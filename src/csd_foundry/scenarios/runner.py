@@ -22,7 +22,7 @@ from csd_foundry.scenarios.spec import (
     StateExpectation,
     TransitionCase,
 )
-from csd_foundry.scenarios.v0_1.manifest import ManifestScenario, SCENARIO_METADATA
+from csd_foundry.scenarios.v0_1.manifest import SCENARIO_METADATA, ManifestScenario
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,7 +314,8 @@ def _run_sequence(spec: ScenarioSpec) -> tuple[CaseResult, ...]:
             link_errors: list[str] = []
             if step != expected_step:
                 link_errors.append(
-                    f"sequence {group_id} uses step {step}; expected contiguous step {expected_step}"
+                    f"sequence {group_id} uses step {step}; expected contiguous "
+                    f"step {expected_step}"
                 )
 
             if expected_step == 1:
