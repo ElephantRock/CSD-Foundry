@@ -264,7 +264,12 @@ def _validate_advance_clock(
     expected_assurance = before.assurance
     if before.obligation is not ObligationStatus.CURRENT:
         expected_assurance = Assurance.NA
-    elif heartbeat_missed and expected_assurance in _SUBSTANTIVE or expected_assurance in _SUBSTANTIVE and not expected_verdict_bases:
+    elif (
+        heartbeat_missed
+        and expected_assurance in _SUBSTANTIVE
+        or expected_assurance in _SUBSTANTIVE
+        and not expected_verdict_bases
+    ):
         expected_assurance = Assurance.STALE
     if after.source_state is not expected_source:
         violations.append(Violation("T-INV-03", "clock source result is not canonical"))
