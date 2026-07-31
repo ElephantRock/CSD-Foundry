@@ -306,7 +306,12 @@ def _validate_advance_clock(
                 )
             )
 
-    expected_source_bases, expected_verdict_bases = _expected_basis_survival(before, after_evidence)
+    expected_source_bases, expected_verdict_bases = _expected_basis_survival(
+        before,
+        after_evidence,
+        after.required_profile_id,
+        after.required_profile_version,
+    )
     heartbeat_missed = before.heartbeat is not None and before.heartbeat.due_at <= event.target_time
     if heartbeat_missed:
         expected_verdict_bases = frozenset()
