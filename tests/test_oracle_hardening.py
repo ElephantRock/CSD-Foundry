@@ -130,3 +130,85 @@ def test_reassessment_supersedes_contradictory_current_basis() -> None:
 
     assert result.after.current_source_basis_ids == frozenset({"BASIS-NEW"})
     assert {basis.basis_id for basis in result.after.bases} == {"BASIS-OLD", "BASIS-NEW"}
+
+
+def test_reassessment_verifier_checks_requested_assurance() -> None:
+    before = ControlState(control_id="CTRL-1", assurance=Assurance.UNVERIFIED)
+    event = Reassess(new_evidence=(), new_bases=(), assurance=Assurance.STALE)
+    after = replace(
+        before,
+        history=(AuditEvent.create("Reassess", authority="I3"),),
+    )
+
+    observed = {
+        violation.invariant_id for violation in validate_event_transition(before, event, after)
+    }
+    assert "G-INV-10" in observed
+
+
+def test_reassessment_verifier_checks_exact_new_evidence() -> None:
+    before = ControlState(control_id="CTRL-1")
+    expected = Evidence("EV-NEW", "D", dependencies=frozenset({"DEP-X"}))
+    event = Reassess(new_evidence=(expected,), new_bases=())
+    after = replace(
+        before,
+        evidence=(
+            Evidence("EV-NEW", "D", dependencies=frozenset({"DEP-Y"})),
+            Evidence("EV-UNRELATED", "D"),
+        ),
+        history=(AuditEvent.create("Reassess", authority="I3"),),
+    )
+
+    observed = {
+        violation.invariant_id for violation in validate_event_transition(before, event, after)
+    }
+    assert {"INV-18", "G-INV-06"} <= observed
+
+
+def test_reassessment_verifier_checks_exact_new_basis() -> None:
+    before = ControlState(control_id="CTRL-1")
+    evidence = Evidence("EV-NEW", "S1")
+    expected_basis = Basis(
+        "BASIS-NEW",
+        BasisKind.SOURCE,
+        SourceState.CONNECTED.value,
+        frozenset({"EV-NEW"}),
+    )
+    event = Reassess(
+        new_evidence=(evidence,),
+        new_bases=(expected_basis,),
+        source_state=SourceState.CONNECTED,
+    )
+    after = replace(
+        before,
+        source_state=SourceState.CONNECTED,
+        evidence=(evidence,),
+        bases=(
+            replace(expected_basis, claim=SourceState.WIRED_INERT.value),
+            Basis("BASIS-EXTRA", BasisKind.SOURCE, "connected", frozenset({"EV-NEW"})),
+        ),
+        current_source_basis_ids=frozenset({"BASIS-NEW"}),
+        history=(AuditEvent.create("Reassess", authority="I3"),),
+    )
+
+    observed = {
+        violation.invariant_id for violation in validate_event_transition(before, event, after)
+    }
+    assert "G-INV-11" in observed
+
+
+def test_retirement_verifier_checks_exact_retirement_evidence() -> None:
+    before = ControlState(control_id="CTRL-1")
+    event = RetireControl(Evidence("EV-RETIRE", "lifecycle"))
+    after = replace(
+        before,
+        obligation=ObligationStatus.RETIRED,
+        assurance=Assurance.NA,
+        evidence=(Evidence("EV-WRONG", "lifecycle"),),
+        history=(AuditEvent.create("RetireControl", authority="I3"),),
+    )
+
+    observed = {
+        violation.invariant_id for violation in validate_event_transition(before, event, after)
+    }
+    assert "G-INV-13" in observed
