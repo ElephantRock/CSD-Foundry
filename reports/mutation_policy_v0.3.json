@@ -1,5 +1,5 @@
 {
-  "claim_boundary": "The kill matrix measures the implemented verifier against ten targeted temporal and governance defects. It does not establish completeness against every possible faulty trajectory.",
+  "claim_boundary": "The kill matrix measures the implemented verifier against eleven targeted temporal and governance defects. It does not establish completeness against every possible faulty trajectory.",
   "covered_invariant_families": [
     "INV-18",
     "T-INV-01",
@@ -17,6 +17,7 @@
     "mut-temporal-backward-time",
     "mut-temporal-resurrect-expired",
     "mut-profile-invalidate-unbound-evidence",
+    "mut-profile-retain-incompatible-basis",
     "mut-request-promote-verdict",
     "mut-heartbeat-promote-verdict",
     "mut-heartbeat-ignore-missed-deadline",
@@ -27,8 +28,8 @@
     "escaped": 0,
     "invalid_canonical": 0,
     "kill_rate": 1.0,
-    "killed": 10,
-    "targeted_mutations": 10
+    "killed": 11,
+    "targeted_mutations": 11
   },
   "release": "v0.3",
   "status": "valid",
