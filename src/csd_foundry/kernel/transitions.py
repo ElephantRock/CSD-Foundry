@@ -8,6 +8,7 @@ from csd_foundry.kernel.events import CsdEvent, DependencyChange, Reassess, Reti
 from csd_foundry.kernel.models import (
     Assurance,
     AuditEvent,
+    Basis,
     BasisKind,
     ControlState,
     EvidenceStatus,
@@ -24,12 +25,16 @@ class TransitionError(ValueError):
 def _basis_is_current(state: ControlState, basis_id: str) -> bool:
     evidence = state.evidence_by_id()
     basis = state.bases_by_id().get(basis_id)
-    if basis is None or not basis.approved:
+    if basis is None or not basis.approved or not basis.member_evidence_ids:
         return False
     return all(
         member in evidence and evidence[member].status is EvidenceStatus.CURRENT
         for member in basis.member_evidence_ids
     )
+
+
+def _basis_matches_claim(basis: Basis, kind: BasisKind, claim: str) -> bool:
+    return basis.kind is kind and basis.claim == claim
 
 
 def apply_dependency_change(
@@ -104,7 +109,15 @@ def apply_dependency_change(
         previous_assurance=state.assurance.value,
         resulting_assurance=post.assurance.value,
         forbidden_inferences=("replacement substantive state or verdict",),
-        rules_fired=("INV-11", "INV-12", "INV-13", "INV-14", "INV-15", "INV-16", "SYM-01"),
+        rules_fired=(
+            "INV-11",
+            "INV-12",
+            "INV-13",
+            "INV-14",
+            "INV-15",
+            "INV-16",
+            "SYM-01",
+        ),
         next_governed_step=(
             "governed reassessment with new evidence and new approved basis"
             if resulting_source is SourceState.UNKNOWN or resulting_assurance is Assurance.STALE
@@ -129,20 +142,44 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
     if any(item.status is not EvidenceStatus.CURRENT for item in event.new_evidence):
         raise TransitionError("new reassessment evidence must be current")
 
+    resulting_source = event.source_state or state.source_state
+    resulting_assurance = event.assurance or state.assurance
     evidence_ids_after = existing_evidence_ids | new_evidence_ids
     for basis in event.new_bases:
         if not basis.approved:
             raise TransitionError("new basis must be approved")
+        if not basis.member_evidence_ids:
+            raise TransitionError("new basis must contain evidence")
         if not basis.member_evidence_ids <= evidence_ids_after:
             raise TransitionError("basis references unknown evidence")
+        if basis.kind is BasisKind.SOURCE and basis.claim != resulting_source.value:
+            raise TransitionError("source basis claim does not match reassessed source state")
+        if basis.kind is BasisKind.VERDICT and basis.claim != resulting_assurance.value:
+            raise TransitionError("verdict basis claim does not match reassessed assurance")
 
-    source_basis_ids = set(state.current_source_basis_ids)
-    verdict_basis_ids = set(state.current_verdict_basis_ids)
+    bases_before = state.bases_by_id()
+    source_basis_ids = {
+        basis_id
+        for basis_id in state.current_source_basis_ids
+        if (basis := bases_before.get(basis_id)) is not None
+        and _basis_matches_claim(basis, BasisKind.SOURCE, resulting_source.value)
+    }
+    verdict_basis_ids = {
+        basis_id
+        for basis_id in state.current_verdict_basis_ids
+        if (basis := bases_before.get(basis_id)) is not None
+        and _basis_matches_claim(basis, BasisKind.VERDICT, resulting_assurance.value)
+    }
     for basis in event.new_bases:
         if basis.kind is BasisKind.SOURCE:
             source_basis_ids.add(basis.basis_id)
         elif basis.kind is BasisKind.VERDICT:
             verdict_basis_ids.add(basis.basis_id)
+
+    if resulting_source is SourceState.UNKNOWN:
+        source_basis_ids.clear()
+    if resulting_assurance not in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}:
+        verdict_basis_ids.clear()
 
     post = replace(
         state,
@@ -150,8 +187,8 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
         bases=(*state.bases, *event.new_bases),
         current_source_basis_ids=frozenset(source_basis_ids),
         current_verdict_basis_ids=frozenset(verdict_basis_ids),
-        source_state=event.source_state or state.source_state,
-        assurance=event.assurance or state.assurance,
+        source_state=resulting_source,
+        assurance=resulting_assurance,
         history=(
             *state.history,
             AuditEvent.create(
@@ -170,7 +207,14 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
         resulting_source_state=post.source_state.value,
         previous_assurance=state.assurance.value,
         resulting_assurance=post.assurance.value,
-        rules_fired=("INV-18", "INV-19", "G-INV-06", "G-INV-09", "G-INV-10", "G-INV-11"),
+        rules_fired=(
+            "INV-18",
+            "INV-19",
+            "G-INV-06",
+            "G-INV-09",
+            "G-INV-10",
+            "G-INV-11",
+        ),
         next_governed_step="publish the new current view while retaining superseded history",
     )
     return post, trace
@@ -187,6 +231,7 @@ def apply_retire(state: ControlState, event: RetireControl) -> tuple[ControlStat
     post = replace(
         state,
         obligation=ObligationStatus.RETIRED,
+        source_state=SourceState.UNKNOWN,
         assurance=Assurance.NA,
         evidence=(*state.evidence, event.retirement_evidence),
         current_source_basis_ids=frozenset(),
