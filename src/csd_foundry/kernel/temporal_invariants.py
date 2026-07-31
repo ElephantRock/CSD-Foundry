@@ -173,21 +173,21 @@ def validate_temporal_transition(
 
     before_requests = before.requests_by_id()
     after_requests = after.requests_by_id()
-    for request_id, old in before_requests.items():
-        new = after_requests.get(request_id)
-        if new is None:
+    for request_id, old_request in before_requests.items():
+        new_request = after_requests.get(request_id)
+        if new_request is None:
             violations.append(Violation("R-INV-03", f"request {request_id} was deleted"))
             continue
         stable_fields = (
-            old.request_id == new.request_id
-            and old.reason == new.reason
-            and old.requested_at == new.requested_at
-            and old.due_at == new.due_at
+            old_request.request_id == new_request.request_id
+            and old_request.reason == new_request.reason
+            and old_request.requested_at == new_request.requested_at
+            and old_request.due_at == new_request.due_at
         )
-        valid_closure = old == new or (
-            old.status is RequestStatus.PENDING
-            and new.status is RequestStatus.CLOSED
-            and new.closed_at == after.logical_time
+        valid_closure = old_request == new_request or (
+            old_request.status is RequestStatus.PENDING
+            and new_request.status is RequestStatus.CLOSED
+            and new_request.closed_at == after.logical_time
             and stable_fields
         )
         if not valid_closure:

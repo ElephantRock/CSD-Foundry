@@ -84,18 +84,20 @@ def main() -> None:
         return
 
     if args.command == "temporal" and args.temporal_command == "validate":
-        from csd_foundry.temporal.v0_3 import validate_release
+        from csd_foundry.temporal.v0_3 import validate_release as validate_temporal_release
 
-        temporal_result = validate_release(args.release)
+        temporal_result = validate_temporal_release(args.release)
         _emit(temporal_result.to_dict(), args.output)
         if not temporal_result.success:
             raise SystemExit(1)
         return
 
     if args.command == "temporal" and args.temporal_command == "mutations":
-        from csd_foundry.synthesis.temporal_mutations import evaluate_release
+        from csd_foundry.synthesis.temporal_mutations import (
+            evaluate_release as evaluate_temporal_mutations,
+        )
 
-        temporal_mutation_result = evaluate_release(args.release)
+        temporal_mutation_result = evaluate_temporal_mutations(args.release)
         _emit(temporal_mutation_result.to_dict(), args.output)
         if not temporal_mutation_result.success:
             raise SystemExit(1)
