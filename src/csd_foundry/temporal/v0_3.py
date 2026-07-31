@@ -362,8 +362,7 @@ def validate_release(release: str = "v0.3") -> TemporalReport:
     first = run_scenarios()
     second = run_scenarios()
     replay = sum(
-        left.trajectory == right.trajectory
-        for left, right in zip(first, second, strict=True)
+        left.trajectory == right.trajectory for left, right in zip(first, second, strict=True)
     )
     accepted = sum(item.accepted for item in first)
     return TemporalReport(
