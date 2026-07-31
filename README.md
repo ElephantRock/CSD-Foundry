@@ -79,7 +79,7 @@ Temporal/governance scenarios:        10
 Accepted temporal scenarios:          10
 Identical full temporal replays:       10
 Retained oracle transition steps:      16
-Temporal targeted mutations killed:  16 / 16
+Temporal targeted mutations killed:  23 / 23
 Temporal mutation escapes:              0
 Valid canonical trajectories rejected:  0
 ```
@@ -110,7 +110,8 @@ or invalidated evidence cannot be restored under the same identity. A profile ch
 rewrite or invalidate historical evidence; it recomputes which preserved bases remain eligible
 for the current required profile. Profile changes, reassessment requests, and heartbeat records
 require I3 authority in both transition execution and independent verification. Request closure
-must target known requests that are pending in the pre-state.
+must target known requests that are pending in the pre-state. Every temporal/governance event
+must preserve unrelated historical state and append its exact canonical audit record.
 
 ## Project layout
 
