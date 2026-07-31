@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from csd_foundry.kernel.events import CsdEvent
-from csd_foundry.kernel.invariants import Violation, validate_state, validate_transition
+from csd_foundry.kernel.invariants import (
+    Violation,
+    validate_event_transition,
+    validate_state,
+    validate_transition,
+)
 from csd_foundry.kernel.models import ControlState
 from csd_foundry.kernel.trace import TransitionTrace
 from csd_foundry.kernel.transitions import apply_event
@@ -31,7 +36,10 @@ class CsdOracle:
         if initial:
             raise OracleRejected(_format_violations("invalid pre-state", initial))
         after, trace = apply_event(state, event)
-        violations = validate_transition(state, after)
+        violations = (
+            *validate_transition(state, after),
+            *validate_event_transition(state, event, after),
+        )
         if violations:
             raise OracleRejected(_format_violations("invalid post-state", violations))
         return OracleResult(before=state, after=after, trace=trace)

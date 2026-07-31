@@ -1,0 +1,84 @@
+name: Finalize oracle hardening
+
+on:
+  push:
+    branches:
+      - web/3-harden-oracle-semantics
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  validate-clean-and-merge:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - name: Validate exact source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruff format --check .
+          ruff check .
+          mypy src
+          pytest
+          python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
+          python -m compileall -q src scripts tests
+          csd-foundry demo > /tmp/csd-foundry-demo.json
+          test -s /tmp/csd-foundry-demo.json
+      - name: Record validation and remove one-shot workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          validated_sha="${GITHUB_SHA}"
+          git fetch origin web/3-harden-oracle-semantics
+          git reset --hard origin/web/3-harden-oracle-semantics
+          rm -f .github/workflows/finalize-hardening.yml
+          rm -f .github/workflows/hardening-validation.yml
+          mkdir -p reports/validation
+          cat > reports/validation/oracle-hardening.json <<EOF
+          {
+            "schema_version": "csd-foundry-validation/0.1",
+            "status": "passed",
+            "validated_commit": "${validated_sha}",
+            "python": "3.11",
+            "gates": [
+              "ruff-format-check",
+              "ruff-check",
+              "mypy-src",
+              "pytest",
+              "seed-manifest-and-digest-validation",
+              "compileall",
+              "installed-cli-smoke"
+            ]
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test: record oracle hardening validation"
+          git push origin HEAD:web/3-harden-oracle-semantics
+      - name: Wait for permanent CI and merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 15
+          gh pr checks 4 --repo "${GITHUB_REPOSITORY}" --watch --fail-fast
+          gh pr merge 4 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --squash \
+            --delete-branch \
+            --subject "Harden oracle event semantics and basis consistency" \
+            --body "Add event-specific verification, exact reassessment and retirement output checks, basis-claim consistency, valid retirement semantics, supersession behavior, and focused regression coverage. Closes #3."
