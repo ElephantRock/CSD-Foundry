@@ -355,7 +355,16 @@ def _validate_request(
 def _validate_heartbeat(
     before: ControlState, event: RecordHeartbeat, after: ControlState
 ) -> list[Violation]:
-    violations = _unchanged_temporal_governance(before, after)
+    violations: list[Violation] = []
+    if after.logical_time != before.logical_time:
+        violations.append(Violation("T-INV-01", "heartbeat altered logical time"))
+    if (
+        after.required_profile_id != before.required_profile_id
+        or after.required_profile_version != before.required_profile_version
+    ):
+        violations.append(Violation("P-INV-01", "heartbeat altered the required profile"))
+    if after.reassessment_requests != before.reassessment_requests:
+        violations.append(Violation("R-INV-03", "heartbeat altered reassessment requests"))
     if (
         after.evidence != before.evidence
         or after.bases != before.bases
