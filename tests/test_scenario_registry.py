@@ -23,10 +23,7 @@ def test_v0_1_registry_is_manifest_complete_and_executable() -> None:
 
 
 def test_packaged_manifest_matches_immutable_release_manifest() -> None:
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "data/seed/v0.1/csd_reasoning_manifest_v0.1.json"
-    )
+    path = Path(__file__).resolve().parents[1] / "data/seed/v0.1/csd_reasoning_manifest_v0.1.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
     release_entries = {
         entry["scenario_id"]: {
