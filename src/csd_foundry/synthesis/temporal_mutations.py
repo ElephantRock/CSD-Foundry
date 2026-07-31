@@ -190,6 +190,17 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
             frozenset({"P-INV-02"}),
         ),
         TemporalMutationProbe(
+            "mut-profile-retain-incompatible-basis",
+            profile_before,
+            profile_event,
+            replace(
+                profile_after,
+                source_state=profile_before.source_state,
+                current_source_basis_ids=profile_before.current_source_basis_ids,
+            ),
+            frozenset({"P-INV-02"}),
+        ),
+        TemporalMutationProbe(
             "mut-request-promote-verdict",
             stale,
             request_event,

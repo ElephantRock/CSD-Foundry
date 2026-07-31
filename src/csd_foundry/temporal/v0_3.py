@@ -183,13 +183,19 @@ def _t04_profile_change_is_scoped() -> TemporalScenarioResult:
     evidence = after.evidence_by_id()
     request = after.requests_by_id()["REQ-PROFILE-A-2"]
     accepted = (
-        evidence["EV-SOURCE"].status is EvidenceStatus.INVALIDATED
+        evidence["EV-SOURCE"].status is EvidenceStatus.CURRENT
         and evidence["EV-VERDICT"].status is EvidenceStatus.CURRENT
+        and "BASIS-SOURCE" in after.bases_by_id()
+        and not after.current_source_basis_ids
         and after.source_state is SourceState.UNKNOWN
         and after.assurance is Assurance.PASS
         and request.status is RequestStatus.PENDING
     )
-    return _result("T-04", accepted, "profile change invalidates only bound evidence")
+    return _result(
+        "T-04",
+        accepted,
+        "profile change preserves evidence and removes incompatible current support",
+    )
 
 
 def _t05_request_preserves_verdict() -> TemporalScenarioResult:

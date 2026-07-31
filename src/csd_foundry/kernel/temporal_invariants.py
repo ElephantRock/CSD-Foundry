@@ -26,30 +26,68 @@ from csd_foundry.kernel.models import (
 _SUBSTANTIVE = {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}
 
 
-def _basis_is_supported(basis: Basis, evidence: dict[str, Evidence]) -> bool:
+def _evidence_matches_required_profile(
+    item: Evidence,
+    required_profile_id: str | None,
+    required_profile_version: int | None,
+) -> bool:
+    if required_profile_id is None or item.profile_id is None:
+        return True
+    return (
+        item.profile_id == required_profile_id and item.profile_version == required_profile_version
+    )
+
+
+def _basis_is_supported(
+    basis: Basis,
+    evidence: dict[str, Evidence],
+    required_profile_id: str | None,
+    required_profile_version: int | None,
+) -> bool:
     return (
         bool(basis.member_evidence_ids)
         and basis.approved
         and all(
-            member in evidence and evidence[member].status is EvidenceStatus.CURRENT
+            member in evidence
+            and evidence[member].status is EvidenceStatus.CURRENT
+            and _evidence_matches_required_profile(
+                evidence[member],
+                required_profile_id,
+                required_profile_version,
+            )
             for member in basis.member_evidence_ids
         )
     )
 
 
 def _expected_basis_survival(
-    before: ControlState, after_evidence: dict[str, Evidence]
+    before: ControlState,
+    after_evidence: dict[str, Evidence],
+    required_profile_id: str | None,
+    required_profile_version: int | None,
 ) -> tuple[frozenset[str], frozenset[str]]:
     bases = before.bases_by_id()
     source = frozenset(
         basis_id
         for basis_id in before.current_source_basis_ids
-        if (basis := bases.get(basis_id)) is not None and _basis_is_supported(basis, after_evidence)
+        if (basis := bases.get(basis_id)) is not None
+        and _basis_is_supported(
+            basis,
+            after_evidence,
+            required_profile_id,
+            required_profile_version,
+        )
     )
     verdict = frozenset(
         basis_id
         for basis_id in before.current_verdict_basis_ids
-        if (basis := bases.get(basis_id)) is not None and _basis_is_supported(basis, after_evidence)
+        if (basis := bases.get(basis_id)) is not None
+        and _basis_is_supported(
+            basis,
+            after_evidence,
+            required_profile_id,
+            required_profile_version,
+        )
     )
     return source, verdict
 
@@ -95,8 +133,10 @@ def validate_temporal_state(state: ControlState) -> tuple[Violation, ...]:
             violations.append(
                 Violation("T-INV-02", f"evidence {item.evidence_id} remained current after expiry")
             )
-        if item.status is EvidenceStatus.EXPIRED and (
-            item.expires_at is None or item.expires_at > state.logical_time
+        if (
+            item.status is EvidenceStatus.EXPIRED
+            and item.expires_at is not None
+            and item.expires_at > state.logical_time
         ):
             violations.append(
                 Violation("T-INV-02", f"evidence {item.evidence_id} expired before its deadline")
@@ -106,6 +146,23 @@ def validate_temporal_state(state: ControlState) -> tuple[Violation, ...]:
                 item.profile_id, item.profile_version, f"evidence {item.evidence_id}"
             )
         )
+
+    evidence_by_id = state.evidence_by_id()
+    bases_by_id = state.bases_by_id()
+    for basis_id in state.current_source_basis_ids | state.current_verdict_basis_ids:
+        basis = bases_by_id.get(basis_id)
+        if basis is not None and not _basis_is_supported(
+            basis,
+            evidence_by_id,
+            state.required_profile_id,
+            state.required_profile_version,
+        ):
+            violations.append(
+                Violation(
+                    "P-INV-02",
+                    f"current basis {basis_id} is incomplete under the required profile",
+                )
+            )
 
     requests = state.requests_by_id()
     if len(requests) != len(state.reassessment_requests):
@@ -297,23 +354,41 @@ def _validate_profile_change(
         or after.required_profile_version != event.profile_version
     ):
         violations.append(Violation("P-INV-01", "profile result does not match the event"))
+    if after.evidence != before.evidence:
+        violations.append(Violation("P-INV-02", "profile change rewrote historical evidence"))
+    if after.bases != before.bases:
+        violations.append(Violation("P-INV-02", "profile change rewrote historical bases"))
 
     after_evidence = after.evidence_by_id()
-    for evidence_id, old in before.evidence_by_id().items():
-        new = after_evidence.get(evidence_id)
-        if new is None:
-            continue
-        bound_to_old = (
-            before.required_profile_id is not None
-            and old.profile_id == before.required_profile_id
-            and old.profile_version == before.required_profile_version
+    expected_source_bases, expected_verdict_bases = _expected_basis_survival(
+        before,
+        after_evidence,
+        event.profile_id,
+        event.profile_version,
+    )
+    if after.current_source_basis_ids != expected_source_bases:
+        violations.append(
+            Violation("P-INV-02", "profile source-basis eligibility is not canonical")
         )
-        affected = old.status is EvidenceStatus.CURRENT and bound_to_old
-        expected_status = EvidenceStatus.INVALIDATED if affected else old.status
-        if new.status is not expected_status:
-            violations.append(
-                Violation("P-INV-02", f"profile impact is incorrect for evidence {evidence_id}")
-            )
+    if after.current_verdict_basis_ids != expected_verdict_bases:
+        violations.append(
+            Violation("P-INV-02", "profile verdict-basis eligibility is not canonical")
+        )
+
+    expected_source = before.source_state
+    if expected_source is not SourceState.UNKNOWN and not expected_source_bases:
+        expected_source = SourceState.UNKNOWN
+    expected_assurance = before.assurance
+    if before.obligation is not ObligationStatus.CURRENT:
+        expected_assurance = Assurance.NA
+    elif expected_assurance in _SUBSTANTIVE and not expected_verdict_bases:
+        expected_assurance = Assurance.STALE
+    if after.source_state is not expected_source:
+        violations.append(Violation("P-INV-02", "profile source result is not canonical"))
+    if after.assurance is not expected_assurance:
+        violations.append(Violation("P-INV-02", "profile assurance result is not canonical"))
+    if after.obligation is not before.obligation:
+        violations.append(Violation("P-INV-02", "profile change altered obligation state"))
 
     new_request_ids = set(after.requests_by_id()) - set(before.requests_by_id())
     expected_request_ids = {event.request_id} if event.request_id is not None else set()
@@ -321,6 +396,17 @@ def _validate_profile_change(
         violations.append(
             Violation("P-INV-03", "profile request identities do not match the event")
         )
+    if event.request_id is not None and event.request_due_at is not None:
+        expected_request = ReassessmentRequest(
+            request_id=event.request_id,
+            reason="required profile changed",
+            requested_at=before.logical_time,
+            due_at=event.request_due_at,
+        )
+        if after.requests_by_id().get(event.request_id) != expected_request:
+            violations.append(
+                Violation("P-INV-03", "profile reassessment request is not canonical")
+            )
     if after.heartbeat != before.heartbeat:
         violations.append(Violation("H-INV-01", "profile change altered heartbeat state"))
     return violations

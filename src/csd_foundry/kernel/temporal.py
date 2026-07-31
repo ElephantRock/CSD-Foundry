@@ -32,13 +32,27 @@ def is_temporal_event(event: object) -> bool:
     return isinstance(event, (AdvanceClock, ProfileChange, RequestReassessment, RecordHeartbeat))
 
 
+def _evidence_matches_required_profile(state: ControlState, evidence_id: str) -> bool:
+    item = state.evidence_by_id().get(evidence_id)
+    if item is None:
+        return False
+    if state.required_profile_id is None or item.profile_id is None:
+        return True
+    return (
+        item.profile_id == state.required_profile_id
+        and item.profile_version == state.required_profile_version
+    )
+
+
 def _basis_is_current(state: ControlState, basis_id: str) -> bool:
     evidence = state.evidence_by_id()
     basis = state.bases_by_id().get(basis_id)
     if basis is None or not basis.approved or not basis.member_evidence_ids:
         return False
     return all(
-        member in evidence and evidence[member].status is EvidenceStatus.CURRENT
+        member in evidence
+        and evidence[member].status is EvidenceStatus.CURRENT
+        and _evidence_matches_required_profile(state, member)
         for member in basis.member_evidence_ids
     )
 
@@ -182,19 +196,13 @@ def apply_profile_change(
             "profile request identity and due time must be supplied together"
         )
 
-    invalidated_ids: set[str] = set()
-    evidence = []
-    for item in state.evidence:
-        bound_to_old_profile = (
-            state.required_profile_id is not None
-            and item.profile_id == state.required_profile_id
-            and item.profile_version == state.required_profile_version
-        )
-        if item.status is EvidenceStatus.CURRENT and bound_to_old_profile:
-            invalidated_ids.add(item.evidence_id)
-            evidence.append(item.invalidate())
-        else:
-            evidence.append(item)
+    incompatible_ids = {
+        item.evidence_id
+        for item in state.evidence
+        if item.status is EvidenceStatus.CURRENT
+        and item.profile_id is not None
+        and (item.profile_id != event.profile_id or item.profile_version != event.profile_version)
+    }
 
     requests = state.reassessment_requests
     if event.request_id is not None and event.request_due_at is not None:
@@ -213,7 +221,6 @@ def apply_profile_change(
 
     interim = replace(
         state,
-        evidence=tuple(evidence),
         required_profile_id=event.profile_id,
         required_profile_version=event.profile_version,
         reassessment_requests=requests,
@@ -237,14 +244,13 @@ def apply_profile_change(
                 authority=event.authority,
                 profile_id=event.profile_id,
                 profile_version=str(event.profile_version),
-                invalidated_evidence=",".join(sorted(invalidated_ids)),
+                profile_incompatible_evidence=",".join(sorted(incompatible_ids)),
                 request_id=event.request_id or "none",
             ),
         ),
     )
     trace = TransitionTrace(
         event_type="ProfileChange",
-        invalidated_evidence=tuple(sorted(invalidated_ids)),
         preserved_evidence=tuple(
             sorted(
                 item.evidence_id for item in post.evidence if item.status is EvidenceStatus.CURRENT
@@ -261,7 +267,7 @@ def apply_profile_change(
         next_governed_step=(
             "complete the profile-change reassessment request"
             if event.request_id is not None
-            else "issue a governed reassessment request if evidence was invalidated"
+            else "issue a governed reassessment request if current support was removed"
         ),
     )
     return post, trace

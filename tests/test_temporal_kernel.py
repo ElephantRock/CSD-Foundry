@@ -3,7 +3,12 @@ from dataclasses import replace
 import pytest
 
 from csd_foundry.kernel.events import AdvanceClock, Reassess, RequestReassessment
-from csd_foundry.kernel.models import Assurance, EvidenceStatus, RequestStatus
+from csd_foundry.kernel.models import (
+    Assurance,
+    EvidenceStatus,
+    RequestStatus,
+    SourceState,
+)
 from csd_foundry.kernel.oracle import CsdOracle, OracleRejected
 from csd_foundry.synthesis.temporal_mutations import evaluate_release as evaluate_mutations
 from csd_foundry.temporal.v0_3 import base_state, validate_release
@@ -23,8 +28,8 @@ def test_temporal_mutation_policy_kills_every_probe() -> None:
     report = evaluate_mutations("v0.3")
 
     assert report.success, report.to_dict()
-    assert report.total == 10
-    assert report.killed == 10
+    assert report.total == 11
+    assert report.killed == 11
     assert report.escaped == 0
     assert report.invalid_canonical == 0
     assert {"T-INV-01", "T-INV-02", "R-INV-03"} <= set(report.covered_invariants)
@@ -79,3 +84,27 @@ def test_request_cannot_promote_stale_assurance() -> None:
 
     assert after.assurance is Assurance.STALE
     assert not after.current_verdict_basis_ids
+
+
+def test_legacy_expired_evidence_without_timestamp_remains_valid() -> None:
+    oracle = CsdOracle()
+    original = base_state()
+    legacy = replace(
+        original,
+        evidence=tuple(
+            replace(item, status=EvidenceStatus.EXPIRED)
+            if item.evidence_id == "EV-SOURCE"
+            else item
+            for item in original.evidence
+        ),
+        source_state=SourceState.UNKNOWN,
+        current_source_basis_ids=frozenset(),
+    )
+
+    after = oracle.apply(
+        legacy,
+        RequestReassessment("REQ-LEGACY", "legacy expiry control", due_at=5),
+    ).after
+
+    assert after.evidence_by_id()["EV-SOURCE"].status is EvidenceStatus.EXPIRED
+    assert after.requests_by_id()["REQ-LEGACY"].status is RequestStatus.PENDING
