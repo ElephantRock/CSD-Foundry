@@ -202,6 +202,13 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
         verdict_basis_ids.clear()
 
     requests = close_reassessment_requests(state, event.close_request_ids)
+    reassessment_audit_details = {
+        "authority": event.authority,
+        "evidence_ids": ",".join(sorted(new_evidence_ids)),
+        "basis_ids": ",".join(sorted(new_basis_ids)),
+    }
+    if event.close_request_ids:
+        reassessment_audit_details["closed_request_ids"] = ",".join(sorted(event.close_request_ids))
     post = replace(
         state,
         evidence=(*state.evidence, *event.new_evidence),
@@ -213,13 +220,7 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
         reassessment_requests=requests,
         history=(
             *state.history,
-            AuditEvent.create(
-                "Reassess",
-                authority=event.authority,
-                evidence_ids=",".join(sorted(new_evidence_ids)),
-                basis_ids=",".join(sorted(new_basis_ids)),
-                closed_request_ids=",".join(sorted(event.close_request_ids)),
-            ),
+            AuditEvent.create("Reassess", **reassessment_audit_details),
         ),
     )
     trace = TransitionTrace(
