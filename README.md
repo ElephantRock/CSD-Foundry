@@ -13,7 +13,7 @@ training records, and evaluation evidence.
 - independent state, transition, and event-specific invariant checks;
 - a manifest-complete executable registry for all 21 CSD Reasoning Seed v0.1 scenarios;
 - transition, sequence, multi-control, observation, and rejected-transition case types;
-- ten deterministic temporal/governance scenarios with replay evidence;
+- ten deterministic temporal/governance scenarios with complete replay evidence;
 - legacy and temporal mutation kill-matrix evaluators;
 - the immutable CSD Reasoning Seed v0.1 and its original generator and validator.
 
@@ -64,7 +64,8 @@ python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
 
 The scenario validator enforces exact agreement between the immutable manifest and executable
 registry. The temporal validator executes canonical logical-time and governance trajectories,
-checks deterministic replay, and verifies exact event consequences.
+retains complete ordered oracle results, checks full replay identity, and verifies exact event
+consequences.
 
 ## Current coverage
 
@@ -76,8 +77,9 @@ Legacy targeted mutations killed:    10 / 10
 
 Temporal/governance scenarios:        10
 Accepted temporal scenarios:          10
-Identical temporal replays:            10
-Temporal targeted mutations killed:  11 / 11
+Identical full temporal replays:       10
+Retained oracle transition steps:      16
+Temporal targeted mutations killed:  16 / 16
 Temporal mutation escapes:              0
 Valid canonical trajectories rejected:  0
 ```
@@ -106,7 +108,9 @@ represents:
 Heartbeat receipt and reassessment requests cannot promote source state or assurance. Expired
 or invalidated evidence cannot be restored under the same identity. A profile change does not
 rewrite or invalidate historical evidence; it recomputes which preserved bases remain eligible
-for the current required profile.
+for the current required profile. Profile changes, reassessment requests, and heartbeat records
+require I3 authority in both transition execution and independent verification. Request closure
+must target known requests that are pending in the pre-state.
 
 ## Project layout
 
