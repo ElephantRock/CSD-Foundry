@@ -23,13 +23,14 @@
   "semantics_exercised": [
     "exact logical-time expiry",
     "source-basis loss and independent-basis survival",
-    "profile-scoped evidence invalidation",
+    "profile-scoped basis eligibility while preserving historical evidence and bases",
     "reassessment-request preservation and lifecycle",
     "missed-heartbeat staleness",
     "non-promoting heartbeat recovery",
     "simultaneous-expiry determinism",
     "identical replay from identical inputs",
-    "substantive convergence of causally independent events"
+    "substantive convergence of causally independent events",
+    "legacy expired-evidence compatibility without synthetic timestamp reconstruction"
   ],
   "status": "valid",
   "version": "0.3.0"
