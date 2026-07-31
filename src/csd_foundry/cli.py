@@ -46,26 +46,26 @@ def main() -> None:
         from csd_foundry.fixtures.v0_1.scenarios import m01
 
         state, event = m01()
-        result = CsdOracle().apply(state, event)
-        print(json.dumps(asdict(result.trace), indent=2, sort_keys=True))
+        demo_result = CsdOracle().apply(state, event)
+        print(json.dumps(asdict(demo_result.trace), indent=2, sort_keys=True))
         return
 
     if args.command == "scenarios" and args.scenario_command == "validate":
         from csd_foundry.scenarios.registry import SCENARIOS
         from csd_foundry.scenarios.runner import validate_release
 
-        result = validate_release(SCENARIOS, args.release)
-        _emit(result.to_dict(), args.output)
-        if not result.success:
+        scenario_result = validate_release(SCENARIOS, args.release)
+        _emit(scenario_result.to_dict(), args.output)
+        if not scenario_result.success:
             raise SystemExit(1)
         return
 
     if args.command == "mutations" and args.mutation_command == "evaluate":
         from csd_foundry.synthesis.scenario_mutations import evaluate_release
 
-        result = evaluate_release(args.release)
-        _emit(result.to_dict(), args.output)
-        if not result.success:
+        mutation_result = evaluate_release(args.release)
+        _emit(mutation_result.to_dict(), args.output)
+        if not mutation_result.success:
             raise SystemExit(1)
         return
 
