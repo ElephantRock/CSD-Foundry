@@ -54,13 +54,21 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          path = Path("src/csd_foundry/kernel/transitions.py")
-          text = path.read_text(encoding="utf-8")
+          transitions = Path("src/csd_foundry/kernel/transitions.py")
+          text = transitions.read_text(encoding="utf-8")
           old = """    elif state.assurance in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}:\n        if not verdict_survivors:\n            resulting_assurance = Assurance.STALE\n"""
           new = """    elif (\n        state.assurance in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}\n        and not verdict_survivors\n    ):\n        resulting_assurance = Assurance.STALE\n"""
           if old not in text:
               raise SystemExit("expected transition source pattern not found")
-          path.write_text(text.replace(old, new), encoding="utf-8")
+          transitions.write_text(text.replace(old, new), encoding="utf-8")
+
+          invariants = Path("src/csd_foundry/kernel/invariants.py")
+          text = invariants.read_text(encoding="utf-8")
+          old = """    for basis_id, old in before_bases.items():\n        new = after_bases.get(basis_id)\n        if new is None:\n            violations.append(Violation(\"INV-19\", f\"basis {basis_id} was deleted\"))\n        elif old != new:\n            violations.append(Violation(\"G-INV-11\", f\"basis {basis_id} was rewritten\"))\n"""
+          new = """    for basis_id, old_basis in before_bases.items():\n        new_basis = after_bases.get(basis_id)\n        if new_basis is None:\n            violations.append(Violation(\"INV-19\", f\"basis {basis_id} was deleted\"))\n        elif old_basis != new_basis:\n            violations.append(Violation(\"G-INV-11\", f\"basis {basis_id} was rewritten\"))\n"""
+          if old not in text:
+              raise SystemExit("expected invariant source pattern not found")
+          invariants.write_text(text.replace(old, new), encoding="utf-8")
           PY
 
       - uses: actions/setup-python@v5
