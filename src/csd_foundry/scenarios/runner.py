@@ -113,9 +113,7 @@ def _expectation_errors(state: object, expected: StateExpectation) -> tuple[str,
 
     errors: list[str] = []
     if expected.obligation is not None and state.obligation is not expected.obligation:
-        errors.append(
-            f"obligation={state.obligation.value}; expected {expected.obligation.value}"
-        )
+        errors.append(f"obligation={state.obligation.value}; expected {expected.obligation.value}")
     if expected.source_state is not None and state.source_state is not expected.source_state:
         errors.append(
             f"source_state={state.source_state.value}; expected {expected.source_state.value}"
@@ -170,7 +168,9 @@ def _expectation_errors(state: object, expected: StateExpectation) -> tuple[str,
     if expected.history_event_types is not None:
         observed = tuple(item.event_type for item in state.history)
         if observed != expected.history_event_types:
-            errors.append(f"history_event_types={observed!r}; expected {expected.history_event_types!r}")
+            errors.append(
+                f"history_event_types={observed!r}; expected {expected.history_event_types!r}"
+            )
     return tuple(errors)
 
 
@@ -296,9 +296,7 @@ def _metadata_errors(
     return tuple(errors)
 
 
-def validate_release(
-    registry: Mapping[str, ScenarioSpec], release: str = "v0.1"
-) -> ReleaseResult:
+def validate_release(registry: Mapping[str, ScenarioSpec], release: str = "v0.1") -> ReleaseResult:
     manifest = _load_manifest(release)
     metadata_errors = _metadata_errors(registry, manifest)
     scenarios = tuple(run_scenario(registry[key]) for key in sorted(registry))

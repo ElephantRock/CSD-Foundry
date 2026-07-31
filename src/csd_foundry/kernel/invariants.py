@@ -170,7 +170,8 @@ def _validate_dependency_change(
             violations.append(
                 Violation(
                     invariant,
-                    f"evidence {evidence_id} has {new.status.value}; expected {expected_status.value}",
+                    f"evidence {evidence_id} has {new.status.value}; "
+                    f"expected {expected_status.value}",
                 )
             )
 

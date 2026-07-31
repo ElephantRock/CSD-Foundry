@@ -914,7 +914,9 @@ _m14 = _scenario(
             "The historical A-only pass basis is retained but is not current under profile A,B.",
         ),
     ),
-    assumptions=("Required-profile structure is represented in the audit event, not ControlState v0.1.",),
+    assumptions=(
+        "Required-profile structure is represented in the audit event, not ControlState v0.1.",
+    ),
 )
 
 
@@ -997,7 +999,8 @@ _m15 = _scenario(
     ),
     forbidden=("treat internal invariant success as proof of real dependency completeness",),
     assumptions=(
-        "A-04 is false in the external oracle: EV-M15-DECLARED-INDEPENDENT really depends on DEP-M15-REAL.",
+        "A-04 is false in the external oracle: EV-M15-DECLARED-INDEPENDENT "
+        "really depends on DEP-M15-REAL.",
     ),
 )
 

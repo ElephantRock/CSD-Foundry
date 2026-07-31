@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from csd_foundry.kernel.events import CsdEvent
 from csd_foundry.kernel.invariants import validate_event_transition, validate_transition
-from csd_foundry.kernel.models import Assurance, Basis, ControlState, EvidenceStatus, SourceState
+from csd_foundry.kernel.models import Assurance, ControlState, EvidenceStatus, SourceState
 from csd_foundry.kernel.oracle import CsdOracle
 from csd_foundry.scenarios.runner import run_case
 from csd_foundry.scenarios.spec import TransitionCase
@@ -227,7 +227,9 @@ def build_probes() -> tuple[MutationProbe, ...]:
 def evaluate_probe(probe: MutationProbe) -> MutationResult:
     violations = list(validate_transition(probe.before, probe.proposed_after))
     if probe.event is not None:
-        violations.extend(validate_event_transition(probe.before, probe.event, probe.proposed_after))
+        violations.extend(
+            validate_event_transition(probe.before, probe.event, probe.proposed_after)
+        )
     observed = frozenset(item.invariant_id for item in violations)
     killed = bool(probe.expected_invariants & observed)
     return MutationResult(
