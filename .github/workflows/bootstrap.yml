@@ -1,4 +1,4 @@
-name: Diagnose bootstrap chunks
+name: Diagnose bootstrap chunk halves
 
 on:
   pull_request:
@@ -17,13 +17,13 @@ jobs:
         with:
           ref: web/1-bootstrap-csd-foundry
           fetch-depth: 0
-      - name: Report chunk sizes and digests
+      - name: Report suspect half digests
         shell: bash
         run: |
           set -euo pipefail
-          wc -c .bootstrap/part*
-          sha256sum .bootstrap/part*
-          cat .bootstrap/part* | base64 -d > /tmp/csd-foundry-bootstrap.zip
-          sha256sum /tmp/csd-foundry-bootstrap.zip
-          unzip -t /tmp/csd-foundry-bootstrap.zip || true
+          for name in part0204 part0212; do
+            head -c 4000 ".bootstrap/$name" > "/tmp/${name}a"
+            tail -c 4000 ".bootstrap/$name" > "/tmp/${name}b"
+          done
+          sha256sum /tmp/part0204a /tmp/part0204b /tmp/part0212a /tmp/part0212b
           exit 1
