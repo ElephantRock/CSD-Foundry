@@ -2,27 +2,27 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
-from dataclasses import dataclass
-from pathlib import Path
-from typing import cast
+from dataclasses import dataclass, replace
 
 from csd_foundry.kernel.invariants import (
     validate_event_transition,
     validate_state,
     validate_transition,
 )
+from csd_foundry.kernel.models import ControlState
 from csd_foundry.kernel.oracle import CsdOracle, OracleRejected
 from csd_foundry.kernel.transitions import TransitionError
 from csd_foundry.scenarios.spec import (
     ExecutableCase,
     ObservationCase,
     RejectedTransitionCase,
+    ScenarioMode,
     ScenarioSpec,
     StateExpectation,
     TransitionCase,
 )
+from csd_foundry.scenarios.v0_1.manifest import ManifestScenario, SCENARIO_METADATA
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,28 +89,16 @@ class ReleaseResult:
         }
 
 
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
-
-
-def manifest_path(release: str) -> Path:
+def _load_manifest(release: str) -> tuple[ManifestScenario, ...]:
     if release != "v0.1":
         raise ValueError(f"unsupported scenario release: {release}")
-    return _project_root() / "data/seed/v0.1/csd_reasoning_manifest_v0.1.json"
+    return SCENARIO_METADATA
 
 
-def _load_manifest(release: str) -> tuple[dict[str, object], ...]:
-    raw = cast(dict[str, object], json.loads(manifest_path(release).read_text(encoding="utf-8")))
-    scenarios = cast(list[dict[str, object]], raw["scenarios"])
-    return tuple(scenarios)
-
-
-def _expectation_errors(state: object, expected: StateExpectation) -> tuple[str, ...]:
-    from csd_foundry.kernel.models import ControlState
-
-    if not isinstance(state, ControlState):
-        return ("internal runner error: expectation target is not ControlState",)
-
+def _expectation_errors(
+    state: ControlState,
+    expected: StateExpectation,
+) -> tuple[str, ...]:
     errors: list[str] = []
     if expected.obligation is not None and state.obligation is not expected.obligation:
         errors.append(f"obligation={state.obligation.value}; expected {expected.obligation.value}")
@@ -174,19 +162,27 @@ def _expectation_errors(state: object, expected: StateExpectation) -> tuple[str,
     return tuple(errors)
 
 
-def _run_transition(scenario_id: str, case: TransitionCase) -> CaseResult:
+def _execute_transition(
+    scenario_id: str,
+    case: TransitionCase,
+    before: ControlState | None = None,
+) -> tuple[CaseResult, ControlState | None]:
+    effective_before = case.before if before is None else before
     errors: list[str] = []
     oracle = CsdOracle()
     try:
-        first = oracle.apply(case.before, case.event)
-        second = oracle.apply(case.before, case.event)
+        first = oracle.apply(effective_before, case.event)
+        second = oracle.apply(effective_before, case.event)
     except (OracleRejected, TransitionError, TypeError, ValueError) as exc:
-        return CaseResult(
-            scenario_id,
-            case.case_id,
-            "transition",
-            False,
-            (f"oracle rejected canonical transition: {exc}",),
+        return (
+            CaseResult(
+                scenario_id,
+                case.case_id,
+                "transition",
+                False,
+                (f"oracle rejected canonical transition: {exc}",),
+            ),
+            None,
         )
 
     if first != second:
@@ -212,7 +208,19 @@ def _run_transition(scenario_id: str, case: TransitionCase) -> CaseResult:
     if missing_rules:
         errors.append(f"trace is missing required rules: {sorted(missing_rules)}")
 
-    return CaseResult(scenario_id, case.case_id, "transition", not errors, tuple(errors))
+    result = CaseResult(
+        scenario_id,
+        case.case_id,
+        "transition",
+        not errors,
+        tuple(errors),
+    )
+    return result, first.after
+
+
+def _run_transition(scenario_id: str, case: TransitionCase) -> CaseResult:
+    result, _ = _execute_transition(scenario_id, case)
+    return result
 
 
 def _run_observation(scenario_id: str, case: ObservationCase) -> CaseResult:
@@ -255,16 +263,111 @@ def run_case(scenario_id: str, case: ExecutableCase) -> CaseResult:
     raise TypeError(f"unsupported scenario case: {type(case).__name__}")
 
 
+def _sequence_coordinates(case_id: str) -> tuple[str, int]:
+    parts = case_id.split("/")
+    if len(parts) < 3:
+        raise ValueError(
+            f"sequence case {case_id!r} must use '<scenario>/<branch>/<step>-<name>'"
+        )
+    step_text = parts[-1].split("-", maxsplit=1)[0]
+    try:
+        step = int(step_text)
+    except ValueError as exc:
+        raise ValueError(f"sequence case {case_id!r} has no numeric step") from exc
+    return "/".join(parts[:-1]), step
+
+
+def _run_sequence(spec: ScenarioSpec) -> tuple[CaseResult, ...]:
+    groups: dict[str, list[tuple[int, TransitionCase]]] = {}
+    errors: list[CaseResult] = []
+
+    for case in spec.cases:
+        if not isinstance(case, TransitionCase):
+            errors.append(
+                CaseResult(
+                    spec.scenario_id,
+                    case.case_id,
+                    type(case).__name__,
+                    False,
+                    ("sequence scenarios may contain only transition cases",),
+                )
+            )
+            continue
+        try:
+            group_id, step = _sequence_coordinates(case.case_id)
+        except ValueError as exc:
+            errors.append(
+                CaseResult(
+                    spec.scenario_id,
+                    case.case_id,
+                    "transition",
+                    False,
+                    (str(exc),),
+                )
+            )
+            continue
+        groups.setdefault(group_id, []).append((step, case))
+
+    results: list[CaseResult] = list(errors)
+    for group_id, members in groups.items():
+        ordered = sorted(members, key=lambda member: member[0])
+        previous_after: ControlState | None = None
+        for expected_step, (step, case) in enumerate(ordered, start=1):
+            link_errors: list[str] = []
+            if step != expected_step:
+                link_errors.append(
+                    f"sequence {group_id} uses step {step}; expected contiguous step {expected_step}"
+                )
+
+            if expected_step == 1:
+                effective_before = case.before
+            elif previous_after is None:
+                results.append(
+                    CaseResult(
+                        spec.scenario_id,
+                        case.case_id,
+                        "transition",
+                        False,
+                        ("preceding sequence step did not produce a post-state",),
+                    )
+                )
+                continue
+            else:
+                effective_before = previous_after
+                if previous_after != case.before:
+                    link_errors.append(
+                        "declared before state does not equal the preceding oracle post-state"
+                    )
+
+            case_result, previous_after = _execute_transition(
+                spec.scenario_id,
+                case,
+                effective_before,
+            )
+            if link_errors:
+                case_result = replace(
+                    case_result,
+                    accepted=False,
+                    details=(*link_errors, *case_result.details),
+                )
+            results.append(case_result)
+    return tuple(results)
+
+
 def run_scenario(spec: ScenarioSpec) -> ScenarioResult:
-    cases = tuple(run_case(spec.scenario_id, case) for case in spec.cases)
+    if spec.mode is ScenarioMode.SEQUENCE:
+        cases = _run_sequence(spec)
+    else:
+        cases = tuple(run_case(spec.scenario_id, case) for case in spec.cases)
     return ScenarioResult(spec.scenario_id, all(case.accepted for case in cases), cases)
 
 
 def _metadata_errors(
-    registry: Mapping[str, ScenarioSpec], manifest: tuple[dict[str, object], ...]
+    registry: Mapping[str, ScenarioSpec],
+    manifest: tuple[ManifestScenario, ...],
 ) -> tuple[str, ...]:
     errors: list[str] = []
-    manifest_by_id = {str(entry["scenario_id"]): entry for entry in manifest}
+    manifest_by_id = {entry.scenario_id: entry for entry in manifest}
     registry_ids = set(registry)
     manifest_ids = set(manifest_by_id)
     missing = manifest_ids - registry_ids
@@ -279,24 +382,29 @@ def _metadata_errors(
         entry = manifest_by_id[scenario_id]
         if spec.scenario_id != scenario_id:
             errors.append(f"registry key {scenario_id} disagrees with spec ID {spec.scenario_id}")
-        if spec.split != str(entry["split"]):
+        if spec.split != entry.split:
             errors.append(f"{scenario_id}: split mismatch")
-        if spec.family != str(entry["family"]):
+        if spec.family != entry.family:
             errors.append(f"{scenario_id}: family mismatch")
-        if spec.source_section != str(entry["source_section"]):
+        if spec.source_section != entry.source_section:
             errors.append(f"{scenario_id}: source-section mismatch")
-        manifest_rules = frozenset(str(rule) for rule in cast(list[object], entry["rules"]))
-        if spec.rule_ids != manifest_rules:
+        if spec.rule_ids != entry.rules:
             errors.append(
                 f"{scenario_id}: rule mismatch; registry={sorted(spec.rule_ids)}, "
-                f"manifest={sorted(manifest_rules)}"
+                f"manifest={sorted(entry.rules)}"
             )
         if not spec.cases:
             errors.append(f"{scenario_id}: no executable cases")
+        case_ids = [case.case_id for case in spec.cases]
+        if len(case_ids) != len(set(case_ids)):
+            errors.append(f"{scenario_id}: duplicate case identity")
     return tuple(errors)
 
 
-def validate_release(registry: Mapping[str, ScenarioSpec], release: str = "v0.1") -> ReleaseResult:
+def validate_release(
+    registry: Mapping[str, ScenarioSpec],
+    release: str = "v0.1",
+) -> ReleaseResult:
     manifest = _load_manifest(release)
     metadata_errors = _metadata_errors(registry, manifest)
     scenarios = tuple(run_scenario(registry[key]) for key in sorted(registry))
