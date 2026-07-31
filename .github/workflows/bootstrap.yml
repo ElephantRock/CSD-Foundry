@@ -51,6 +51,17 @@ jobs:
           [tool.ruff.lint.per-file-ignores]
           "scripts/generate_csd_reasoning_seed.py" = ["E501"]
           EOF
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/csd_foundry/kernel/transitions.py")
+          text = path.read_text(encoding="utf-8")
+          old = """    elif state.assurance in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}:\n        if not verdict_survivors:\n            resulting_assurance = Assurance.STALE\n"""
+          new = """    elif (\n        state.assurance in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}\n        and not verdict_survivors\n    ):\n        resulting_assurance = Assurance.STALE\n"""
+          if old not in text:
+              raise SystemExit("expected transition source pattern not found")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
 
       - uses: actions/setup-python@v5
         with:
