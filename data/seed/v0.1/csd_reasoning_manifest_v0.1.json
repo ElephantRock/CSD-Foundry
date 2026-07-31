@@ -1,0 +1,304 @@
+{
+  "claim_boundary": "Passing deterministic validation establishes schema and declared-rule consistency only. It does not establish pedagogical effectiveness, general reasoning transfer, or absence of specification-level errors.",
+  "dataset": "CSD Reasoning Seed",
+  "dataset_version": "0.1.0",
+  "generated_by": "generate_csd_reasoning_seed.py",
+  "generation_method": "deterministic_templates",
+  "preference": {
+    "file": "csd_reasoning_preference_v0.1.jsonl",
+    "records": 63,
+    "sha256": "18f7d612041d2769d138a51165d5b55f73bd12e95578e4e012f45bbdd981aa5c",
+    "split_counts": {
+      "test": 9,
+      "train": 42,
+      "validation": 12
+    }
+  },
+  "provider_calls": 0,
+  "scenario_count": 21,
+  "scenarios": [
+    {
+      "family": "revocation_non_inference",
+      "rules": [
+        "INV-11",
+        "INV-12",
+        "INV-13",
+        "INV-15",
+        "SYM-01"
+      ],
+      "scenario_id": "M-01",
+      "source_section": "Charter §12 M-01",
+      "split": "train"
+    },
+    {
+      "family": "lost_source_basis",
+      "rules": [
+        "INV-05",
+        "INV-11",
+        "INV-13",
+        "INV-15"
+      ],
+      "scenario_id": "M-02",
+      "source_section": "Charter §12 M-02",
+      "split": "train"
+    },
+    {
+      "family": "expiry_and_staleness",
+      "rules": [
+        "INV-06",
+        "INV-07",
+        "INV-09",
+        "INV-15",
+        "INV-20",
+        "INV-21"
+      ],
+      "scenario_id": "M-03",
+      "source_section": "Charter §12 M-03",
+      "split": "train"
+    },
+    {
+      "family": "independent_failure_preservation",
+      "rules": [
+        "INV-11",
+        "INV-14",
+        "INV-16",
+        "INV-21",
+        "SYM-01"
+      ],
+      "scenario_id": "M-04",
+      "source_section": "Charter §12 M-04",
+      "split": "train"
+    },
+    {
+      "family": "unsupported_historical_verdict",
+      "rules": [
+        "INV-07",
+        "INV-09",
+        "INV-13",
+        "INV-15"
+      ],
+      "scenario_id": "M-05",
+      "source_section": "Charter §12 M-05",
+      "split": "train"
+    },
+    {
+      "family": "alternative_basis",
+      "rules": [
+        "INV-11",
+        "INV-14",
+        "INV-16"
+      ],
+      "scenario_id": "M-06",
+      "source_section": "Charter §12 M-06",
+      "split": "train"
+    },
+    {
+      "family": "no_replacement_verdict",
+      "rules": [
+        "INV-09",
+        "INV-12",
+        "INV-13",
+        "INV-15"
+      ],
+      "scenario_id": "M-07",
+      "source_section": "Charter §12 M-07",
+      "split": "train"
+    },
+    {
+      "family": "level_preserving_recovery",
+      "rules": [
+        "INV-17",
+        "INV-18",
+        "G-INV-10"
+      ],
+      "scenario_id": "M-08",
+      "source_section": "Charter §12 M-08",
+      "split": "train"
+    },
+    {
+      "family": "governed_source_restoration",
+      "rules": [
+        "INV-05",
+        "INV-18",
+        "G-INV-09",
+        "G-INV-10"
+      ],
+      "scenario_id": "M-09",
+      "source_section": "Charter §12 M-09",
+      "split": "train"
+    },
+    {
+      "family": "dependency_scoped_multi_control",
+      "rules": [
+        "INV-11",
+        "INV-14",
+        "INV-15",
+        "INV-16"
+      ],
+      "scenario_id": "M-10",
+      "source_section": "Charter §12 M-10 and README Layer 2",
+      "split": "train"
+    },
+    {
+      "family": "atomic_interleavings",
+      "rules": [
+        "INV-03",
+        "INV-07",
+        "INV-18",
+        "INV-19",
+        "INV-20"
+      ],
+      "scenario_id": "M-11",
+      "source_section": "Charter §12 M-11 and README Layer 2",
+      "split": "train"
+    },
+    {
+      "family": "evidence_is_not_verdict",
+      "rules": [
+        "INV-07",
+        "G-INV-07",
+        "A-07"
+      ],
+      "scenario_id": "G-01",
+      "source_section": "README Layer 3B workflow 1",
+      "split": "train"
+    },
+    {
+      "family": "new_identity_restoration",
+      "rules": [
+        "INV-18",
+        "G-INV-06",
+        "G-INV-08",
+        "G-INV-09",
+        "G-INV-10",
+        "G-INV-11"
+      ],
+      "scenario_id": "G-02",
+      "source_section": "README Layer 3B workflow 2",
+      "split": "train"
+    },
+    {
+      "family": "fresh_adverse_evidence",
+      "rules": [
+        "INV-07",
+        "INV-21"
+      ],
+      "scenario_id": "C-01",
+      "source_section": "Charter §7.2 and INV-21",
+      "split": "train"
+    },
+    {
+      "family": "age_trigger_symmetry",
+      "rules": [
+        "INV-11",
+        "INV-14",
+        "INV-15",
+        "INV-20",
+        "INV-21"
+      ],
+      "scenario_id": "M-12",
+      "source_section": "Charter §12 M-12",
+      "split": "validation"
+    },
+    {
+      "family": "non_current_obligation",
+      "rules": [
+        "INV-04",
+        "INV-12"
+      ],
+      "scenario_id": "M-13",
+      "source_section": "Charter §12 M-13",
+      "split": "validation"
+    },
+    {
+      "family": "profile_strengthening",
+      "rules": [
+        "INV-08",
+        "INV-09",
+        "G-INV-12",
+        "G-INV-14"
+      ],
+      "scenario_id": "M-14",
+      "source_section": "Charter §12 M-14 and README Layer 3B workflow 3",
+      "split": "validation"
+    },
+    {
+      "family": "governed_retirement",
+      "rules": [
+        "INV-04",
+        "INV-19",
+        "G-INV-11",
+        "G-INV-12",
+        "G-INV-13"
+      ],
+      "scenario_id": "G-04",
+      "source_section": "README Layer 3B workflow 4",
+      "split": "validation"
+    },
+    {
+      "family": "assumption_boundary",
+      "rules": [
+        "A-04",
+        "INV-11",
+        "REAL-01",
+        "REAL-02"
+      ],
+      "scenario_id": "M-15",
+      "source_section": "Charter §12 M-15 and Layer 3A results",
+      "split": "test"
+    },
+    {
+      "family": "conditional_liveness",
+      "rules": [
+        "LIVE-01",
+        "INV-07",
+        "INV-18",
+        "INV-19"
+      ],
+      "scenario_id": "L-01",
+      "source_section": "Charter LIVE-01 and README temporal structure",
+      "split": "test"
+    },
+    {
+      "family": "append_only_history",
+      "rules": [
+        "INV-18",
+        "INV-19",
+        "G-INV-06",
+        "G-INV-11"
+      ],
+      "scenario_id": "H-01",
+      "source_section": "Charter INV-19 and counterexample policy",
+      "split": "test"
+    }
+  ],
+  "sft": {
+    "file": "csd_reasoning_sft_v0.1.jsonl",
+    "records": 252,
+    "sha256": "02903221be8aff0f5e667dbde556040f049bf386c84722a032101ae02879aaa9",
+    "split_counts": {
+      "test": 36,
+      "train": 168,
+      "validation": 48
+    }
+  },
+  "source_baselines": {
+    "control_status_discipline": {
+      "sha256": "b2ae29adb3f2ae275c42a7fdb067cba758b54c606e9e350f6b2e41baee293d4e",
+      "version": "v0.9.0 Candidate"
+    },
+    "formalization_charter": {
+      "sha256": "c59fc9779342c9a16fc8be3b7990f190ee3476eda198a7d7149e27664e6e7df2",
+      "version": "v0.1.1 Approved"
+    }
+  },
+  "split_policy": "source_scenario_family_exclusive",
+  "status": "synthetic_seed_unbenchmarked",
+  "surface_variant_count": 3,
+  "task_types": [
+    "transition",
+    "critique",
+    "counterfactual",
+    "audit"
+  ]
+}
