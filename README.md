@@ -6,36 +6,39 @@ training records, and evaluation evidence.
 
 ## Status
 
-**Executable Scenario Registry v0.2**. The repository contains:
+**Temporal and Governance Kernel v0.3**. The repository contains:
 
-- a typed CSD kernel for dependency invalidation, basis survival, restoration, and retirement;
+- a typed CSD kernel for dependency invalidation, basis survival, restoration, retirement,
+  logical time, expiry, profile changes, reassessment requests, and heartbeat obligations;
 - independent state, transition, and event-specific invariant checks;
 - a manifest-complete executable registry for all 21 CSD Reasoning Seed v0.1 scenarios;
 - transition, sequence, multi-control, observation, and rejected-transition case types;
-- deterministic state and trace expectation checks;
-- targeted mutation probes and a mutation kill-matrix evaluator;
+- ten deterministic temporal/governance scenarios with complete replay evidence;
+- legacy and temporal mutation kill-matrix evaluators;
 - the immutable CSD Reasoning Seed v0.1 and its original generator and validator.
 
-The included seed remains an unbenchmarked synthetic seed. Registry validation establishes
-coverage relative to the encoded CSD semantics; it does not prove that CSD covers all
-real-world dependencies or that a trained model generalizes.
+The included seed remains an unbenchmarked synthetic seed. Passing validation establishes
+coverage relative to the encoded CSD semantics; it does not prove real-world dependency
+completeness, model generalization, scheduler fairness, or production safety.
 
 ## Architecture
 
 ```text
 manifest-aligned scenario registry
-        ↓
-symbolic state and event cases
+        +
+logical-time and governance trajectories
         ↓
 executable CSD kernel
         ↓
-canonical transition traces
+canonical state transitions and traces
         ↓
 independent state, transition, and event verification
         ↓
-invariant-targeted mutations and kill matrix
+invariant-targeted mutations and kill matrices
         ↓
-future state-space sampling and natural-language rendering
+constraint-valid state/event sampling
+        ↓
+natural-language rendering
         ↓
 SFT / preference / evaluation releases
 ```
@@ -54,28 +57,61 @@ pytest
 
 csd-foundry scenarios validate --release v0.1
 csd-foundry mutations evaluate --release v0.1
+csd-foundry temporal validate --release v0.3
+csd-foundry temporal mutations --release v0.3
 python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
 ```
 
 The scenario validator enforces exact agreement between the immutable manifest and executable
-registry for scenario identity, split, family, source section, and declared rule set. It then
-runs every executable case and checks deterministic state and trace outcomes.
+registry. The temporal validator executes canonical logical-time and governance trajectories,
+retains complete ordered oracle results, checks full replay identity, and verifies exact event
+consequences.
 
 ## Current coverage
 
 ```text
-Manifest scenarios:             21
-Executable registry scenarios:  21
-Accepted scenarios:             21
-Oracle-backed transition cases: 20
-Observation cases:               7
-Rejected-transition cases:       1
-Targeted mutations killed:      10 / 10
-Valid canonical cases rejected:  0
+Manifest scenarios:                   21
+Executable registry scenarios:        21
+Accepted registry scenarios:          21
+Legacy targeted mutations killed:    10 / 10
+
+Temporal/governance scenarios:        10
+Accepted temporal scenarios:          10
+Identical full temporal replays:       10
+Retained oracle transition steps:      16
+Temporal targeted mutations killed:  23 / 23
+Temporal mutation escapes:              0
+Valid canonical trajectories rejected:  0
 ```
 
-The machine-readable report is committed at
-`reports/scenario_coverage_v0.2.json`.
+Machine-readable evidence is committed at:
+
+- `reports/scenario_coverage_v0.2.json`
+- `reports/temporal_kernel_coverage_v0.3.json`
+- `reports/mutation_policy_v0.3.json`
+
+## Temporal and governance semantics
+
+The v0.3 kernel uses a serialized logical clock rather than wall-clock time. It directly
+represents:
+
+- evidence issuance and governed expiry;
+- required-profile identity and version;
+- profile-scoped current-basis eligibility while preserving historical evidence and bases;
+- pending and closed reassessment requests;
+- heartbeat interval, last receipt, and deadline;
+- deterministic demotion after evidence expiry or a missed heartbeat;
+- named request closure during governed reassessment;
+- append-only audit history and identical replay from identical inputs;
+- legacy expired evidence whose historical source did not record an expiry timestamp.
+
+Heartbeat receipt and reassessment requests cannot promote source state or assurance. Expired
+or invalidated evidence cannot be restored under the same identity. A profile change does not
+rewrite or invalidate historical evidence; it recomputes which preserved bases remain eligible
+for the current required profile. Profile changes, reassessment requests, and heartbeat records
+require I3 authority in both transition execution and independent verification. Request closure
+must target known requests that are pending in the pre-state. Every temporal/governance event
+must preserve unrelated historical state and append its exact canonical audit record.
 
 ## Project layout
 
@@ -83,38 +119,38 @@ The machine-readable report is committed at
 src/csd_foundry/kernel/          State, events, transitions, invariants, oracle
 src/csd_foundry/scenarios/       Typed scenario contracts, registry, release runner
 src/csd_foundry/scenarios/v0_1/  Manifest-complete v0.1 scenario definitions
-src/csd_foundry/synthesis/       Mutation operators and kill-matrix evaluation
+src/csd_foundry/temporal/        Canonical temporal/governance release scenarios
+src/csd_foundry/synthesis/       Legacy and temporal mutation evaluation
 src/csd_foundry/fixtures/v0_1/   Compatibility fixtures for the bootstrap API
 scripts/                         Seed generation and validation utilities
 data/seed/v0.1/                  Immutable v0.1 seed release
-reports/                         Coverage and future benchmark evidence
-tests/                           Kernel, registry, invariant, mutation, and determinism tests
+reports/                         Machine-readable coverage and release evidence
+tests/                           Kernel, registry, temporal, mutation, and determinism tests
 ```
 
-## Explicit representation boundaries
+## Explicit boundaries
 
-The v0.1 kernel does not directly represent every semantic dimension named by the source
-scenarios. The registry marks the following as explicit assumptions or observational cases
-rather than silently pretending they are executable transitions:
+The current implementation does not establish:
 
-- clock-trigger execution and expiry scheduling;
-- required-profile structure and profile-change events;
-- real-world dependency completeness beyond the declared graph;
-- temporal fairness and scheduler liveness.
+- fairness or liveness of a real scheduler;
+- completeness of real-world dependency declarations;
+- correspondence between encoded evidence and external truth;
+- model learning or generalization from generated records;
+- production safety.
 
-These are kernel-extension targets, not inferred capabilities.
+These remain release boundaries rather than inferred capabilities.
 
 ## Immediate roadmap
 
-1. Add native clock, profile-change, reassessment-request, and heartbeat events.
-2. Replace curated mutation probes with one generated operator per invariant family.
-3. Add mutation-coverage and false-positive thresholds as release policy.
-4. Build constraint-valid state and event samplers.
-5. Generate v0.2 records from executable states and traces rather than prose templates.
-6. Benchmark base, SFT, and preference-trained models on topology and composition holdouts.
+1. Build constraint-valid state and event samplers.
+2. Generate canonical multi-event trajectories from sampled states.
+3. Derive one mutation operator per invariant family with release thresholds.
+4. Render verified trajectories into SFT, preference, critique, and evaluation records.
+5. Create topology, composition, temporal, and surface holdouts.
+6. Benchmark base, SFT, and preference-trained models against the executable oracle.
 
 ## Claim boundary
 
 Passing tests establishes correctness relative to the implemented CSD semantics and test
 coverage. It does not establish dependency completeness, external truth, general reasoning
-transfer, or production safety.
+transfer, scheduler fairness, or production safety.

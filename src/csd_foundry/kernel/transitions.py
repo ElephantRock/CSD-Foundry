@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from csd_foundry.kernel.events import CsdEvent, DependencyChange, Reassess, RetireControl
+from csd_foundry.kernel.events import (
+    AdvanceClock,
+    CsdEvent,
+    DependencyChange,
+    ProfileChange,
+    Reassess,
+    RecordHeartbeat,
+    RequestReassessment,
+    RetireControl,
+)
 from csd_foundry.kernel.models import (
     Assurance,
     AuditEvent,
@@ -14,6 +23,13 @@ from csd_foundry.kernel.models import (
     EvidenceStatus,
     ObligationStatus,
     SourceState,
+)
+from csd_foundry.kernel.temporal import (
+    apply_advance_clock,
+    apply_profile_change,
+    apply_record_heartbeat,
+    apply_request_reassessment,
+    close_reassessment_requests,
 )
 from csd_foundry.kernel.trace import TransitionTrace
 
@@ -141,6 +157,8 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
         raise TransitionError("reassessment must use new basis identities")
     if any(item.status is not EvidenceStatus.CURRENT for item in event.new_evidence):
         raise TransitionError("new reassessment evidence must be current")
+    if any(item.issued_at > state.logical_time for item in event.new_evidence):
+        raise TransitionError("new reassessment evidence cannot be issued in the future")
 
     resulting_source = event.source_state or state.source_state
     resulting_assurance = event.assurance or state.assurance
@@ -183,6 +201,14 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
     if resulting_assurance not in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}:
         verdict_basis_ids.clear()
 
+    requests = close_reassessment_requests(state, event.close_request_ids)
+    reassessment_audit_details = {
+        "authority": event.authority,
+        "evidence_ids": ",".join(sorted(new_evidence_ids)),
+        "basis_ids": ",".join(sorted(new_basis_ids)),
+    }
+    if event.close_request_ids:
+        reassessment_audit_details["closed_request_ids"] = ",".join(sorted(event.close_request_ids))
     post = replace(
         state,
         evidence=(*state.evidence, *event.new_evidence),
@@ -191,14 +217,10 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
         current_verdict_basis_ids=frozenset(verdict_basis_ids),
         source_state=resulting_source,
         assurance=resulting_assurance,
+        reassessment_requests=requests,
         history=(
             *state.history,
-            AuditEvent.create(
-                "Reassess",
-                authority=event.authority,
-                evidence_ids=",".join(sorted(new_evidence_ids)),
-                basis_ids=",".join(sorted(new_basis_ids)),
-            ),
+            AuditEvent.create("Reassess", **reassessment_audit_details),
         ),
     )
     trace = TransitionTrace(
@@ -216,6 +238,7 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
             "G-INV-09",
             "G-INV-10",
             "G-INV-11",
+            "R-INV-03",
         ),
         next_governed_step="publish the new current view while retaining superseded history",
     )
@@ -270,4 +293,12 @@ def apply_event(state: ControlState, event: CsdEvent) -> tuple[ControlState, Tra
         return apply_reassess(state, event)
     if isinstance(event, RetireControl):
         return apply_retire(state, event)
+    if isinstance(event, AdvanceClock):
+        return apply_advance_clock(state, event)
+    if isinstance(event, ProfileChange):
+        return apply_profile_change(state, event)
+    if isinstance(event, RequestReassessment):
+        return apply_request_reassessment(state, event)
+    if isinstance(event, RecordHeartbeat):
+        return apply_record_heartbeat(state, event)
     raise TypeError(f"unsupported event type: {type(event).__name__}")

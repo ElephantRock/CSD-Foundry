@@ -1,0 +1,37 @@
+{
+  "claim_boundary": "This report establishes deterministic temporal and governance behavior relative to the encoded logical-time model. It does not establish real-world scheduler fairness, external dependency completeness, model generalization, or production safety.",
+  "generated_by": "csd-foundry temporal validate --release v0.3",
+  "release": "v0.3",
+  "scenario_coverage": {
+    "accepted": 10,
+    "failed": 0,
+    "replay_identical": 10,
+    "total": 10
+  },
+  "scenario_ids": [
+    "T-01",
+    "T-02",
+    "T-03",
+    "T-04",
+    "T-05",
+    "T-06",
+    "T-07",
+    "T-08",
+    "T-09",
+    "T-10"
+  ],
+  "semantics_exercised": [
+    "exact logical-time expiry",
+    "source-basis loss and independent-basis survival",
+    "profile-scoped basis eligibility while preserving historical evidence and bases",
+    "reassessment-request preservation and lifecycle",
+    "missed-heartbeat staleness",
+    "non-promoting heartbeat recovery",
+    "simultaneous-expiry determinism",
+    "identical replay from identical inputs",
+    "substantive convergence of causally independent events",
+    "legacy expired-evidence compatibility without synthetic timestamp reconstruction"
+  ],
+  "status": "valid",
+  "version": "0.3.0"
+}
