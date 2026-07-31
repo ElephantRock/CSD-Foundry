@@ -266,9 +266,7 @@ def run_case(scenario_id: str, case: ExecutableCase) -> CaseResult:
 def _sequence_coordinates(case_id: str) -> tuple[str, int]:
     parts = case_id.split("/")
     if len(parts) < 3:
-        raise ValueError(
-            f"sequence case {case_id!r} must use '<scenario>/<branch>/<step>-<name>'"
-        )
+        raise ValueError(f"sequence case {case_id!r} must use '<scenario>/<branch>/<step>-<name>'")
     step_text = parts[-1].split("-", maxsplit=1)[0]
     try:
         step = int(step_text)
