@@ -20,39 +20,50 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
-      - name: Correct heartbeat event verification
+      - name: Preserve legacy reassessment audit compatibility
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          path = Path("src/csd_foundry/kernel/temporal_invariants.py")
+          path = Path("src/csd_foundry/kernel/transitions.py")
           text = path.read_text()
-          old = '''def _validate_heartbeat(
-              before: ControlState, event: RecordHeartbeat, after: ControlState
-          ) -> list[Violation]:
-              violations = _unchanged_temporal_governance(before, after)
+          old = '''    requests = close_reassessment_requests(state, event.close_request_ids)
+              post = replace(
+                  state,
           '''
-          new = '''def _validate_heartbeat(
-              before: ControlState, event: RecordHeartbeat, after: ControlState
-          ) -> list[Violation]:
-              violations: list[Violation] = []
-              if after.logical_time != before.logical_time:
-                  violations.append(Violation("T-INV-01", "heartbeat altered logical time"))
-              if (
-                  after.required_profile_id != before.required_profile_id
-                  or after.required_profile_version != before.required_profile_version
-              ):
-                  violations.append(Violation("P-INV-01", "heartbeat altered the required profile"))
-              if after.reassessment_requests != before.reassessment_requests:
-                  violations.append(Violation("R-INV-03", "heartbeat altered reassessment requests"))
+          new = '''    requests = close_reassessment_requests(state, event.close_request_ids)
+              reassessment_audit_details = {
+                  "authority": event.authority,
+                  "evidence_ids": ",".join(sorted(new_evidence_ids)),
+                  "basis_ids": ",".join(sorted(new_basis_ids)),
+              }
+              if event.close_request_ids:
+                  reassessment_audit_details["closed_request_ids"] = ",".join(
+                      sorted(event.close_request_ids)
+                  )
+              post = replace(
+                  state,
           '''
           if old not in text:
-              raise SystemExit("heartbeat verifier block not found")
+              raise SystemExit("reassessment prelude not found")
+          text = text.replace(old, new, 1)
+          old = '''            AuditEvent.create(
+                          "Reassess",
+                          authority=event.authority,
+                          evidence_ids=",".join(sorted(new_evidence_ids)),
+                          basis_ids=",".join(sorted(new_basis_ids)),
+                          closed_request_ids=",".join(sorted(event.close_request_ids)),
+                      ),
+          '''
+          new = '''            AuditEvent.create("Reassess", **reassessment_audit_details),
+          '''
+          if old not in text:
+              raise SystemExit("reassessment audit event not found")
           path.write_text(text.replace(old, new, 1))
           PY
       - run: ruff format .
       - run: ruff check --fix .
-      - name: Commit heartbeat verifier correction
+      - name: Commit reassessment compatibility correction
         run: |
           if git diff --quiet; then
             exit 0
@@ -60,23 +71,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Allow governed heartbeat state updates"
+          git commit -m "Preserve legacy reassessment audit shape"
           git push origin HEAD:web/7-temporal-governance-kernel-v0.3
       - run: ruff format --check .
       - run: ruff check .
       - run: mypy src
-      - name: Diagnose v0.1 scenario regressions
-        run: |
-          python - <<'PY'
-          from csd_foundry.scenarios.registry import SCENARIOS
-          from csd_foundry.scenarios.runner import validate_release
-
-          report = validate_release(SCENARIOS, "v0.1")
-          for scenario in report.scenarios:
-              for case in scenario.cases:
-                  if not case.accepted:
-                      print(scenario.scenario_id, case.case_id, *case.details, sep=" | ")
-          PY
       - run: pytest
       - run: python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
       - run: python -m compileall -q src scripts tests
