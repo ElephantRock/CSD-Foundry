@@ -22,6 +22,8 @@ def test_temporal_release_is_deterministic_and_complete() -> None:
     assert report.accepted == 10
     assert report.failed == 0
     assert report.replay_identical == 10
+    assert all(scenario.trajectory for scenario in report.scenarios)
+    assert sum(len(scenario.trajectory) for scenario in report.scenarios) == 16
 
 
 def test_temporal_mutation_policy_kills_every_probe() -> None:
