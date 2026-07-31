@@ -24,9 +24,13 @@ class Violation:
 
 
 def _basis_is_supported(basis: Basis, evidence: dict[str, Evidence]) -> bool:
-    return bool(basis.member_evidence_ids) and basis.approved and all(
-        member in evidence and evidence[member].status is EvidenceStatus.CURRENT
-        for member in basis.member_evidence_ids
+    return (
+        bool(basis.member_evidence_ids)
+        and basis.approved
+        and all(
+            member in evidence and evidence[member].status is EvidenceStatus.CURRENT
+            for member in basis.member_evidence_ids
+        )
     )
 
 
@@ -159,10 +163,7 @@ def _validate_dependency_change(
         new = after_evidence.get(evidence_id)
         if new is None:
             continue
-        affected = (
-            old.status is EvidenceStatus.CURRENT
-            and event.dependency_id in old.dependencies
-        )
+        affected = old.status is EvidenceStatus.CURRENT and event.dependency_id in old.dependencies
         expected_status = EvidenceStatus.INVALIDATED if affected else old.status
         if new.status is not expected_status:
             invariant = "INV-11" if affected else "INV-14"
@@ -246,7 +247,9 @@ def _validate_reassess(
     if after.current_source_basis_ids != expected_source:
         violations.append(Violation("G-INV-10", "reassessment source references are not canonical"))
     if after.current_verdict_basis_ids != expected_verdict:
-        violations.append(Violation("G-INV-10", "reassessment verdict references are not canonical"))
+        violations.append(
+            Violation("G-INV-10", "reassessment verdict references are not canonical")
+        )
     return violations
 
 
