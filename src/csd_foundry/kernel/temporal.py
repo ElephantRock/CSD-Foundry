@@ -45,10 +45,14 @@ def _basis_is_current(state: ControlState, basis_id: str) -> bool:
 
 def _surviving_bases(state: ControlState) -> tuple[frozenset[str], frozenset[str]]:
     source = frozenset(
-        basis_id for basis_id in state.current_source_basis_ids if _basis_is_current(state, basis_id)
+        basis_id
+        for basis_id in state.current_source_basis_ids
+        if _basis_is_current(state, basis_id)
     )
     verdict = frozenset(
-        basis_id for basis_id in state.current_verdict_basis_ids if _basis_is_current(state, basis_id)
+        basis_id
+        for basis_id in state.current_verdict_basis_ids
+        if _basis_is_current(state, basis_id)
     )
     return source, verdict
 
@@ -116,8 +120,10 @@ def apply_advance_clock(
         force_stale=heartbeat_missed,
     )
     removed = (
-        state.current_source_basis_ids | state.current_verdict_basis_ids
-    ) - source_bases - verdict_bases
+        (state.current_source_basis_ids | state.current_verdict_basis_ids)
+        - source_bases
+        - verdict_bases
+    )
     post = replace(
         interim,
         source_state=source,
@@ -139,7 +145,9 @@ def apply_advance_clock(
         event_type="AdvanceClock",
         invalidated_evidence=tuple(sorted(expired_ids)),
         preserved_evidence=tuple(
-            sorted(item.evidence_id for item in post.evidence if item.status is EvidenceStatus.CURRENT)
+            sorted(
+                item.evidence_id for item in post.evidence if item.status is EvidenceStatus.CURRENT
+            )
         ),
         removed_bases=tuple(sorted(removed)),
         surviving_bases=tuple(sorted(source_bases | verdict_bases)),
@@ -150,9 +158,7 @@ def apply_advance_clock(
         forbidden_inferences=("heartbeat or expiry based substantive promotion",),
         rules_fired=("T-INV-01", "T-INV-02", "T-INV-03", "T-INV-06"),
         next_governed_step=(
-            "complete governed reassessment"
-            if expired_ids or heartbeat_missed
-            else "none required"
+            "complete governed reassessment" if expired_ids or heartbeat_missed else "none required"
         ),
     )
     return post, trace
@@ -172,7 +178,9 @@ def apply_profile_change(
     ):
         raise TemporalTransitionError("profile version must advance monotonically")
     if (event.request_id is None) != (event.request_due_at is None):
-        raise TemporalTransitionError("profile request identity and due time must be supplied together")
+        raise TemporalTransitionError(
+            "profile request identity and due time must be supplied together"
+        )
 
     invalidated_ids: set[str] = set()
     evidence = []
@@ -212,8 +220,10 @@ def apply_profile_change(
     )
     source, assurance, source_bases, verdict_bases = _canonical_claims(state, interim)
     removed = (
-        state.current_source_basis_ids | state.current_verdict_basis_ids
-    ) - source_bases - verdict_bases
+        (state.current_source_basis_ids | state.current_verdict_basis_ids)
+        - source_bases
+        - verdict_bases
+    )
     post = replace(
         interim,
         source_state=source,
@@ -236,7 +246,9 @@ def apply_profile_change(
         event_type="ProfileChange",
         invalidated_evidence=tuple(sorted(invalidated_ids)),
         preserved_evidence=tuple(
-            sorted(item.evidence_id for item in post.evidence if item.status is EvidenceStatus.CURRENT)
+            sorted(
+                item.evidence_id for item in post.evidence if item.status is EvidenceStatus.CURRENT
+            )
         ),
         removed_bases=tuple(sorted(removed)),
         surviving_bases=tuple(sorted(source_bases | verdict_bases)),
@@ -352,9 +364,7 @@ def close_reassessment_requests(
     if missing:
         raise TemporalTransitionError(f"unknown reassessment requests: {sorted(missing)}")
     already_closed = {
-        request_id
-        for request_id in requested
-        if known[request_id].status is RequestStatus.CLOSED
+        request_id for request_id in requested if known[request_id].status is RequestStatus.CLOSED
     }
     if already_closed:
         raise TemporalTransitionError(

@@ -126,9 +126,7 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
     heartbeat_event = RecordHeartbeat(at_time=0, interval=5)
     heartbeat_after = oracle.apply(stale, heartbeat_event).after
 
-    missed_before = base_state(
-        heartbeat=HeartbeatState(interval=5, last_recorded_at=0, due_at=5)
-    )
+    missed_before = base_state(heartbeat=HeartbeatState(interval=5, last_recorded_at=0, due_at=5))
     missed_event = AdvanceClock(5)
     missed_after = oracle.apply(missed_before, missed_event).after
 

@@ -155,9 +155,7 @@ def _t03_independent_basis_survives() -> TemporalScenarioResult:
         state,
         evidence=(*state.evidence, independent_evidence),
         bases=(*state.bases, independent_basis),
-        current_source_basis_ids=frozenset(
-            {"BASIS-SOURCE", independent_basis.basis_id}
-        ),
+        current_source_basis_ids=frozenset({"BASIS-SOURCE", independent_basis.basis_id}),
     )
     after = CsdOracle().apply(state, AdvanceClock(5)).after
     accepted = (
@@ -169,15 +167,19 @@ def _t03_independent_basis_survives() -> TemporalScenarioResult:
 
 def _t04_profile_change_is_scoped() -> TemporalScenarioResult:
     state = base_state(profile_id="PROFILE-A", profile_version=1)
-    after = CsdOracle().apply(
-        state,
-        ProfileChange(
-            "PROFILE-A",
-            2,
-            request_id="REQ-PROFILE-A-2",
-            request_due_at=10,
-        ),
-    ).after
+    after = (
+        CsdOracle()
+        .apply(
+            state,
+            ProfileChange(
+                "PROFILE-A",
+                2,
+                request_id="REQ-PROFILE-A-2",
+                request_due_at=10,
+            ),
+        )
+        .after
+    )
     evidence = after.evidence_by_id()
     request = after.requests_by_id()["REQ-PROFILE-A-2"]
     accepted = (
@@ -192,10 +194,14 @@ def _t04_profile_change_is_scoped() -> TemporalScenarioResult:
 
 def _t05_request_preserves_verdict() -> TemporalScenarioResult:
     state = base_state()
-    after = CsdOracle().apply(
-        state,
-        RequestReassessment("REQ-1", "scheduled review", due_at=8),
-    ).after
+    after = (
+        CsdOracle()
+        .apply(
+            state,
+            RequestReassessment("REQ-1", "scheduled review", due_at=8),
+        )
+        .after
+    )
     accepted = (
         after.source_state is state.source_state
         and after.assurance is state.assurance
@@ -208,10 +214,14 @@ def _t05_request_preserves_verdict() -> TemporalScenarioResult:
 
 def _t06_missed_heartbeat_stales() -> TemporalScenarioResult:
     heartbeat = HeartbeatState(interval=5, last_recorded_at=0, due_at=5)
-    after = CsdOracle().apply(
-        base_state(heartbeat=heartbeat),
-        AdvanceClock(5),
-    ).after
+    after = (
+        CsdOracle()
+        .apply(
+            base_state(heartbeat=heartbeat),
+            AdvanceClock(5),
+        )
+        .after
+    )
     accepted = after.assurance is Assurance.STALE and not after.current_verdict_basis_ids
     return _result("T-06", accepted, "missed heartbeat stales substantive assurance")
 

@@ -44,14 +44,12 @@ def _expected_basis_survival(
     source = frozenset(
         basis_id
         for basis_id in before.current_source_basis_ids
-        if (basis := bases.get(basis_id)) is not None
-        and _basis_is_supported(basis, after_evidence)
+        if (basis := bases.get(basis_id)) is not None and _basis_is_supported(basis, after_evidence)
     )
     verdict = frozenset(
         basis_id
         for basis_id in before.current_verdict_basis_ids
-        if (basis := bases.get(basis_id)) is not None
-        and _basis_is_supported(basis, after_evidence)
+        if (basis := bases.get(basis_id)) is not None and _basis_is_supported(basis, after_evidence)
     )
     return source, verdict
 
@@ -104,7 +102,9 @@ def validate_temporal_state(state: ControlState) -> tuple[Violation, ...]:
                 Violation("T-INV-02", f"evidence {item.evidence_id} expired before its deadline")
             )
         violations.extend(
-            _validate_profile_pair(item.profile_id, item.profile_version, f"evidence {item.evidence_id}")
+            _validate_profile_pair(
+                item.profile_id, item.profile_version, f"evidence {item.evidence_id}"
+            )
         )
 
     requests = state.requests_by_id()
@@ -127,7 +127,9 @@ def validate_temporal_state(state: ControlState) -> tuple[Violation, ...]:
             request.closed_at is None or request.closed_at > state.logical_time
         ):
             violations.append(
-                Violation("R-INV-03", f"closed request {request.request_id} has an invalid close time")
+                Violation(
+                    "R-INV-03", f"closed request {request.request_id} has an invalid close time"
+                )
             )
 
     if state.heartbeat is not None:
@@ -182,14 +184,11 @@ def validate_temporal_transition(
             and old.requested_at == new.requested_at
             and old.due_at == new.due_at
         )
-        valid_closure = (
-            old == new
-            or (
-                old.status is RequestStatus.PENDING
-                and new.status is RequestStatus.CLOSED
-                and new.closed_at == after.logical_time
-                and stable_fields
-            )
+        valid_closure = old == new or (
+            old.status is RequestStatus.PENDING
+            and new.status is RequestStatus.CLOSED
+            and new.closed_at == after.logical_time
+            and stable_fields
         )
         if not valid_closure:
             violations.append(Violation("R-INV-03", f"request {request_id} was rewritten"))
@@ -250,9 +249,7 @@ def _validate_advance_clock(
                 )
             )
 
-    expected_source_bases, expected_verdict_bases = _expected_basis_survival(
-        before, after_evidence
-    )
+    expected_source_bases, expected_verdict_bases = _expected_basis_survival(before, after_evidence)
     heartbeat_missed = before.heartbeat is not None and before.heartbeat.due_at <= event.target_time
     if heartbeat_missed:
         expected_verdict_bases = frozenset()
@@ -267,9 +264,7 @@ def _validate_advance_clock(
     expected_assurance = before.assurance
     if before.obligation is not ObligationStatus.CURRENT:
         expected_assurance = Assurance.NA
-    elif heartbeat_missed and expected_assurance in _SUBSTANTIVE:
-        expected_assurance = Assurance.STALE
-    elif expected_assurance in _SUBSTANTIVE and not expected_verdict_bases:
+    elif heartbeat_missed and expected_assurance in _SUBSTANTIVE or expected_assurance in _SUBSTANTIVE and not expected_verdict_bases:
         expected_assurance = Assurance.STALE
     if after.source_state is not expected_source:
         violations.append(Violation("T-INV-03", "clock source result is not canonical"))
@@ -318,7 +313,9 @@ def _validate_profile_change(
     new_request_ids = set(after.requests_by_id()) - set(before.requests_by_id())
     expected_request_ids = {event.request_id} if event.request_id is not None else set()
     if new_request_ids != expected_request_ids:
-        violations.append(Violation("P-INV-03", "profile request identities do not match the event"))
+        violations.append(
+            Violation("P-INV-03", "profile request identities do not match the event")
+        )
     if after.heartbeat != before.heartbeat:
         violations.append(Violation("H-INV-01", "profile change altered heartbeat state"))
     return violations
