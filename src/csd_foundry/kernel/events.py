@@ -20,6 +20,7 @@ class Reassess:
     source_state: SourceState | None = None
     assurance: Assurance | None = None
     authority: str = "I3"
+    close_request_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,4 +29,41 @@ class RetireControl:
     authority: str = "I3"
 
 
-CsdEvent = DependencyChange | Reassess | RetireControl
+@dataclass(frozen=True, slots=True)
+class AdvanceClock:
+    target_time: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileChange:
+    profile_id: str
+    profile_version: int
+    authority: str = "I3"
+    request_id: str | None = None
+    request_due_at: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RequestReassessment:
+    request_id: str
+    reason: str
+    due_at: int
+    authority: str = "I3"
+
+
+@dataclass(frozen=True, slots=True)
+class RecordHeartbeat:
+    at_time: int
+    interval: int | None = None
+    authority: str = "I3"
+
+
+CsdEvent = (
+    DependencyChange
+    | Reassess
+    | RetireControl
+    | AdvanceClock
+    | ProfileChange
+    | RequestReassessment
+    | RecordHeartbeat
+)
