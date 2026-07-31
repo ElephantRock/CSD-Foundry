@@ -23,7 +23,9 @@ jobs:
         run: |
           set -euo pipefail
           cat .bootstrap/part* | base64 -d > /tmp/csd-foundry-bootstrap.zip
-          echo "bb29775aef95b50fae3e7dba38dcd1c899697aa309ac286b820415b8b706481f  /tmp/csd-foundry-bootstrap.zip" | sha256sum -c -
+          sha256sum /tmp/csd-foundry-bootstrap.zip
+          echo "41483b55f156c628e478f4e4f40fd576ebb5661fecf6116a4a47f423a9616c52  /tmp/csd-foundry-bootstrap.zip" | sha256sum -c -
+          unzip -tq /tmp/csd-foundry-bootstrap.zip
 
       - name: Materialize validated project
         shell: bash
