@@ -352,6 +352,8 @@ def _validate_profile_change(
     before: ControlState, event: ProfileChange, after: ControlState
 ) -> list[Violation]:
     violations: list[Violation] = []
+    if event.authority != "I3":
+        violations.append(Violation("P-INV-01", "profile change requires I3 authority"))
     if after.logical_time != before.logical_time:
         violations.append(Violation("P-INV-01", "profile change altered logical time"))
     if (
@@ -421,6 +423,8 @@ def _validate_request(
     before: ControlState, event: RequestReassessment, after: ControlState
 ) -> list[Violation]:
     violations = _unchanged_temporal_governance(before, after, allow_requests=True)
+    if event.authority != "I3":
+        violations.append(Violation("R-INV-01", "reassessment request requires I3 authority"))
     if (
         after.evidence != before.evidence
         or after.bases != before.bases
@@ -447,6 +451,8 @@ def _validate_heartbeat(
     before: ControlState, event: RecordHeartbeat, after: ControlState
 ) -> list[Violation]:
     violations: list[Violation] = []
+    if event.authority != "I3":
+        violations.append(Violation("H-INV-01", "heartbeat requires I3 authority"))
     if after.logical_time != before.logical_time:
         violations.append(Violation("T-INV-01", "heartbeat altered logical time"))
     if (
@@ -490,6 +496,26 @@ def _validate_reassessment_requests(
         violations.append(Violation("R-INV-03", "request closure identities are duplicated"))
     before_requests = before.requests_by_id()
     after_requests = after.requests_by_id()
+    unknown_request_ids = requested - set(before_requests)
+    if unknown_request_ids:
+        violations.append(
+            Violation(
+                "R-INV-03",
+                f"unknown request closure identities: {sorted(unknown_request_ids)}",
+            )
+        )
+    nonpending_request_ids = {
+        request_id
+        for request_id in requested & set(before_requests)
+        if before_requests[request_id].status is not RequestStatus.PENDING
+    }
+    if nonpending_request_ids:
+        violations.append(
+            Violation(
+                "R-INV-03",
+                f"request closures must target pending requests: {sorted(nonpending_request_ids)}",
+            )
+        )
     if set(after_requests) != set(before_requests):
         violations.append(Violation("R-INV-03", "reassessment altered request identities"))
     for request_id, old in before_requests.items():

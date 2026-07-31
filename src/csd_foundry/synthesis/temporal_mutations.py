@@ -114,6 +114,7 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
     profile_before = base_state(profile_id="PROFILE-A", profile_version=1)
     profile_event = ProfileChange("PROFILE-A", 2)
     profile_after = oracle.apply(profile_before, profile_event).after
+    unauthorized_profile_event = replace(profile_event, authority="I2")
 
     stale = replace(
         base_state(),
@@ -122,9 +123,11 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
     )
     request_event = RequestReassessment("REQ-MUT", "mutation control", due_at=8)
     request_after = oracle.apply(stale, request_event).after
+    unauthorized_request_event = replace(request_event, authority="I2")
 
     heartbeat_event = RecordHeartbeat(at_time=0, interval=5)
     heartbeat_after = oracle.apply(stale, heartbeat_event).after
+    unauthorized_heartbeat_event = replace(heartbeat_event, authority="I2")
 
     missed_before = base_state(heartbeat=HeartbeatState(interval=5, last_recorded_at=0, due_at=5))
     missed_event = AdvanceClock(5)
@@ -136,6 +139,8 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
     ).after
     close_event = Reassess((), (), close_request_ids=("REQ-CLOSE",))
     close_after = oracle.apply(requested, close_event).after
+    unknown_close_event = Reassess((), (), close_request_ids=("REQ-UNKNOWN",))
+    already_closed_event = Reassess((), (), close_request_ids=("REQ-CLOSE",))
 
     clock_request_event = AdvanceClock(1)
     clock_request_after = oracle.apply(requested, clock_request_event).after
@@ -201,6 +206,27 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
             frozenset({"P-INV-02"}),
         ),
         TemporalMutationProbe(
+            "mut-profile-unauthorized-authority",
+            profile_before,
+            unauthorized_profile_event,
+            profile_after,
+            frozenset({"P-INV-01"}),
+        ),
+        TemporalMutationProbe(
+            "mut-request-unauthorized-authority",
+            stale,
+            unauthorized_request_event,
+            request_after,
+            frozenset({"R-INV-01"}),
+        ),
+        TemporalMutationProbe(
+            "mut-heartbeat-unauthorized-authority",
+            stale,
+            unauthorized_heartbeat_event,
+            heartbeat_after,
+            frozenset({"H-INV-01"}),
+        ),
+        TemporalMutationProbe(
             "mut-request-promote-verdict",
             stale,
             request_event,
@@ -238,6 +264,20 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
             requested,
             close_event,
             replace(close_after, reassessment_requests=requested.reassessment_requests),
+            frozenset({"R-INV-03"}),
+        ),
+        TemporalMutationProbe(
+            "mut-reassessment-close-unknown-request",
+            requested,
+            unknown_close_event,
+            requested,
+            frozenset({"R-INV-03"}),
+        ),
+        TemporalMutationProbe(
+            "mut-reassessment-close-already-closed-request",
+            close_after,
+            already_closed_event,
+            close_after,
             frozenset({"R-INV-03"}),
         ),
         TemporalMutationProbe(
