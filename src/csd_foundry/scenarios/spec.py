@@ -33,9 +33,12 @@ class StateExpectation:
     source_state: SourceState | None = None
     assurance: Assurance | None = None
     evidence_statuses: tuple[tuple[str, EvidenceStatus], ...] = ()
+    evidence_outcomes: tuple[tuple[str, str | None], ...] = ()
+    basis_claims: tuple[tuple[str, str], ...] = ()
     current_source_basis_ids: frozenset[str] | None = None
     current_verdict_basis_ids: frozenset[str] | None = None
     history_length: int | None = None
+    history_event_types: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
