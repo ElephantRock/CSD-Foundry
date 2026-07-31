@@ -170,7 +170,8 @@ def _validate_dependency_change(
             violations.append(
                 Violation(
                     invariant,
-                    f"evidence {evidence_id} has {new.status.value}; expected {expected_status.value}",
+                    f"evidence {evidence_id} has {new.status.value}; "
+                    f"expected {expected_status.value}",
                 )
             )
 
@@ -241,9 +242,9 @@ def _validate_reassess(
         violations.append(
             Violation("G-INV-11", "reassessment basis identities do not match the event")
         )
-    for basis_id, expected in expected_new_bases.items():
-        actual = after_bases.get(basis_id)
-        if actual is not None and actual != expected:
+    for basis_id, expected_basis in expected_new_bases.items():
+        actual_basis = after_bases.get(basis_id)
+        if actual_basis is not None and actual_basis != expected_basis:
             violations.append(
                 Violation("G-INV-11", f"reassessment basis {basis_id} differs from the event")
             )
@@ -255,9 +256,7 @@ def _validate_reassess(
             Violation("G-INV-10", "reassessment source state does not match the event")
         )
     if after.assurance is not resulting_assurance:
-        violations.append(
-            Violation("G-INV-10", "reassessment assurance does not match the event")
-        )
+        violations.append(Violation("G-INV-10", "reassessment assurance does not match the event"))
 
     expected_source = frozenset(
         basis_id

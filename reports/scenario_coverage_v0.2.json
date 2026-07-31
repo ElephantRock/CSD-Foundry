@@ -1,0 +1,53 @@
+{
+  "claim_boundary": "This report establishes executable coverage relative to the encoded CSD semantics. It does not establish dependency completeness, external truth, model generalization, or production safety.",
+  "generated_by": "csd-foundry scenarios validate --release v0.1 and csd-foundry mutations evaluate --release v0.1",
+  "mutation_coverage": {
+    "escaped": 0,
+    "invalid_canonical": 0,
+    "kill_rate": 1.0,
+    "killed": 10,
+    "targeted_mutations": 10
+  },
+  "release": "v0.1",
+  "scenario_coverage": {
+    "accepted_scenarios": 21,
+    "failed_cases": 0,
+    "manifest_scenarios": 21,
+    "metadata_errors": [],
+    "observation_cases": 7,
+    "oracle_backed_cases": 20,
+    "registry_scenarios": 21,
+    "rejected_transition_cases": 1
+  },
+  "scenario_ids": [
+    "C-01",
+    "G-01",
+    "G-02",
+    "G-04",
+    "H-01",
+    "L-01",
+    "M-01",
+    "M-02",
+    "M-03",
+    "M-04",
+    "M-05",
+    "M-06",
+    "M-07",
+    "M-08",
+    "M-09",
+    "M-10",
+    "M-11",
+    "M-12",
+    "M-13",
+    "M-14",
+    "M-15"
+  ],
+  "status": "valid",
+  "unmodeled_directly": [
+    "clock-trigger execution",
+    "required-profile structure",
+    "real dependency completeness",
+    "temporal fairness scheduling"
+  ],
+  "version": "0.2.0"
+}

@@ -161,14 +161,16 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
     source_basis_ids = {
         basis_id
         for basis_id in state.current_source_basis_ids
-        if (basis := bases_before.get(basis_id)) is not None
-        and _basis_matches_claim(basis, BasisKind.SOURCE, resulting_source.value)
+        if (existing_source_basis := bases_before.get(basis_id)) is not None
+        and _basis_matches_claim(existing_source_basis, BasisKind.SOURCE, resulting_source.value)
     }
     verdict_basis_ids = {
         basis_id
         for basis_id in state.current_verdict_basis_ids
-        if (basis := bases_before.get(basis_id)) is not None
-        and _basis_matches_claim(basis, BasisKind.VERDICT, resulting_assurance.value)
+        if (existing_verdict_basis := bases_before.get(basis_id)) is not None
+        and _basis_matches_claim(
+            existing_verdict_basis, BasisKind.VERDICT, resulting_assurance.value
+        )
     }
     for basis in event.new_bases:
         if basis.kind is BasisKind.SOURCE:

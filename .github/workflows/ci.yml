@@ -24,4 +24,14 @@ jobs:
       - run: pytest
       - run: python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
       - run: python -m compileall -q src scripts tests
+      - run: csd-foundry scenarios validate --release v0.1
+      - run: csd-foundry mutations evaluate --release v0.1
       - run: csd-foundry demo > /tmp/csd-foundry-demo.json && test -s /tmp/csd-foundry-demo.json
+      - run: pip wheel . --no-deps --wheel-dir /tmp/csd-wheelhouse
+      - name: Validate installed wheel outside the repository
+        run: |
+          python -m venv /tmp/csd-installed
+          /tmp/csd-installed/bin/pip install /tmp/csd-wheelhouse/csd_foundry-*.whl
+          cd /tmp
+          /tmp/csd-installed/bin/csd-foundry scenarios validate --release v0.1 > scenario-report.json
+          test -s scenario-report.json
