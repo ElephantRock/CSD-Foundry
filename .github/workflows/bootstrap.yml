@@ -1,4 +1,4 @@
-name: Materialize validated bootstrap
+name: Diagnose bootstrap chunks
 
 on:
   pull_request:
@@ -7,41 +7,23 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  materialize:
+  diagnose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: web/1-bootstrap-csd-foundry
           fetch-depth: 0
-
-      - name: Reconstruct and verify bootstrap archive
+      - name: Report chunk sizes and digests
         shell: bash
         run: |
           set -euo pipefail
+          wc -c .bootstrap/part*
+          sha256sum .bootstrap/part*
           cat .bootstrap/part* | base64 -d > /tmp/csd-foundry-bootstrap.zip
-          echo "1366004ff87615fdd52fa9ff8d6ad470f1c72b777dbeb72c4697ce881b4dd02e  /tmp/csd-foundry-bootstrap.zip" | sha256sum -c -
-          unzip -tq /tmp/csd-foundry-bootstrap.zip
-
-      - name: Materialize validated project
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/csd-foundry-bootstrap
-          mkdir -p /tmp/csd-foundry-bootstrap
-          unzip -q /tmp/csd-foundry-bootstrap.zip -d /tmp/csd-foundry-bootstrap
-          cp -a /tmp/csd-foundry-bootstrap/CSD-Foundry/. .
-          rm -rf .bootstrap .github/workflows/bootstrap.yml
-
-      - name: Commit materialized project
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat: materialize validated CSD Foundry bootstrap"
-          git push origin HEAD:web/1-bootstrap-csd-foundry
+          sha256sum /tmp/csd-foundry-bootstrap.zip
+          unzip -t /tmp/csd-foundry-bootstrap.zip || true
+          exit 1
