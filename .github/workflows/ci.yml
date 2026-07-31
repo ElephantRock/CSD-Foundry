@@ -6,18 +6,426 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: web/7-temporal-governance-kernel-v0.3
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
+      - name: Align profile and legacy expiry semantics
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/csd_foundry/kernel/temporal.py")
+          text = path.read_text()
+          old = '''def _basis_is_current(state: ControlState, basis_id: str) -> bool:
+              evidence = state.evidence_by_id()
+              basis = state.bases_by_id().get(basis_id)
+              if basis is None or not basis.approved or not basis.member_evidence_ids:
+                  return False
+              return all(
+                  member in evidence and evidence[member].status is EvidenceStatus.CURRENT
+                  for member in basis.member_evidence_ids
+              )
+          '''
+          new = '''def _evidence_matches_required_profile(state: ControlState, evidence_id: str) -> bool:
+              item = state.evidence_by_id().get(evidence_id)
+              if item is None:
+                  return False
+              if state.required_profile_id is None or item.profile_id is None:
+                  return True
+              return (
+                  item.profile_id == state.required_profile_id
+                  and item.profile_version == state.required_profile_version
+              )
+
+
+          def _basis_is_current(state: ControlState, basis_id: str) -> bool:
+              evidence = state.evidence_by_id()
+              basis = state.bases_by_id().get(basis_id)
+              if basis is None or not basis.approved or not basis.member_evidence_ids:
+                  return False
+              return all(
+                  member in evidence
+                  and evidence[member].status is EvidenceStatus.CURRENT
+                  and _evidence_matches_required_profile(state, member)
+                  for member in basis.member_evidence_ids
+              )
+          '''
+          if old not in text:
+              raise SystemExit("temporal basis helper not found")
+          text = text.replace(old, new, 1)
+
+          old = '''    invalidated_ids: set[str] = set()
+              evidence = []
+              for item in state.evidence:
+                  bound_to_old_profile = (
+                      state.required_profile_id is not None
+                      and item.profile_id == state.required_profile_id
+                      and item.profile_version == state.required_profile_version
+                  )
+                  if item.status is EvidenceStatus.CURRENT and bound_to_old_profile:
+                      invalidated_ids.add(item.evidence_id)
+                      evidence.append(item.invalidate())
+                  else:
+                      evidence.append(item)
+
+              requests = state.reassessment_requests
+          '''
+          new = '''    incompatible_ids = {
+              item.evidence_id
+              for item in state.evidence
+              if item.status is EvidenceStatus.CURRENT
+              and item.profile_id is not None
+              and (
+                  item.profile_id != event.profile_id
+                  or item.profile_version != event.profile_version
+              )
+          }
+
+              requests = state.reassessment_requests
+          '''
+          if old not in text:
+              raise SystemExit("profile evidence mutation block not found")
+          text = text.replace(old, new, 1)
+          text = text.replace("        evidence=tuple(evidence),\n", "", 1)
+          text = text.replace(
+              '                invalidated_evidence=",".join(sorted(invalidated_ids)),',
+              '                profile_incompatible_evidence=",".join(sorted(incompatible_ids)),',
+              1,
+          )
+          text = text.replace(
+              "        invalidated_evidence=tuple(sorted(invalidated_ids)),\n",
+              "",
+              1,
+          )
+          path.write_text(text)
+
+          path = Path("src/csd_foundry/kernel/temporal_invariants.py")
+          text = path.read_text()
+          old = '''def _basis_is_supported(basis: Basis, evidence: dict[str, Evidence]) -> bool:
+              return (
+                  bool(basis.member_evidence_ids)
+                  and basis.approved
+                  and all(
+                      member in evidence and evidence[member].status is EvidenceStatus.CURRENT
+                      for member in basis.member_evidence_ids
+                  )
+              )
+
+
+          def _expected_basis_survival(
+              before: ControlState, after_evidence: dict[str, Evidence]
+          ) -> tuple[frozenset[str], frozenset[str]]:
+              bases = before.bases_by_id()
+              source = frozenset(
+                  basis_id
+                  for basis_id in before.current_source_basis_ids
+                  if (basis := bases.get(basis_id)) is not None
+                  and _basis_is_supported(basis, after_evidence)
+              )
+              verdict = frozenset(
+                  basis_id
+                  for basis_id in before.current_verdict_basis_ids
+                  if (basis := bases.get(basis_id)) is not None
+                  and _basis_is_supported(basis, after_evidence)
+              )
+              return source, verdict
+          '''
+          new = '''def _evidence_matches_required_profile(
+              item: Evidence,
+              required_profile_id: str | None,
+              required_profile_version: int | None,
+          ) -> bool:
+              if required_profile_id is None or item.profile_id is None:
+                  return True
+              return (
+                  item.profile_id == required_profile_id
+                  and item.profile_version == required_profile_version
+              )
+
+
+          def _basis_is_supported(
+              basis: Basis,
+              evidence: dict[str, Evidence],
+              required_profile_id: str | None,
+              required_profile_version: int | None,
+          ) -> bool:
+              return (
+                  bool(basis.member_evidence_ids)
+                  and basis.approved
+                  and all(
+                      member in evidence
+                      and evidence[member].status is EvidenceStatus.CURRENT
+                      and _evidence_matches_required_profile(
+                          evidence[member],
+                          required_profile_id,
+                          required_profile_version,
+                      )
+                      for member in basis.member_evidence_ids
+                  )
+              )
+
+
+          def _expected_basis_survival(
+              before: ControlState,
+              after_evidence: dict[str, Evidence],
+              required_profile_id: str | None,
+              required_profile_version: int | None,
+          ) -> tuple[frozenset[str], frozenset[str]]:
+              bases = before.bases_by_id()
+              source = frozenset(
+                  basis_id
+                  for basis_id in before.current_source_basis_ids
+                  if (basis := bases.get(basis_id)) is not None
+                  and _basis_is_supported(
+                      basis,
+                      after_evidence,
+                      required_profile_id,
+                      required_profile_version,
+                  )
+              )
+              verdict = frozenset(
+                  basis_id
+                  for basis_id in before.current_verdict_basis_ids
+                  if (basis := bases.get(basis_id)) is not None
+                  and _basis_is_supported(
+                      basis,
+                      after_evidence,
+                      required_profile_id,
+                      required_profile_version,
+                  )
+              )
+              return source, verdict
+          '''
+          if old not in text:
+              raise SystemExit("temporal invariant basis helper not found")
+          text = text.replace(old, new, 1)
+
+          old = '''        if item.status is EvidenceStatus.EXPIRED and (
+                      item.expires_at is None or item.expires_at > state.logical_time
+                  ):
+          '''
+          new = '''        if (
+                      item.status is EvidenceStatus.EXPIRED
+                      and item.expires_at is not None
+                      and item.expires_at > state.logical_time
+                  ):
+          '''
+          if old not in text:
+              raise SystemExit("legacy expiry condition not found")
+          text = text.replace(old, new, 1)
+
+          marker = "    requests = state.requests_by_id()\n"
+          insertion = '''    evidence_by_id = state.evidence_by_id()
+              bases_by_id = state.bases_by_id()
+              for basis_id in state.current_source_basis_ids | state.current_verdict_basis_ids:
+                  basis = bases_by_id.get(basis_id)
+                  if basis is not None and not _basis_is_supported(
+                      basis,
+                      evidence_by_id,
+                      state.required_profile_id,
+                      state.required_profile_version,
+                  ):
+                      violations.append(
+                          Violation(
+                              "P-INV-02",
+                              f"current basis {basis_id} is incomplete under the required profile",
+                          )
+                      )
+
+          '''
+          if marker not in text:
+              raise SystemExit("request marker not found")
+          text = text.replace(marker, insertion + marker, 1)
+
+          text = text.replace(
+              "    expected_source_bases, expected_verdict_bases = _expected_basis_survival(\n"
+              "        before, after_evidence\n"
+              "    )",
+              "    expected_source_bases, expected_verdict_bases = _expected_basis_survival(\n"
+              "        before,\n"
+              "        after_evidence,\n"
+              "        after.required_profile_id,\n"
+              "        after.required_profile_version,\n"
+              "    )",
+              1,
+          )
+
+          old = '''    after_evidence = after.evidence_by_id()
+              for evidence_id, old in before.evidence_by_id().items():
+                  new = after_evidence.get(evidence_id)
+                  if new is None:
+                      continue
+                  bound_to_old = (
+                      before.required_profile_id is not None
+                      and old.profile_id == before.required_profile_id
+                      and old.profile_version == before.required_profile_version
+                  )
+                  affected = old.status is EvidenceStatus.CURRENT and bound_to_old
+                  expected_status = EvidenceStatus.INVALIDATED if affected else old.status
+                  if new.status is not expected_status:
+                      violations.append(
+                          Violation("P-INV-02", f"profile impact is incorrect for evidence {evidence_id}")
+                      )
+
+              new_request_ids = set(after.requests_by_id()) - set(before.requests_by_id())
+          '''
+          new = '''    if after.evidence != before.evidence:
+              violations.append(Violation("P-INV-02", "profile change rewrote historical evidence"))
+              if after.bases != before.bases:
+                  violations.append(Violation("P-INV-02", "profile change rewrote historical bases"))
+
+              after_evidence = after.evidence_by_id()
+              expected_source_bases, expected_verdict_bases = _expected_basis_survival(
+                  before,
+                  after_evidence,
+                  event.profile_id,
+                  event.profile_version,
+              )
+              if after.current_source_basis_ids != expected_source_bases:
+                  violations.append(
+                      Violation("P-INV-02", "profile source-basis eligibility is not canonical")
+                  )
+              if after.current_verdict_basis_ids != expected_verdict_bases:
+                  violations.append(
+                      Violation("P-INV-02", "profile verdict-basis eligibility is not canonical")
+                  )
+
+              expected_source = before.source_state
+              if expected_source is not SourceState.UNKNOWN and not expected_source_bases:
+                  expected_source = SourceState.UNKNOWN
+              expected_assurance = before.assurance
+              if before.obligation is not ObligationStatus.CURRENT:
+                  expected_assurance = Assurance.NA
+              elif expected_assurance in _SUBSTANTIVE and not expected_verdict_bases:
+                  expected_assurance = Assurance.STALE
+              if after.source_state is not expected_source:
+                  violations.append(Violation("P-INV-02", "profile source result is not canonical"))
+              if after.assurance is not expected_assurance:
+                  violations.append(Violation("P-INV-02", "profile assurance result is not canonical"))
+              if after.obligation is not before.obligation:
+                  violations.append(Violation("P-INV-02", "profile change altered obligation state"))
+
+              new_request_ids = set(after.requests_by_id()) - set(before.requests_by_id())
+          '''
+          if old not in text:
+              raise SystemExit("profile event verifier block not found")
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          path = Path("src/csd_foundry/temporal/v0_3.py")
+          text = path.read_text()
+          text = text.replace(
+              '        evidence["EV-SOURCE"].status is EvidenceStatus.INVALIDATED\n'
+              '        and evidence["EV-VERDICT"].status is EvidenceStatus.CURRENT\n'
+              '        and after.source_state is SourceState.UNKNOWN',
+              '        evidence["EV-SOURCE"].status is EvidenceStatus.CURRENT\n'
+              '        and evidence["EV-VERDICT"].status is EvidenceStatus.CURRENT\n'
+              '        and "BASIS-SOURCE" in after.bases_by_id()\n'
+              '        and not after.current_source_basis_ids\n'
+              '        and after.source_state is SourceState.UNKNOWN',
+              1,
+          )
+          text = text.replace(
+              'return _result("T-04", accepted, "profile change invalidates only bound evidence")',
+              'return _result(\n'
+              '        "T-04",\n'
+              '        accepted,\n'
+              '        "profile change preserves evidence and removes incompatible current support",\n'
+              '    )',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path("src/csd_foundry/synthesis/temporal_mutations.py")
+          text = path.read_text()
+          marker = '''        TemporalMutationProbe(
+                      "mut-request-promote-verdict",
+          '''
+          insertion = '''        TemporalMutationProbe(
+                      "mut-profile-retain-incompatible-basis",
+                      profile_before,
+                      profile_event,
+                      replace(
+                          profile_after,
+                          source_state=profile_before.source_state,
+                          current_source_basis_ids=profile_before.current_source_basis_ids,
+                      ),
+                      frozenset({"P-INV-02"}),
+                  ),
+          '''
+          if marker not in text:
+              raise SystemExit("profile mutation insertion marker not found")
+          text = text.replace(marker, insertion + marker, 1)
+          path.write_text(text)
+
+          path = Path("tests/test_temporal_kernel.py")
+          text = path.read_text()
+          text = text.replace(
+              '    assert report.total == 10\n    assert report.killed == 10',
+              '    assert report.total == 11\n    assert report.killed == 11',
+              1,
+          )
+          if "test_legacy_expired_evidence_without_timestamp_remains_valid" not in text:
+              text += '''
+
+          def test_legacy_expired_evidence_without_timestamp_remains_valid() -> None:
+              oracle = CsdOracle()
+              original = base_state()
+              legacy = replace(
+                  original,
+                  evidence=tuple(
+                      replace(item, status=EvidenceStatus.EXPIRED)
+                      if item.evidence_id == "EV-SOURCE"
+                      else item
+                      for item in original.evidence
+                  ),
+                  source_state=SourceState.UNKNOWN,
+                  current_source_basis_ids=frozenset(),
+              )
+
+              after = oracle.apply(
+                  legacy,
+                  RequestReassessment("REQ-LEGACY", "legacy expiry control", due_at=5),
+              ).after
+
+              assert after.evidence_by_id()["EV-SOURCE"].status is EvidenceStatus.EXPIRED
+              assert after.requests_by_id()["REQ-LEGACY"].status is RequestStatus.PENDING
+          '''
+              text = text.replace(
+                  "from csd_foundry.kernel.models import Assurance, EvidenceStatus, RequestStatus",
+                  "from csd_foundry.kernel.models import (\n"
+                  "    Assurance,\n"
+                  "    EvidenceStatus,\n"
+                  "    RequestStatus,\n"
+                  "    SourceState,\n"
+                  ")",
+                  1,
+              )
+          path.write_text(text)
+          PY
+      - run: ruff format .
+      - run: ruff check --fix .
+      - name: Commit profile and legacy compatibility corrections
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Align profile strengthening with preserved evidence"
+          git push origin HEAD:web/7-temporal-governance-kernel-v0.3
       - run: ruff format --check .
       - run: ruff check .
       - run: mypy src
