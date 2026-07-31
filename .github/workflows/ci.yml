@@ -20,8 +20,24 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
+      - name: Split the remaining long diagnostic
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/csd_foundry/scenarios/runner.py")
+          text = path.read_text()
+          text = text.replace(
+              'f"sequence {group_id} uses step {step}; expected contiguous step {expected_step}"',
+              'f"sequence {group_id} uses step {step}; expected contiguous "\n'
+              'f"step {expected_step}"',
+              1,
+          )
+          path.write_text(text)
+          PY
       - run: ruff format .
-      - name: Commit deterministic formatting
+      - run: ruff check --fix .
+      - name: Commit deterministic lint corrections
         run: |
           if git diff --quiet; then
             exit 0
@@ -29,7 +45,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Apply final deterministic formatting"
+          git commit -m "Apply final lint corrections"
           git push origin HEAD:web/5-scenario-registry-v0.2
       - run: ruff format --check .
       - run: ruff check .
