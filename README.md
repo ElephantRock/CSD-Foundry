@@ -69,17 +69,17 @@ checks deterministic replay, and verifies exact event consequences.
 ## Current coverage
 
 ```text
-Manifest scenarios:                  21
-Executable registry scenarios:       21
-Accepted registry scenarios:         21
-Legacy targeted mutations killed:   10 / 10
+Manifest scenarios:                   21
+Executable registry scenarios:        21
+Accepted registry scenarios:          21
+Legacy targeted mutations killed:    10 / 10
 
-Temporal/governance scenarios:       10
-Accepted temporal scenarios:         10
-Identical temporal replays:           10
-Temporal targeted mutations killed: 10 / 10
-Temporal mutation escapes:             0
-Valid canonical trajectories rejected: 0
+Temporal/governance scenarios:        10
+Accepted temporal scenarios:          10
+Identical temporal replays:            10
+Temporal targeted mutations killed:  11 / 11
+Temporal mutation escapes:              0
+Valid canonical trajectories rejected:  0
 ```
 
 Machine-readable evidence is committed at:
@@ -95,15 +95,18 @@ represents:
 
 - evidence issuance and governed expiry;
 - required-profile identity and version;
-- profile-scoped invalidation;
+- profile-scoped current-basis eligibility while preserving historical evidence and bases;
 - pending and closed reassessment requests;
 - heartbeat interval, last receipt, and deadline;
 - deterministic demotion after evidence expiry or a missed heartbeat;
 - named request closure during governed reassessment;
-- append-only audit history and identical replay from identical inputs.
+- append-only audit history and identical replay from identical inputs;
+- legacy expired evidence whose historical source did not record an expiry timestamp.
 
 Heartbeat receipt and reassessment requests cannot promote source state or assurance. Expired
-or invalidated evidence cannot be restored under the same identity.
+or invalidated evidence cannot be restored under the same identity. A profile change does not
+rewrite or invalidate historical evidence; it recomputes which preserved bases remain eligible
+for the current required profile.
 
 ## Project layout
 
