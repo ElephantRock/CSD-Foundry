@@ -242,9 +242,9 @@ def _validate_reassess(
         violations.append(
             Violation("G-INV-11", "reassessment basis identities do not match the event")
         )
-    for basis_id, expected in expected_new_bases.items():
-        actual = after_bases.get(basis_id)
-        if actual is not None and actual != expected:
+    for basis_id, expected_basis in expected_new_bases.items():
+        actual_basis = after_bases.get(basis_id)
+        if actual_basis is not None and actual_basis != expected_basis:
             violations.append(
                 Violation("G-INV-11", f"reassessment basis {basis_id} differs from the event")
             )
