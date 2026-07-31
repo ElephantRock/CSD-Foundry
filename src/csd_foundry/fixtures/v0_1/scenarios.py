@@ -69,9 +69,7 @@ def m09() -> tuple[ControlState, Reassess]:
                 dependencies=frozenset({"DEP-FW-POLICY-7"}),
             ),
         ),
-        bases=(
-            Basis("BASIS-N17-01", BasisKind.SOURCE, "connected", frozenset({"EV-N17-001"})),
-        ),
+        bases=(Basis("BASIS-N17-01", BasisKind.SOURCE, "connected", frozenset({"EV-N17-001"})),),
         history=(AuditEvent.create("InvalidateEvidence", evidence_id="EV-N17-001"),),
     )
     event = Reassess(

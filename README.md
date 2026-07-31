@@ -52,7 +52,7 @@ python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
 ```text
 src/csd_foundry/kernel/       State, events, transitions, invariants, oracle
 src/csd_foundry/synthesis/    Mutation operators and kill-matrix evaluation
-fixtures/v0_1/                Executable regression fixtures
+src/csd_foundry/fixtures/v0_1/                Executable regression fixtures
 scripts/                      Seed generation and validation utilities
 data/seed/v0.1/               Immutable v0.1 seed release
 reports/                      Future benchmark and decision records

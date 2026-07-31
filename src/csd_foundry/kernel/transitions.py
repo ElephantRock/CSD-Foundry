@@ -38,10 +38,7 @@ def apply_dependency_change(
     invalidated_ids: set[str] = set()
     updated_evidence = []
     for item in state.evidence:
-        if (
-            item.status is EvidenceStatus.CURRENT
-            and event.dependency_id in item.dependencies
-        ):
+        if item.status is EvidenceStatus.CURRENT and event.dependency_id in item.dependencies:
             invalidated_ids.add(item.evidence_id)
             updated_evidence.append(item.invalidate())
         else:
@@ -72,9 +69,11 @@ def apply_dependency_change(
     resulting_assurance = state.assurance
     if state.obligation is not ObligationStatus.CURRENT:
         resulting_assurance = Assurance.NA
-    elif state.assurance in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}:
-        if not verdict_survivors:
-            resulting_assurance = Assurance.STALE
+    elif (
+        state.assurance in {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}
+        and not verdict_survivors
+    ):
+        resulting_assurance = Assurance.STALE
 
     event_record = AuditEvent.create(
         "DependencyChange",
@@ -91,11 +90,7 @@ def apply_dependency_change(
     )
 
     preserved = tuple(
-        sorted(
-            item.evidence_id
-            for item in post.evidence
-            if item.status is EvidenceStatus.CURRENT
-        )
+        sorted(item.evidence_id for item in post.evidence if item.status is EvidenceStatus.CURRENT)
     )
     surviving = tuple(sorted(source_survivors | verdict_survivors))
     trace = TransitionTrace(
@@ -181,9 +176,7 @@ def apply_reassess(state: ControlState, event: Reassess) -> tuple[ControlState, 
     return post, trace
 
 
-def apply_retire(
-    state: ControlState, event: RetireControl
-) -> tuple[ControlState, TransitionTrace]:
+def apply_retire(state: ControlState, event: RetireControl) -> tuple[ControlState, TransitionTrace]:
     if event.authority != "I3":
         raise TransitionError("retirement requires I3 authority")
     if event.retirement_evidence.evidence_id in state.evidence_by_id():

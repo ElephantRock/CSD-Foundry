@@ -39,3 +39,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.11"
 strict = true
 packages = ["csd_foundry"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/generate_csd_reasoning_seed.py" = ["E501"]

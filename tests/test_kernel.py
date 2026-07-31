@@ -1,6 +1,6 @@
+from csd_foundry.fixtures.v0_1.scenarios import m01, m06, m09
 from csd_foundry.kernel.models import Assurance, EvidenceStatus, SourceState
 from csd_foundry.kernel.oracle import CsdOracle
-from fixtures.v0_1.scenarios import m01, m06, m09
 
 
 def test_m01_revocation_demotes_without_promotion() -> None:

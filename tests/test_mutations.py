@@ -1,3 +1,4 @@
+from csd_foundry.fixtures.v0_1.scenarios import m01
 from csd_foundry.kernel.oracle import CsdOracle
 from csd_foundry.synthesis.kill_matrix import evaluate
 from csd_foundry.synthesis.mutations import (
@@ -6,7 +7,6 @@ from csd_foundry.synthesis.mutations import (
     reactivate_evidence,
     retain_invalid_basis,
 )
-from fixtures.v0_1.scenarios import m01
 
 
 def test_initial_mutation_families_are_killed() -> None:

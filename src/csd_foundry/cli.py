@@ -16,7 +16,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "demo":
-        from fixtures.v0_1.scenarios import m01
+        from csd_foundry.fixtures.v0_1.scenarios import m01
 
         state, event = m01()
         result = CsdOracle().apply(state, event)

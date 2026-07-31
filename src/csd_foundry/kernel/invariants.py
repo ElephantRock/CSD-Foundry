@@ -99,11 +99,11 @@ def validate_transition(before: ControlState, after: ControlState) -> tuple[Viol
 
     before_bases = before.bases_by_id()
     after_bases = after.bases_by_id()
-    for basis_id, old in before_bases.items():
-        new = after_bases.get(basis_id)
-        if new is None:
+    for basis_id, old_basis in before_bases.items():
+        new_basis = after_bases.get(basis_id)
+        if new_basis is None:
             violations.append(Violation("INV-19", f"basis {basis_id} was deleted"))
-        elif old != new:
+        elif old_basis != new_basis:
             violations.append(Violation("G-INV-11", f"basis {basis_id} was rewritten"))
 
     return tuple(violations)
