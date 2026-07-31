@@ -20,24 +20,20 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
-      - name: Align profile and legacy expiry semantics
+      - name: Apply profile and legacy compatibility semantics
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
+          def replace_function(text: str, start: str, end: str, replacement: str) -> str:
+              start_index = text.index(start)
+              end_index = text.index(end, start_index)
+              return text[:start_index] + replacement + "\n\n" + text[end_index:]
 
           path = Path("src/csd_foundry/kernel/temporal.py")
           text = path.read_text()
-          old = '''def _basis_is_current(state: ControlState, basis_id: str) -> bool:
-              evidence = state.evidence_by_id()
-              basis = state.bases_by_id().get(basis_id)
-              if basis is None or not basis.approved or not basis.member_evidence_ids:
-                  return False
-              return all(
-                  member in evidence and evidence[member].status is EvidenceStatus.CURRENT
-                  for member in basis.member_evidence_ids
-              )
-          '''
-          new = '''def _evidence_matches_required_profile(state: ControlState, evidence_id: str) -> bool:
+          helper = '''def _evidence_matches_required_profile(state: ControlState, evidence_id: str) -> bool:
               item = state.evidence_by_id().get(evidence_id)
               if item is None:
                   return False
@@ -61,87 +57,123 @@ jobs:
                   for member in basis.member_evidence_ids
               )
           '''
-          if old not in text:
-              raise SystemExit("temporal basis helper not found")
-          text = text.replace(old, new, 1)
-
-          old = '''    invalidated_ids: set[str] = set()
-              evidence = []
-              for item in state.evidence:
-                  bound_to_old_profile = (
-                      state.required_profile_id is not None
-                      and item.profile_id == state.required_profile_id
-                      and item.profile_version == state.required_profile_version
-                  )
-                  if item.status is EvidenceStatus.CURRENT and bound_to_old_profile:
-                      invalidated_ids.add(item.evidence_id)
-                      evidence.append(item.invalidate())
-                  else:
-                      evidence.append(item)
-
-              requests = state.reassessment_requests
-          '''
-          new = '''    incompatible_ids = {
-              item.evidence_id
-              for item in state.evidence
-              if item.status is EvidenceStatus.CURRENT
-              and item.profile_id is not None
-              and (
-                  item.profile_id != event.profile_id
-                  or item.profile_version != event.profile_version
-              )
-          }
-
-              requests = state.reassessment_requests
-          '''
-          if old not in text:
-              raise SystemExit("profile evidence mutation block not found")
-          text = text.replace(old, new, 1)
-          text = text.replace("        evidence=tuple(evidence),\n", "", 1)
-          text = text.replace(
-              '                invalidated_evidence=",".join(sorted(invalidated_ids)),',
-              '                profile_incompatible_evidence=",".join(sorted(incompatible_ids)),',
-              1,
+          text = replace_function(
+              text,
+              "def _basis_is_current",
+              "def _surviving_bases",
+              helper,
           )
-          text = text.replace(
-              "        invalidated_evidence=tuple(sorted(invalidated_ids)),\n",
-              "",
-              1,
+
+          profile_function = '''def apply_profile_change(
+              state: ControlState, event: ProfileChange
+          ) -> tuple[ControlState, TransitionTrace]:
+              if event.authority != "I3":
+                  raise TemporalTransitionError("profile change requires I3 authority")
+              if not event.profile_id or event.profile_version <= 0:
+                  raise TemporalTransitionError("profile identity and positive version are required")
+              if (
+                  state.required_profile_id == event.profile_id
+                  and state.required_profile_version is not None
+                  and event.profile_version <= state.required_profile_version
+              ):
+                  raise TemporalTransitionError("profile version must advance monotonically")
+              if (event.request_id is None) != (event.request_due_at is None):
+                  raise TemporalTransitionError(
+                      "profile request identity and due time must be supplied together"
+                  )
+
+              incompatible_ids = {
+                  item.evidence_id
+                  for item in state.evidence
+                  if item.status is EvidenceStatus.CURRENT
+                  and item.profile_id is not None
+                  and (
+                      item.profile_id != event.profile_id
+                      or item.profile_version != event.profile_version
+                  )
+              }
+
+              requests = state.reassessment_requests
+              if event.request_id is not None and event.request_due_at is not None:
+                  if event.request_id in state.requests_by_id():
+                      raise TemporalTransitionError("profile change request identity already exists")
+                  request = _request_from_event(
+                      RequestReassessment(
+                          request_id=event.request_id,
+                          reason="required profile changed",
+                          due_at=event.request_due_at,
+                          authority=event.authority,
+                      ),
+                      state.logical_time,
+                  )
+                  requests = (*requests, request)
+
+              interim = replace(
+                  state,
+                  required_profile_id=event.profile_id,
+                  required_profile_version=event.profile_version,
+                  reassessment_requests=requests,
+              )
+              source, assurance, source_bases, verdict_bases = _canonical_claims(state, interim)
+              removed = (
+                  (state.current_source_basis_ids | state.current_verdict_basis_ids)
+                  - source_bases
+                  - verdict_bases
+              )
+              post = replace(
+                  interim,
+                  source_state=source,
+                  assurance=assurance,
+                  current_source_basis_ids=source_bases,
+                  current_verdict_basis_ids=verdict_bases,
+                  history=(
+                      *state.history,
+                      AuditEvent.create(
+                          "ProfileChange",
+                          authority=event.authority,
+                          profile_id=event.profile_id,
+                          profile_version=str(event.profile_version),
+                          profile_incompatible_evidence=",".join(sorted(incompatible_ids)),
+                          request_id=event.request_id or "none",
+                      ),
+                  ),
+              )
+              trace = TransitionTrace(
+                  event_type="ProfileChange",
+                  preserved_evidence=tuple(
+                      sorted(
+                          item.evidence_id
+                          for item in post.evidence
+                          if item.status is EvidenceStatus.CURRENT
+                      )
+                  ),
+                  removed_bases=tuple(sorted(removed)),
+                  surviving_bases=tuple(sorted(source_bases | verdict_bases)),
+                  previous_source_state=state.source_state.value,
+                  resulting_source_state=post.source_state.value,
+                  previous_assurance=state.assurance.value,
+                  resulting_assurance=post.assurance.value,
+                  forbidden_inferences=("profile-change based substantive promotion",),
+                  rules_fired=("P-INV-01", "P-INV-02", "P-INV-03"),
+                  next_governed_step=(
+                      "complete the profile-change reassessment request"
+                      if event.request_id is not None
+                      else "issue a governed reassessment request if current support was removed"
+                  ),
+              )
+              return post, trace
+          '''
+          text = replace_function(
+              text,
+              "def apply_profile_change",
+              "def apply_request_reassessment",
+              profile_function,
           )
           path.write_text(text)
 
           path = Path("src/csd_foundry/kernel/temporal_invariants.py")
           text = path.read_text()
-          old = '''def _basis_is_supported(basis: Basis, evidence: dict[str, Evidence]) -> bool:
-              return (
-                  bool(basis.member_evidence_ids)
-                  and basis.approved
-                  and all(
-                      member in evidence and evidence[member].status is EvidenceStatus.CURRENT
-                      for member in basis.member_evidence_ids
-                  )
-              )
-
-
-          def _expected_basis_survival(
-              before: ControlState, after_evidence: dict[str, Evidence]
-          ) -> tuple[frozenset[str], frozenset[str]]:
-              bases = before.bases_by_id()
-              source = frozenset(
-                  basis_id
-                  for basis_id in before.current_source_basis_ids
-                  if (basis := bases.get(basis_id)) is not None
-                  and _basis_is_supported(basis, after_evidence)
-              )
-              verdict = frozenset(
-                  basis_id
-                  for basis_id in before.current_verdict_basis_ids
-                  if (basis := bases.get(basis_id)) is not None
-                  and _basis_is_supported(basis, after_evidence)
-              )
-              return source, verdict
-          '''
-          new = '''def _evidence_matches_required_profile(
+          support_helpers = '''def _evidence_matches_required_profile(
               item: Evidence,
               required_profile_id: str | None,
               required_profile_version: int | None,
@@ -207,26 +239,28 @@ jobs:
               )
               return source, verdict
           '''
-          if old not in text:
-              raise SystemExit("temporal invariant basis helper not found")
-          text = text.replace(old, new, 1)
+          text = replace_function(
+              text,
+              "def _basis_is_supported",
+              "def _validate_profile_pair",
+              support_helpers,
+          )
 
-          old = '''        if item.status is EvidenceStatus.EXPIRED and (
-                      item.expires_at is None or item.expires_at > state.logical_time
-                  ):
-          '''
-          new = '''        if (
-                      item.status is EvidenceStatus.EXPIRED
-                      and item.expires_at is not None
-                      and item.expires_at > state.logical_time
-                  ):
-          '''
-          if old not in text:
-              raise SystemExit("legacy expiry condition not found")
-          text = text.replace(old, new, 1)
+          text = re.sub(
+              r"        if item\.status is EvidenceStatus\.EXPIRED and \(\n"
+              r"            item\.expires_at is None or item\.expires_at > state\.logical_time\n"
+              r"        \):",
+              "        if (\n"
+              "            item.status is EvidenceStatus.EXPIRED\n"
+              "            and item.expires_at is not None\n"
+              "            and item.expires_at > state.logical_time\n"
+              "        ):",
+              text,
+              count=1,
+          )
 
           marker = "    requests = state.requests_by_id()\n"
-          insertion = '''    evidence_by_id = state.evidence_by_id()
+          state_profile_check = '''    evidence_by_id = state.evidence_by_id()
               bases_by_id = state.bases_by_id()
               for basis_id in state.current_source_basis_ids | state.current_verdict_basis_ids:
                   basis = bases_by_id.get(basis_id)
@@ -245,43 +279,38 @@ jobs:
 
           '''
           if marker not in text:
-              raise SystemExit("request marker not found")
-          text = text.replace(marker, insertion + marker, 1)
+              raise SystemExit("temporal state request marker not found")
+          text = text.replace(marker, state_profile_check + marker, 1)
 
-          text = text.replace(
-              "    expected_source_bases, expected_verdict_bases = _expected_basis_survival(\n"
-              "        before, after_evidence\n"
-              "    )",
+          text = re.sub(
+              r"    expected_source_bases, expected_verdict_bases = _expected_basis_survival\(\n"
+              r"        before, after_evidence\n"
+              r"    \)",
               "    expected_source_bases, expected_verdict_bases = _expected_basis_survival(\n"
               "        before,\n"
               "        after_evidence,\n"
               "        after.required_profile_id,\n"
               "        after.required_profile_version,\n"
               "    )",
-              1,
+              text,
+              count=1,
           )
 
-          old = '''    after_evidence = after.evidence_by_id()
-              for evidence_id, old in before.evidence_by_id().items():
-                  new = after_evidence.get(evidence_id)
-                  if new is None:
-                      continue
-                  bound_to_old = (
-                      before.required_profile_id is not None
-                      and old.profile_id == before.required_profile_id
-                      and old.profile_version == before.required_profile_version
+          profile_validator = '''def _validate_profile_change(
+              before: ControlState, event: ProfileChange, after: ControlState
+          ) -> list[Violation]:
+              violations: list[Violation] = []
+              if after.logical_time != before.logical_time:
+                  violations.append(Violation("P-INV-01", "profile change altered logical time"))
+              if (
+                  after.required_profile_id != event.profile_id
+                  or after.required_profile_version != event.profile_version
+              ):
+                  violations.append(Violation("P-INV-01", "profile result does not match the event"))
+              if after.evidence != before.evidence:
+                  violations.append(
+                      Violation("P-INV-02", "profile change rewrote historical evidence")
                   )
-                  affected = old.status is EvidenceStatus.CURRENT and bound_to_old
-                  expected_status = EvidenceStatus.INVALIDATED if affected else old.status
-                  if new.status is not expected_status:
-                      violations.append(
-                          Violation("P-INV-02", f"profile impact is incorrect for evidence {evidence_id}")
-                      )
-
-              new_request_ids = set(after.requests_by_id()) - set(before.requests_by_id())
-          '''
-          new = '''    if after.evidence != before.evidence:
-              violations.append(Violation("P-INV-02", "profile change rewrote historical evidence"))
               if after.bases != before.bases:
                   violations.append(Violation("P-INV-02", "profile change rewrote historical bases"))
 
@@ -314,36 +343,78 @@ jobs:
               if after.assurance is not expected_assurance:
                   violations.append(Violation("P-INV-02", "profile assurance result is not canonical"))
               if after.obligation is not before.obligation:
-                  violations.append(Violation("P-INV-02", "profile change altered obligation state"))
+                  violations.append(
+                      Violation("P-INV-02", "profile change altered obligation state")
+                  )
 
               new_request_ids = set(after.requests_by_id()) - set(before.requests_by_id())
+              expected_request_ids = {event.request_id} if event.request_id is not None else set()
+              if new_request_ids != expected_request_ids:
+                  violations.append(
+                      Violation("P-INV-03", "profile request identities do not match the event")
+                  )
+              if event.request_id is not None and event.request_due_at is not None:
+                  expected_request = ReassessmentRequest(
+                      request_id=event.request_id,
+                      reason="required profile changed",
+                      requested_at=before.logical_time,
+                      due_at=event.request_due_at,
+                  )
+                  if after.requests_by_id().get(event.request_id) != expected_request:
+                      violations.append(
+                          Violation("P-INV-03", "profile reassessment request is not canonical")
+                      )
+              if after.heartbeat != before.heartbeat:
+                  violations.append(Violation("H-INV-01", "profile change altered heartbeat state"))
+              return violations
           '''
-          if old not in text:
-              raise SystemExit("profile event verifier block not found")
-          text = text.replace(old, new, 1)
+          text = replace_function(
+              text,
+              "def _validate_profile_change",
+              "def _validate_request",
+              profile_validator,
+          )
           path.write_text(text)
 
           path = Path("src/csd_foundry/temporal/v0_3.py")
           text = path.read_text()
-          text = text.replace(
-              '        evidence["EV-SOURCE"].status is EvidenceStatus.INVALIDATED\n'
-              '        and evidence["EV-VERDICT"].status is EvidenceStatus.CURRENT\n'
-              '        and after.source_state is SourceState.UNKNOWN',
-              '        evidence["EV-SOURCE"].status is EvidenceStatus.CURRENT\n'
-              '        and evidence["EV-VERDICT"].status is EvidenceStatus.CURRENT\n'
-              '        and "BASIS-SOURCE" in after.bases_by_id()\n'
-              '        and not after.current_source_basis_ids\n'
-              '        and after.source_state is SourceState.UNKNOWN',
-              1,
-          )
-          text = text.replace(
-              'return _result("T-04", accepted, "profile change invalidates only bound evidence")',
-              'return _result(\n'
-              '        "T-04",\n'
-              '        accepted,\n'
-              '        "profile change preserves evidence and removes incompatible current support",\n'
-              '    )',
-              1,
+          scenario = '''def _t04_profile_change_is_scoped() -> TemporalScenarioResult:
+              state = base_state(profile_id="PROFILE-A", profile_version=1)
+              after = (
+                  CsdOracle()
+                  .apply(
+                      state,
+                      ProfileChange(
+                          "PROFILE-A",
+                          2,
+                          request_id="REQ-PROFILE-A-2",
+                          request_due_at=10,
+                      ),
+                  )
+                  .after
+              )
+              evidence = after.evidence_by_id()
+              request = after.requests_by_id()["REQ-PROFILE-A-2"]
+              accepted = (
+                  evidence["EV-SOURCE"].status is EvidenceStatus.CURRENT
+                  and evidence["EV-VERDICT"].status is EvidenceStatus.CURRENT
+                  and "BASIS-SOURCE" in after.bases_by_id()
+                  and not after.current_source_basis_ids
+                  and after.source_state is SourceState.UNKNOWN
+                  and after.assurance is Assurance.PASS
+                  and request.status is RequestStatus.PENDING
+              )
+              return _result(
+                  "T-04",
+                  accepted,
+                  "profile change preserves evidence and removes incompatible current support",
+              )
+          '''
+          text = replace_function(
+              text,
+              "def _t04_profile_change_is_scoped",
+              "def _t05_request_preserves_verdict",
+              scenario,
           )
           path.write_text(text)
 
@@ -372,8 +443,18 @@ jobs:
           path = Path("tests/test_temporal_kernel.py")
           text = path.read_text()
           text = text.replace(
-              '    assert report.total == 10\n    assert report.killed == 10',
-              '    assert report.total == 11\n    assert report.killed == 11',
+              "from csd_foundry.kernel.models import Assurance, EvidenceStatus, RequestStatus",
+              "from csd_foundry.kernel.models import (\n"
+              "    Assurance,\n"
+              "    EvidenceStatus,\n"
+              "    RequestStatus,\n"
+              "    SourceState,\n"
+              ")",
+              1,
+          )
+          text = text.replace(
+              "    assert report.total == 10\n    assert report.killed == 10",
+              "    assert report.total == 11\n    assert report.killed == 11",
               1,
           )
           if "test_legacy_expired_evidence_without_timestamp_remains_valid" not in text:
@@ -402,16 +483,6 @@ jobs:
               assert after.evidence_by_id()["EV-SOURCE"].status is EvidenceStatus.EXPIRED
               assert after.requests_by_id()["REQ-LEGACY"].status is RequestStatus.PENDING
           '''
-              text = text.replace(
-                  "from csd_foundry.kernel.models import Assurance, EvidenceStatus, RequestStatus",
-                  "from csd_foundry.kernel.models import (\n"
-                  "    Assurance,\n"
-                  "    EvidenceStatus,\n"
-                  "    RequestStatus,\n"
-                  "    SourceState,\n"
-                  ")",
-                  1,
-              )
           path.write_text(text)
           PY
       - run: ruff format .
