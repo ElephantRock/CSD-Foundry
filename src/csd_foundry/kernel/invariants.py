@@ -255,9 +255,7 @@ def _validate_reassess(
             Violation("G-INV-10", "reassessment source state does not match the event")
         )
     if after.assurance is not resulting_assurance:
-        violations.append(
-            Violation("G-INV-10", "reassessment assurance does not match the event")
-        )
+        violations.append(Violation("G-INV-10", "reassessment assurance does not match the event"))
 
     expected_source = frozenset(
         basis_id
