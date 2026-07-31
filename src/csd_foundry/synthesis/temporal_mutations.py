@@ -15,9 +15,12 @@ from csd_foundry.kernel.events import (
 from csd_foundry.kernel.invariants import validate_event_transition, validate_transition
 from csd_foundry.kernel.models import (
     Assurance,
+    Basis,
+    BasisKind,
     ControlState,
     EvidenceStatus,
     HeartbeatState,
+    RequestStatus,
 )
 from csd_foundry.kernel.oracle import CsdOracle
 from csd_foundry.kernel.temporal import is_temporal_event
@@ -99,6 +102,12 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
     expiry_before = base_state(source_expires_at=5)
     expiry_event = AdvanceClock(5)
     expiry_after = oracle.apply(expiry_before, expiry_event).after
+    manufactured_clock_basis = Basis(
+        "BASIS-CLOCK-MANUFACTURED",
+        BasisKind.SOURCE,
+        "connected",
+        frozenset({"EV-SOURCE"}),
+    )
 
     early_event = AdvanceClock(4)
     early_after = oracle.apply(expiry_before, early_event).after
@@ -124,6 +133,24 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
     request_event = RequestReassessment("REQ-MUT", "mutation control", due_at=8)
     request_after = oracle.apply(stale, request_event).after
     unauthorized_request_event = replace(request_event, authority="I2")
+    existing_request_state = oracle.apply(
+        base_state(),
+        RequestReassessment("REQ-EXISTING", "existing work", due_at=7),
+    ).after
+    second_request_event = RequestReassessment(
+        "REQ-SECOND",
+        "second work",
+        due_at=8,
+    )
+    second_request_after = oracle.apply(
+        existing_request_state,
+        second_request_event,
+    ).after
+    silently_closed_existing = replace(
+        existing_request_state.reassessment_requests[0],
+        status=RequestStatus.CLOSED,
+        closed_at=existing_request_state.logical_time,
+    )
 
     heartbeat_event = RecordHeartbeat(at_time=0, interval=5)
     heartbeat_after = oracle.apply(stale, heartbeat_event).after
@@ -153,6 +180,23 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
             expiry_event,
             _replace_evidence_status(expiry_after, "EV-SOURCE", EvidenceStatus.CURRENT),
             frozenset({"T-INV-02"}),
+        ),
+        TemporalMutationProbe(
+            "mut-clock-manufacture-basis",
+            expiry_before,
+            expiry_event,
+            replace(
+                expiry_after,
+                bases=(*expiry_after.bases, manufactured_clock_basis),
+            ),
+            frozenset({"T-INV-03"}),
+        ),
+        TemporalMutationProbe(
+            "mut-clock-omit-audit",
+            expiry_before,
+            expiry_event,
+            replace(expiry_after, history=expiry_before.history),
+            frozenset({"T-INV-04"}),
         ),
         TemporalMutationProbe(
             "mut-temporal-expire-early",
@@ -206,6 +250,13 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
             frozenset({"P-INV-02"}),
         ),
         TemporalMutationProbe(
+            "mut-profile-omit-audit",
+            profile_before,
+            profile_event,
+            replace(profile_after, history=profile_before.history),
+            frozenset({"P-INV-04"}),
+        ),
+        TemporalMutationProbe(
             "mut-profile-unauthorized-authority",
             profile_before,
             unauthorized_profile_event,
@@ -227,6 +278,26 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
             frozenset({"H-INV-01"}),
         ),
         TemporalMutationProbe(
+            "mut-request-rewrite-existing-request",
+            existing_request_state,
+            second_request_event,
+            replace(
+                second_request_after,
+                reassessment_requests=(
+                    silently_closed_existing,
+                    second_request_after.reassessment_requests[1],
+                ),
+            ),
+            frozenset({"R-INV-01"}),
+        ),
+        TemporalMutationProbe(
+            "mut-request-omit-audit",
+            stale,
+            request_event,
+            replace(request_after, history=stale.history),
+            frozenset({"R-INV-04"}),
+        ),
+        TemporalMutationProbe(
             "mut-request-promote-verdict",
             stale,
             request_event,
@@ -236,6 +307,13 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
                 current_verdict_basis_ids=frozenset({"BASIS-VERDICT"}),
             ),
             frozenset({"R-INV-02"}),
+        ),
+        TemporalMutationProbe(
+            "mut-heartbeat-omit-audit",
+            stale,
+            heartbeat_event,
+            replace(heartbeat_after, history=stale.history),
+            frozenset({"H-INV-03"}),
         ),
         TemporalMutationProbe(
             "mut-heartbeat-promote-verdict",
@@ -258,6 +336,13 @@ def build_probes() -> tuple[TemporalMutationProbe, ...]:
                 current_verdict_basis_ids=frozenset({"BASIS-VERDICT"}),
             ),
             frozenset({"T-INV-06"}),
+        ),
+        TemporalMutationProbe(
+            "mut-reassessment-omit-audit",
+            requested,
+            close_event,
+            replace(close_after, history=requested.history),
+            frozenset({"R-INV-04"}),
         ),
         TemporalMutationProbe(
             "mut-reassessment-omit-request-closure",

@@ -30,8 +30,8 @@ def test_temporal_mutation_policy_kills_every_probe() -> None:
     report = evaluate_mutations("v0.3")
 
     assert report.success, report.to_dict()
-    assert report.total == 16
-    assert report.killed == 16
+    assert report.total == 23
+    assert report.killed == 23
     assert report.escaped == 0
     assert report.invalid_canonical == 0
     assert {"T-INV-01", "T-INV-02", "R-INV-03"} <= set(report.covered_invariants)

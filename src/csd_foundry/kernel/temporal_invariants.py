@@ -13,6 +13,7 @@ from csd_foundry.kernel.events import (
 from csd_foundry.kernel.invariants import Violation
 from csd_foundry.kernel.models import (
     Assurance,
+    AuditEvent,
     Basis,
     ControlState,
     Evidence,
@@ -24,6 +25,17 @@ from csd_foundry.kernel.models import (
 )
 
 _SUBSTANTIVE = {Assurance.PASS, Assurance.PARTIAL, Assurance.FAIL}
+
+
+def _validate_exact_audit(
+    before: ControlState,
+    after: ControlState,
+    expected: AuditEvent,
+    invariant_id: str,
+) -> list[Violation]:
+    if after.history == (*before.history, expected):
+        return []
+    return [Violation(invariant_id, f"{expected.event_type} audit append is not canonical")]
 
 
 def _evidence_matches_required_profile(
@@ -286,6 +298,8 @@ def _validate_advance_clock(
         violations.append(Violation("T-INV-01", "clock result does not match the target time"))
     if set(after.evidence_by_id()) != set(before.evidence_by_id()):
         violations.append(Violation("T-INV-02", "clock advance altered evidence identities"))
+    if after.bases != before.bases:
+        violations.append(Violation("T-INV-03", "clock advance rewrote historical bases"))
 
     after_evidence = after.evidence_by_id()
     for evidence_id, old in before.evidence_by_id().items():
@@ -345,6 +359,21 @@ def _validate_advance_clock(
         or after.heartbeat != before.heartbeat
     ):
         violations.append(Violation("T-INV-01", "clock changed unrelated governance state"))
+    expired_ids = {
+        item.evidence_id
+        for item in before.evidence
+        if item.status is EvidenceStatus.CURRENT
+        and item.expires_at is not None
+        and item.expires_at <= event.target_time
+    }
+    expected_audit = AuditEvent.create(
+        "AdvanceClock",
+        from_time=str(before.logical_time),
+        target_time=str(event.target_time),
+        expired_evidence=",".join(sorted(expired_ids)),
+        heartbeat_missed=str(heartbeat_missed).lower(),
+    )
+    violations.extend(_validate_exact_audit(before, after, expected_audit, "T-INV-04"))
     return violations
 
 
@@ -416,6 +445,22 @@ def _validate_profile_change(
             )
     if after.heartbeat != before.heartbeat:
         violations.append(Violation("H-INV-01", "profile change altered heartbeat state"))
+    incompatible_ids = {
+        item.evidence_id
+        for item in before.evidence
+        if item.status is EvidenceStatus.CURRENT
+        and item.profile_id is not None
+        and (item.profile_id != event.profile_id or item.profile_version != event.profile_version)
+    }
+    expected_audit = AuditEvent.create(
+        "ProfileChange",
+        authority=event.authority,
+        profile_id=event.profile_id,
+        profile_version=str(event.profile_version),
+        profile_incompatible_evidence=",".join(sorted(incompatible_ids)),
+        request_id=event.request_id or "none",
+    )
+    violations.extend(_validate_exact_audit(before, after, expected_audit, "P-INV-04"))
     return violations
 
 
@@ -441,9 +486,27 @@ def _validate_request(
         requested_at=before.logical_time,
         due_at=event.due_at,
     )
-    new_ids = set(after.requests_by_id()) - set(before.requests_by_id())
-    if new_ids != {event.request_id} or after.requests_by_id().get(event.request_id) != expected:
+    before_requests = before.requests_by_id()
+    after_requests = after.requests_by_id()
+    new_ids = set(after_requests) - set(before_requests)
+    if new_ids != {event.request_id} or after_requests.get(event.request_id) != expected:
         violations.append(Violation("R-INV-01", "request result does not match the event"))
+    for request_id, existing_request in before_requests.items():
+        if after_requests.get(request_id) != existing_request:
+            violations.append(
+                Violation(
+                    "R-INV-01",
+                    f"request creation rewrote existing request {request_id}",
+                )
+            )
+    expected_audit = AuditEvent.create(
+        "RequestReassessment",
+        authority=event.authority,
+        request_id=event.request_id,
+        due_at=str(event.due_at),
+        reason=event.reason,
+    )
+    violations.extend(_validate_exact_audit(before, after, expected_audit, "R-INV-04"))
     return violations
 
 
@@ -484,6 +547,15 @@ def _validate_heartbeat(
         or after.heartbeat.due_at != event.at_time + interval
     ):
         violations.append(Violation("H-INV-01", "heartbeat result does not match the event"))
+    if interval is not None:
+        expected_audit = AuditEvent.create(
+            "RecordHeartbeat",
+            authority=event.authority,
+            at_time=str(event.at_time),
+            interval=str(interval),
+            due_at=str(event.at_time + interval),
+        )
+        violations.extend(_validate_exact_audit(before, after, expected_audit, "H-INV-03"))
     return violations
 
 
@@ -542,10 +614,18 @@ def validate_temporal_event(
     if isinstance(event, RecordHeartbeat):
         return tuple(_validate_heartbeat(before, event, after))
     if isinstance(event, Reassess):
-        return tuple(
-            [
-                *_unchanged_temporal_governance(before, after, allow_requests=True),
-                *_validate_reassessment_requests(before, event, after),
-            ]
-        )
+        violations = [
+            *_unchanged_temporal_governance(before, after, allow_requests=True),
+            *_validate_reassessment_requests(before, event, after),
+        ]
+        audit_details = {
+            "authority": event.authority,
+            "evidence_ids": ",".join(sorted(item.evidence_id for item in event.new_evidence)),
+            "basis_ids": ",".join(sorted(item.basis_id for item in event.new_bases)),
+        }
+        if event.close_request_ids:
+            audit_details["closed_request_ids"] = ",".join(sorted(event.close_request_ids))
+        expected_audit = AuditEvent.create("Reassess", **audit_details)
+        violations.extend(_validate_exact_audit(before, after, expected_audit, "R-INV-04"))
+        return tuple(violations)
     return tuple(_unchanged_temporal_governance(before, after))
