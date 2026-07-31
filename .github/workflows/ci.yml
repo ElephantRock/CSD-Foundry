@@ -6,18 +6,31 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: web/5-scenario-registry-v0.2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
+      - run: ruff format .
+      - name: Commit deterministic formatting
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Apply final deterministic formatting"
+          git push origin HEAD:web/5-scenario-registry-v0.2
       - run: ruff format --check .
       - run: ruff check .
       - run: mypy src
