@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "token": {"pattern": "^[a-z0-9][a-z0-9._-]*$", "type": "string"}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "allowed_namespace_prefix": {"$ref": "#/$defs/token"},
+    "attempt_key": {"type": "object"},
+    "generation_namespace_digest": {"$ref": "#/$defs/digest"},
+    "producer_contract_id": {"$ref": "#/$defs/token"},
+    "records": {
+      "items": {"$ref": "choice_record.schema.json"},
+      "type": "array"
+    },
+    "schema_version": {"const": "csd-choice-ledger/0.4"},
+    "seed_commitment": {"$ref": "#/$defs/digest"}
+  },
+  "required": [
+    "allowed_namespace_prefix",
+    "attempt_key",
+    "generation_namespace_digest",
+    "producer_contract_id",
+    "records",
+    "schema_version",
+    "seed_commitment"
+  ],
+  "type": "object"
+}
