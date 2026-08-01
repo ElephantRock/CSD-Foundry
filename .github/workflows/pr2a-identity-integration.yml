@@ -24,6 +24,7 @@ jobs:
         run: |
           if [ ! -f specs/v0.4/identity_policy.json ]; then
             python scripts/patch_pr2a_identity_integration.py
+            git checkout -- .github/workflows/ci.yml
             ruff format .
             ruff check --fix .
             git config user.name "github-actions[bot]"
