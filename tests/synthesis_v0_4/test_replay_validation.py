@@ -13,6 +13,7 @@ from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
 ROOT = Path(__file__).resolve().parents[2]
 VECTOR_PATH = ROOT / "data" / "canary" / "v0.4" / "replay-v1" / "replay_vectors.json"
+REPORT_PATH = ROOT / "reports" / "deterministic_replay_v0.4.json"
 
 
 def test_frozen_replay_validation_passes() -> None:
@@ -38,3 +39,9 @@ def test_replay_vector_artifact_matches_frozen_code_evidence() -> None:
     assert artifact["catalog_digest"] == FROZEN_REPLAY_VECTOR_CATALOG_DIGEST
     assert tuple(artifact["vector_ids"]) == REPLAY_VECTOR_IDS
     assert artifact["expected_digests"] == EXPECTED_REPLAY_DIGESTS
+
+
+def test_committed_replay_report_matches_executable_validation() -> None:
+    committed = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+
+    assert committed == validate_replay("v0.4").to_dict()
