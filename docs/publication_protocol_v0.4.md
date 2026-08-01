@@ -43,11 +43,14 @@ The reference does not change the semantic envelope.
 
 `OperationalPublicationReceipt` records append-only operational publication history. Receipts
 form a contiguous previous-digest chain within one execution run, inventory, and attempt.
-Operational receipt bytes never enter completion-envelope identity. Receipts truthfully
-record whether that execution run installed new authority or encountered `existing-identical`
-bytes. During same-run recovery, an already persisted canonical `published` receipt is reused
-rather than regenerated from the retry's storage disposition. This preserves exact receipt
-chains after receipt-boundary crashes without misclassifying duplicates from another run.
+Operational receipt bytes never enter completion-envelope identity. Before installing a
+semantic object, the coordinator atomically installs an immutable per-kind, per-object
+publication claim. The claim owner commits the execution run, inventory, attempt, object kind,
+object digest, receipt ordinal, and predecessor receipt. Same-run workers therefore converge on
+one `published` receipt choice even when they race; a different run observes
+`existing-identical`. Because the claim is durable before object installation, recovery across
+the object-to-receipt gap reproduces the uninterrupted receipt chain. Reused receipt objects
+are routed through the durable-existing path before success is returned.
 
 ## No-clobber object publication
 

@@ -14,6 +14,7 @@ from csd_foundry.synthesis.v0_4.publication_protocol import PublicationDispositi
 from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes
 
 _HEX_256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_TOKEN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 class PublicationStoreError(RuntimeError):
@@ -56,10 +57,12 @@ class ContentAddressedPublicationStore:
             raise PublicationStoreError("publication root must be a pathlib Path")
         self.root = root
         self.objects_root = root / "objects"
+        self.claims_root = root / "claims"
         self.references_root = root / "references"
         self.temporary_root = root / ".tmp"
         self._ensure_directory(self.root)
         self._ensure_directory(self.objects_root)
+        self._ensure_directory(self.claims_root)
         self._ensure_directory(self.references_root)
         self._ensure_directory(self.temporary_root)
 
@@ -68,6 +71,12 @@ class ContentAddressedPublicationStore:
         if type(digest) is not str or _HEX_256_PATTERN.fullmatch(digest) is None:
             raise PublicationStoreError("object digest must be a lowercase SHA-256 digest")
         return digest
+
+    @staticmethod
+    def _require_token(value: object, field_name: str) -> str:
+        if type(value) is not str or _TOKEN_PATTERN.fullmatch(value) is None:
+            raise PublicationStoreError(f"{field_name} must be a lowercase ASCII token")
+        return value
 
     def object_path(self, digest: str) -> Path:
         normalized = self._require_digest(digest)
@@ -134,6 +143,116 @@ class ContentAddressedPublicationStore:
         result = self._classify_existing(final_path, payload, digest)
         self._fsync_directory(final_path.parent)
         return result
+
+    def publication_claim_path(self, object_kind: str, digest: str) -> Path:
+        kind = self._require_token(object_kind, "object_kind")
+        object_digest = self._require_digest(digest)
+        return self.claims_root / kind / object_digest[:2] / object_digest[2:]
+
+    @classmethod
+    def _publication_claim_bytes(cls, owner_digest: str) -> bytes:
+        return (cls._require_digest(owner_digest) + "\n").encode("ascii")
+
+    def _read_publication_claim_owner(self, path: Path) -> str:
+        payload = path.read_bytes()
+        if len(payload) != 65 or payload[-1:] != b"\n":
+            raise PublicationCorruptionError(
+                "publication claim does not contain one canonical owner digest"
+            )
+        try:
+            owner = payload[:-1].decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise PublicationCorruptionError("publication claim owner is not ASCII") from exc
+        self._require_digest(owner)
+        self._fsync_directory(path.parent)
+        return owner
+
+    def claim_publication(
+        self,
+        *,
+        object_kind: str,
+        digest: str,
+        owner_digest: str,
+        fault_stage: str | None = None,
+        fault_injector: FaultInjector | None = None,
+    ) -> bool:
+        claim_path = self.publication_claim_path(object_kind, digest)
+        claim_payload = self._publication_claim_bytes(owner_digest)
+        self._ensure_directory(claim_path.parent)
+        if claim_path.exists():
+            return self._read_publication_claim_owner(claim_path) == owner_digest
+
+        temporary_path = self.temporary_root / (f"claim.{digest}.{uuid.uuid4().hex}.tmp")
+        with temporary_path.open("xb") as handle:
+            handle.write(claim_payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary_path, claim_path)
+        except FileExistsError:
+            owned = self._read_publication_claim_owner(claim_path) == owner_digest
+            temporary_path.unlink(missing_ok=True)
+            self._fsync_directory(self.temporary_root)
+            return owned
+
+        self._fsync_directory(claim_path.parent)
+        if fault_stage is not None:
+            self._invoke(fault_injector, fault_stage)
+        temporary_path.unlink(missing_ok=True)
+        self._fsync_directory(self.temporary_root)
+        return True
+
+    def claim_and_publish_bytes(
+        self,
+        payload: bytes,
+        *,
+        expected_digest: str,
+        object_kind: str,
+        owner_digest: str,
+        claim_fault_stage: str | None = None,
+        object_fault_stage: str | None = None,
+        fault_injector: FaultInjector | None = None,
+    ) -> PublicationResult:
+        if type(payload) is not bytes:
+            raise PublicationStoreError("publication payload must use the exact bytes type")
+        digest = hashlib.sha256(payload).hexdigest()
+        self._require_digest(expected_digest)
+        if digest != expected_digest:
+            raise PublicationCorruptionError(
+                "publication payload does not match the expected digest"
+            )
+        claim_path = self.publication_claim_path(object_kind, digest)
+        object_path = self.object_path(digest)
+
+        if object_path.exists() and not claim_path.exists():
+            result = self.publish_bytes(payload, expected_digest=digest)
+            if object_fault_stage is not None:
+                self._invoke(fault_injector, object_fault_stage)
+            return result
+
+        owned = self.claim_publication(
+            object_kind=object_kind,
+            digest=digest,
+            owner_digest=owner_digest,
+            fault_stage=claim_fault_stage,
+            fault_injector=fault_injector,
+        )
+        if not owned and not object_path.exists():
+            raise PublicationStoreError(
+                "publication object is claimed by another execution run but not installed"
+            )
+        result = self.publish_bytes(payload, expected_digest=digest)
+        if object_fault_stage is not None:
+            self._invoke(fault_injector, object_fault_stage)
+        return PublicationResult(
+            digest=result.digest,
+            relative_path=result.relative_path,
+            disposition=(
+                PublicationDisposition.PUBLISHED
+                if owned
+                else PublicationDisposition.EXISTING_IDENTICAL
+            ),
+        )
 
     def publish_bytes(
         self,

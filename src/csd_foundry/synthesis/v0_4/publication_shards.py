@@ -554,6 +554,38 @@ class ShardPublicationCoordinator:
         if fault_injector is not None:
             fault_injector(stage)
 
+    @staticmethod
+    def _receipt_claim_owner_digest(
+        *,
+        previous: OperationalPublicationReceipt | None,
+        execution_run_id: str,
+        inventory_digest: str,
+        attempt_key: AttemptKey,
+        object_kind: PublicationObjectKind,
+        object_digest: str,
+    ) -> str:
+        return canonical_sha256(
+            {
+                "attempt_key": {
+                    "attempt_index": attempt_key.attempt_index,
+                    "release": attempt_key.sample_key.release,
+                    "sample_index": attempt_key.sample_key.sample_index,
+                    "target_id": attempt_key.sample_key.target_id,
+                },
+                "execution_run_id": execution_run_id,
+                "inventory_digest": inventory_digest,
+                "object_digest": object_digest,
+                "object_kind": object_kind.value,
+                "previous_publication_receipt_digest": (
+                    None if previous is None else previous.digest
+                ),
+                "publication_claim_version": 1,
+                "publication_ordinal": (
+                    0 if previous is None else previous.publication_ordinal + 1
+                ),
+            }
+        )
+
     def _publish_or_reuse_receipt(
         self,
         *,
@@ -565,37 +597,14 @@ class ShardPublicationCoordinator:
         object_digest: str,
         actual_disposition: PublicationDisposition,
     ) -> OperationalPublicationReceipt:
-        published_candidate = OperationalPublicationReceipt.append(
+        receipt = OperationalPublicationReceipt.append(
             previous=previous,
             execution_run_id=execution_run_id,
             inventory_digest=inventory_digest,
             attempt_key=attempt_key,
             object_kind=object_kind,
             object_digest=object_digest,
-            disposition=PublicationDisposition.PUBLISHED,
-        )
-        candidate_path = self.store.object_path(published_candidate.digest)
-        if candidate_path.is_file():
-            if (
-                self.store.read_verified(published_candidate.digest)
-                != published_candidate.canonical_bytes
-            ):
-                raise ShardPublicationError(
-                    "persisted publication receipt does not match its canonical bytes"
-                )
-            return published_candidate
-        receipt = (
-            published_candidate
-            if actual_disposition is PublicationDisposition.PUBLISHED
-            else OperationalPublicationReceipt.append(
-                previous=previous,
-                execution_run_id=execution_run_id,
-                inventory_digest=inventory_digest,
-                attempt_key=attempt_key,
-                object_kind=object_kind,
-                object_digest=object_digest,
-                disposition=actual_disposition,
-            )
+            disposition=actual_disposition,
         )
         self.store.publish_bytes(
             receipt.canonical_bytes,
@@ -612,32 +621,60 @@ class ShardPublicationCoordinator:
         fault_injector: FaultInjector | None = None,
     ) -> PublishedCompletion:
         envelope = AttemptCompletionEnvelope.from_completion(completion)
-        envelope_result = self.store.publish_bytes(
+        envelope_kind = PublicationObjectKind.ATTEMPT_COMPLETION_ENVELOPE
+        envelope_owner_digest = self._receipt_claim_owner_digest(
+            previous=None,
+            execution_run_id=execution_run_id,
+            inventory_digest=inventory.digest,
+            attempt_key=envelope.attempt_key,
+            object_kind=envelope_kind,
+            object_digest=envelope.digest,
+        )
+        envelope_result = self.store.claim_and_publish_bytes(
             envelope.canonical_bytes,
             expected_digest=envelope.digest,
+            object_kind=envelope_kind.value,
+            owner_digest=envelope_owner_digest,
+            claim_fault_stage="completion-claim-persisted",
+            object_fault_stage="completion-object-persisted",
+            fault_injector=fault_injector,
         )
         envelope_receipt = self._publish_or_reuse_receipt(
             previous=None,
             execution_run_id=execution_run_id,
             inventory_digest=inventory.digest,
             attempt_key=envelope.attempt_key,
-            object_kind=PublicationObjectKind.ATTEMPT_COMPLETION_ENVELOPE,
+            object_kind=envelope_kind,
             object_digest=envelope.digest,
             actual_disposition=envelope_result.disposition,
         )
         self._invoke(fault_injector, "completion-receipt-persisted")
 
         reference = InventoryCompletionReference.from_inventory(inventory, envelope)
-        reference_result = self.store.publish_bytes(
+        reference_kind = PublicationObjectKind.INVENTORY_COMPLETION_REFERENCE
+        reference_owner_digest = self._receipt_claim_owner_digest(
+            previous=envelope_receipt,
+            execution_run_id=execution_run_id,
+            inventory_digest=inventory.digest,
+            attempt_key=envelope.attempt_key,
+            object_kind=reference_kind,
+            object_digest=reference.digest,
+        )
+        reference_result = self.store.claim_and_publish_bytes(
             reference.canonical_bytes,
             expected_digest=reference.digest,
+            object_kind=reference_kind.value,
+            owner_digest=reference_owner_digest,
+            claim_fault_stage="reference-claim-persisted",
+            object_fault_stage="reference-object-persisted",
+            fault_injector=fault_injector,
         )
         reference_receipt = self._publish_or_reuse_receipt(
             previous=envelope_receipt,
             execution_run_id=execution_run_id,
             inventory_digest=inventory.digest,
             attempt_key=envelope.attempt_key,
-            object_kind=PublicationObjectKind.INVENTORY_COMPLETION_REFERENCE,
+            object_kind=reference_kind,
             object_digest=reference.digest,
             actual_disposition=reference_result.disposition,
         )

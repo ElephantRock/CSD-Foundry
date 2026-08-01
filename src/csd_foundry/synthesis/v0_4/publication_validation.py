@@ -464,7 +464,11 @@ def _validate_shards() -> tuple[bool, bool, bool, bool, bool]:
             premature_rejected = False
 
     stages = (
+        "completion-claim-persisted",
+        "completion-object-persisted",
         "completion-receipt-persisted",
+        "reference-claim-persisted",
+        "reference-object-persisted",
         "reference-receipt-persisted",
         "shard-index-persisted",
         "shard-manifest-persisted",
@@ -480,7 +484,15 @@ def _validate_shards() -> tuple[bool, bool, bool, bool, bool]:
                 if current == expected:
                     raise InjectedPublicationCrash(current)
 
-            if stage in {"completion-receipt-persisted", "reference-receipt-persisted"}:
+            completion_stages = {
+                "completion-claim-persisted",
+                "completion-object-persisted",
+                "completion-receipt-persisted",
+                "reference-claim-persisted",
+                "reference-object-persisted",
+                "reference-receipt-persisted",
+            }
+            if stage in completion_stages:
                 with suppress(InjectedPublicationCrash):
                     coordinator.publish_completion(
                         inventory,

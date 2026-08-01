@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -69,6 +71,62 @@ def test_cross_run_duplicate_receipts_report_existing_identical(tmp_path: Path) 
     assert tuple(receipt.digest for receipt in first.receipts) != tuple(
         receipt.digest for receipt in duplicate.receipts
     )
+
+
+def test_concurrent_same_run_retries_converge_on_one_receipt_chain(
+    tmp_path: Path,
+) -> None:
+    store = ContentAddressedPublicationStore(tmp_path)
+    inventory = publication_fixture_inventory(shard_count=2, sample_count=1)
+    coordinator = ShardPublicationCoordinator(store)
+    worker_count = 8
+    barrier = Barrier(worker_count)
+
+    def publish() -> tuple[str, str]:
+        barrier.wait()
+        publication = coordinator.publish_completion(
+            inventory,
+            publication_fixture_accepted(0),
+            execution_run_id="run-concurrent-same",
+        )
+        return tuple(receipt.digest for receipt in publication.receipts)  # type: ignore[return-value]
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        receipt_chains = tuple(executor.map(lambda _: publish(), range(worker_count)))
+
+    assert len(set(receipt_chains)) == 1
+
+
+def test_same_run_reused_receipts_are_directory_durable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContentAddressedPublicationStore(tmp_path)
+    inventory = publication_fixture_inventory(shard_count=2, sample_count=1)
+    coordinator = ShardPublicationCoordinator(store)
+    first = coordinator.publish_completion(
+        inventory,
+        publication_fixture_accepted(0),
+        execution_run_id="run-durable-reuse",
+    )
+
+    synced: list[Path] = []
+    monkeypatch.setattr(
+        ContentAddressedPublicationStore,
+        "_fsync_directory",
+        staticmethod(synced.append),
+    )
+    second = coordinator.publish_completion(
+        inventory,
+        publication_fixture_accepted(0),
+        execution_run_id="run-durable-reuse",
+    )
+
+    assert tuple(receipt.digest for receipt in first.receipts) == tuple(
+        receipt.digest for receipt in second.receipts
+    )
+    for receipt in second.receipts:
+        assert store.object_path(receipt.digest).parent in synced
 
 
 def test_shard_index_is_completion_order_independent(tmp_path: Path) -> None:
@@ -159,7 +217,11 @@ def test_semantic_envelope_is_stable_across_1_2_7_shard_inventories() -> None:
 @pytest.mark.parametrize(
     "stage",
     (
+        "completion-claim-persisted",
+        "completion-object-persisted",
         "completion-receipt-persisted",
+        "reference-claim-persisted",
+        "reference-object-persisted",
         "reference-receipt-persisted",
         "shard-index-persisted",
         "shard-manifest-persisted",
@@ -190,7 +252,15 @@ def test_staged_publication_is_crash_idempotent(tmp_path: Path, stage: str) -> N
         if current == stage:
             raise InjectedPublicationCrash(current)
 
-    if stage in {"completion-receipt-persisted", "reference-receipt-persisted"}:
+    completion_stages = {
+        "completion-claim-persisted",
+        "completion-object-persisted",
+        "completion-receipt-persisted",
+        "reference-claim-persisted",
+        "reference-object-persisted",
+        "reference-receipt-persisted",
+    }
+    if stage in completion_stages:
         with suppress(InjectedPublicationCrash):
             coordinator.publish_completion(
                 inventory,
