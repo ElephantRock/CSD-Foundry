@@ -32,9 +32,9 @@ def validate_canonical_value(value: object) -> CanonicalValue:
     if value is None:
         return None
     if type(value) is bool:
-        return cast(bool, value)
+        return value
     if type(value) is int:
-        return cast(int, value)
+        return value
     if type(value) is str:
         return _validate_string(value, "canonical string")
     if isinstance(value, (CanonicalArray, CanonicalObject)):
