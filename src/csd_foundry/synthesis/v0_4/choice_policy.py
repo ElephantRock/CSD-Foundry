@@ -23,6 +23,10 @@ from csd_foundry.synthesis.v0_4.deterministic_choices import (
 from csd_foundry.synthesis.v0_4.specs import CHOICE_ALGORITHM_SPEC
 
 EXPECTED_SCHEMA_VERSION = "0.4.0"
+DISPLAY_DIGEST_BITS = 128
+DESIGN_IDENTITY_CEILING = 10_000_000
+COLLISION_RISK_CEILING_NUMERATOR = 15
+COLLISION_RISK_CEILING_DENOMINATOR = 100_000_000_000_000_000_000_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,10 @@ class ChoiceAlgorithmPolicy:
             "attempt_index_encoding": "uint32",
             "maximum_attempt_index": MAX_ATTEMPT_INDEX,
             "candidate_byte_order": CANDIDATE_BYTE_ORDER,
+            "display_digest_bits": DISPLAY_DIGEST_BITS,
+            "design_identity_ceiling": DESIGN_IDENTITY_CEILING,
+            "collision_risk_ceiling_numerator": COLLISION_RISK_CEILING_NUMERATOR,
+            "collision_risk_ceiling_denominator": COLLISION_RISK_CEILING_DENOMINATOR,
             "semantic_floating_point_permitted": False,
         }
         for field_name, expected_value in expected.items():
@@ -72,16 +80,6 @@ class ChoiceAlgorithmPolicy:
                 raise ChoiceValidationError(
                     f"{field_name} must equal the algorithm-v1 normative value {expected_value!r}"
                 )
-        if self.display_digest_bits < 128 or self.display_digest_bits % 8:
-            raise ChoiceValidationError(
-                "display_digest_bits must be a byte-aligned value of at least 128"
-            )
-        if self.design_identity_ceiling <= 0:
-            raise ChoiceValidationError("design_identity_ceiling must be positive")
-        if self.collision_risk_ceiling_numerator <= 0:
-            raise ChoiceValidationError("collision risk ceiling numerator must be positive")
-        if self.collision_risk_ceiling_denominator <= 0:
-            raise ChoiceValidationError("collision risk ceiling denominator must be positive")
         if self.collision_probability_upper_bound > self.collision_risk_ceiling:
             raise ChoiceValidationError(
                 "display identity prefix does not satisfy the declared collision-risk ceiling"
@@ -101,28 +99,28 @@ class ChoiceAlgorithmPolicy:
 
 
 def _mapping(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+    if not isinstance(value, dict) or not all(type(key) is str for key in value):
         raise ChoiceValidationError("choice algorithm policy must be an object")
     return cast(dict[str, object], value)
 
 
 def _string(data: dict[str, object], key: str) -> str:
     value = data.get(key)
-    if not isinstance(value, str):
+    if type(value) is not str:
         raise ChoiceValidationError(f"{key} must be a string")
     return value
 
 
 def _integer(data: dict[str, object], key: str) -> int:
     value = data.get(key)
-    if not isinstance(value, int) or isinstance(value, bool):
+    if type(value) is not int:
         raise ChoiceValidationError(f"{key} must be an integer")
     return value
 
 
 def _boolean(data: dict[str, object], key: str) -> bool:
     value = data.get(key)
-    if not isinstance(value, bool):
+    if type(value) is not bool:
         raise ChoiceValidationError(f"{key} must be a boolean")
     return value
 
