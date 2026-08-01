@@ -166,6 +166,28 @@ def test_store_fsyncs_new_directory_ancestors_before_success(
     assert final_parent in synced
 
 
+def test_preexisting_raced_directory_syncs_its_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ContentAddressedPublicationStore(tmp_path)
+    envelope = AttemptCompletionEnvelope.from_completion(publication_fixture_accepted())
+    target = store.object_path(envelope.digest).parent
+    target.mkdir(parents=True)
+
+    synced: list[Path] = []
+    monkeypatch.setattr(
+        ContentAddressedPublicationStore,
+        "_fsync_directory",
+        staticmethod(synced.append),
+    )
+    result = store.publish_bytes(envelope.canonical_bytes, expected_digest=envelope.digest)
+
+    assert result.disposition is PublicationDisposition.PUBLISHED
+    assert target in synced
+    assert target.parent in synced
+
+
 def test_concurrent_directory_creation_is_idempotent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -105,6 +105,8 @@ class ContentAddressedPublicationStore:
             cls._fsync_directory(directory.parent)
         if not path.is_dir():
             raise PublicationStoreError("publication path exists but is not a directory")
+        cls._fsync_directory(path)
+        cls._fsync_directory(path.parent)
 
     @staticmethod
     def _invoke(fault_injector: FaultInjector | None, stage: str) -> None:
