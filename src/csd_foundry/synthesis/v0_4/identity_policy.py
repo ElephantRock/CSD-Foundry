@@ -28,12 +28,16 @@ class RationalBound:
     denominator: int
 
     def __post_init__(self) -> None:
+        if type(self) is not RationalBound:
+            raise ChoiceValidationError("rational bounds must use the exact contract class")
         if type(self.numerator) is not int or self.numerator < 0:
             raise ChoiceValidationError("rational numerator must be a nonnegative integer")
         if type(self.denominator) is not int or self.denominator <= 0:
             raise ChoiceValidationError("rational denominator must be a positive integer")
 
     def no_greater_than(self, other: RationalBound) -> bool:
+        if type(other) is not RationalBound:
+            raise ChoiceValidationError("comparison bound must be an exact RationalBound")
         return self.numerator * other.denominator <= other.numerator * self.denominator
 
 
@@ -43,6 +47,10 @@ class IdentityKindVolume:
     projected_count: int
 
     def __post_init__(self) -> None:
+        if type(self) is not IdentityKindVolume:
+            raise ChoiceValidationError(
+                "identity kind volumes must use the exact contract class"
+            )
         if type(self.entity_kind) is not str or not self.entity_kind:
             raise ChoiceValidationError("identity volume kind must be a nonempty string")
         if type(self.projected_count) is not int or self.projected_count < 0:
@@ -57,8 +65,18 @@ class IdentityVolumeEnvelope:
     status: str = "provisional"
 
     def __post_init__(self) -> None:
+        if type(self) is not IdentityVolumeEnvelope:
+            raise ChoiceValidationError(
+                "identity volume envelopes must use the exact contract class"
+            )
         if type(self.per_kind) is not tuple or not self.per_kind:
-            raise ChoiceValidationError("identity volume envelope requires immutable per-kind data")
+            raise ChoiceValidationError(
+                "identity volume envelope requires immutable per-kind data"
+            )
+        if not all(type(item) is IdentityKindVolume for item in self.per_kind):
+            raise ChoiceValidationError(
+                "identity volume entries must be exact IdentityKindVolume values"
+            )
         kinds = tuple(item.entity_kind for item in self.per_kind)
         if len(kinds) != len(set(kinds)):
             raise ChoiceValidationError("identity volume kinds must be unique")
@@ -71,7 +89,7 @@ class IdentityVolumeEnvelope:
             raise ChoiceValidationError("identity safety-margin denominator must be positive")
         if self.safety_margin_numerator < self.safety_margin_denominator:
             raise ChoiceValidationError("identity safety margin cannot reduce projected volume")
-        if self.status != "provisional":
+        if type(self.status) is not str or self.status != "provisional":
             raise ChoiceValidationError("PR 2A identity volume status must remain provisional")
 
     @property
@@ -103,12 +121,13 @@ def per_kind_collision_bound(
 ) -> RationalBound:
     """Return the union bound across entity-kind display-prefix domains."""
 
-    if not isinstance(envelope, IdentityVolumeEnvelope):
-        raise ChoiceValidationError("envelope must be an IdentityVolumeEnvelope")
+    if type(envelope) is not IdentityVolumeEnvelope:
+        raise ChoiceValidationError("envelope must be an exact IdentityVolumeEnvelope")
     if type(digest_bits) is not int or digest_bits <= 0:
         raise ChoiceValidationError("digest bits must be a positive integer")
     numerator = sum(
-        item.projected_count * max(0, item.projected_count - 1) for item in envelope.per_kind
+        item.projected_count * max(0, item.projected_count - 1)
+        for item in envelope.per_kind
     )
     return RationalBound(numerator=numerator, denominator=1 << (digest_bits + 1))
 
