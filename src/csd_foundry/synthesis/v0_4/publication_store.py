@@ -57,8 +57,9 @@ class ContentAddressedPublicationStore:
         self.root = root
         self.objects_root = root / "objects"
         self.temporary_root = root / ".tmp"
-        self.objects_root.mkdir(parents=True, exist_ok=True)
-        self.temporary_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_directory(self.root)
+        self._ensure_directory(self.objects_root)
+        self._ensure_directory(self.temporary_root)
 
     @staticmethod
     def _require_digest(digest: object) -> str:
@@ -80,6 +81,22 @@ class ContentAddressedPublicationStore:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
+
+    @classmethod
+    def _ensure_directory(cls, path: Path) -> None:
+        """Create a directory and durably persist its entry in the parent."""
+
+        missing: list[Path] = []
+        cursor = path
+        while not cursor.exists():
+            missing.append(cursor)
+            cursor = cursor.parent
+        for directory in reversed(missing):
+            directory.mkdir()
+            cls._fsync_directory(directory)
+            cls._fsync_directory(directory.parent)
+        if not path.is_dir():
+            raise PublicationStoreError("publication path exists but is not a directory")
 
     @staticmethod
     def _invoke(fault_injector: FaultInjector | None, stage: str) -> None:
@@ -103,6 +120,13 @@ class ContentAddressedPublicationStore:
             disposition=PublicationDisposition.EXISTING_IDENTICAL,
         )
 
+    def _durable_existing(
+        self, final_path: Path, payload: bytes, digest: str
+    ) -> PublicationResult:
+        result = self._classify_existing(final_path, payload, digest)
+        self._fsync_directory(final_path.parent)
+        return result
+
     def publish_bytes(
         self,
         payload: bytes,
@@ -120,9 +144,9 @@ class ContentAddressedPublicationStore:
                     "publication payload does not match the expected digest"
                 )
         final_path = self.object_path(digest)
-        final_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_directory(final_path.parent)
         if final_path.exists():
-            return self._classify_existing(final_path, payload, digest)
+            return self._durable_existing(final_path, payload, digest)
 
         temporary_path = self.temporary_root / f"{digest}.{uuid.uuid4().hex}.tmp"
         with temporary_path.open("xb") as handle:
@@ -136,7 +160,7 @@ class ContentAddressedPublicationStore:
         try:
             os.link(temporary_path, final_path)
         except FileExistsError:
-            result = self._classify_existing(final_path, payload, digest)
+            result = self._durable_existing(final_path, payload, digest)
             temporary_path.unlink(missing_ok=True)
             self._fsync_directory(self.temporary_root)
             return result
@@ -184,6 +208,7 @@ class ContentAddressedPublicationStore:
                 final_path = self.object_path(declared_digest)
                 if final_path.exists():
                     self.read_verified(declared_digest)
+                    self._fsync_directory(final_path.parent)
                     verified += 1
             temporary_path.unlink(missing_ok=True)
             removed += 1
