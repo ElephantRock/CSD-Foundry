@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "base": {
+      "additionalProperties": true,
+      "properties": {
+        "attempt_input_commitment_digest": {"$ref": "#/$defs/digest"},
+        "attempt_key": {"type": "object"},
+        "choice_ledger_digest": {"$ref": "#/$defs/digest"},
+        "generation_namespace_digest": {"$ref": "#/$defs/digest"},
+        "identity_ledger_digest": {"$ref": "#/$defs/digest"},
+        "schema_version": {"const": "csd-attempt-replay/0.4"},
+        "search_branch_digest": {"$ref": "#/$defs/digest"},
+        "status": {"enum": ["accepted", "rejected"]}
+      },
+      "required": [
+        "attempt_input_commitment_digest",
+        "attempt_key",
+        "choice_ledger_digest",
+        "generation_namespace_digest",
+        "identity_ledger_digest",
+        "schema_version",
+        "search_branch_digest",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {"$ref": "#/$defs/base"},
+    {
+      "oneOf": [
+        {
+          "not": {"required": ["rejection"]},
+          "properties": {"status": {"const": "accepted"}},
+          "required": ["result", "result_digest"]
+        },
+        {
+          "not": {"required": ["result"]},
+          "properties": {"status": {"const": "rejected"}},
+          "required": ["rejection", "rejection_digest"]
+        }
+      ]
+    }
+  ],
+  "type": "object"
+}

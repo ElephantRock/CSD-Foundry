@@ -115,13 +115,9 @@ def build_generation_namespace(target_definition_digest: str) -> GenerationNames
     from csd_foundry.synthesis.v0_4.specs import (
         DETERMINISTIC_ARITHMETIC_POLICY_SPEC,
         RELEASE_POLICY_SPEC,
+        REPLAY_POLICY_SPEC,
     )
 
-    replay_contract = {
-        "policy_id": REPLAY_POLICY_ID,
-        "policy_version": REPLAY_POLICY_VERSION,
-        "semantic_execution_mode": "lowest-valid-attempt",
-    }
     shard_contract = {
         "policy_id": SHARD_POLICY_ID,
         "policy_version": SHARD_POLICY_VERSION,
@@ -142,7 +138,7 @@ def build_generation_namespace(target_definition_digest: str) -> GenerationNames
         arithmetic_policy_digest=canonical_sha256(DETERMINISTIC_ARITHMETIC_POLICY_SPEC),
         replay_policy_id=REPLAY_POLICY_ID,
         replay_policy_version=REPLAY_POLICY_VERSION,
-        replay_policy_digest=canonical_sha256(replay_contract),
+        replay_policy_digest=canonical_sha256(REPLAY_POLICY_SPEC),
         shard_policy_id=SHARD_POLICY_ID,
         shard_policy_version=SHARD_POLICY_VERSION,
         shard_policy_digest=canonical_sha256(shard_contract),

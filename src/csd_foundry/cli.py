@@ -71,6 +71,11 @@ def main() -> None:
         help="validate canonical values and deterministic entity identities",
     )
     _add_release_argument(synthesis_identities, default="v0.4")
+    synthesis_replay = synthesis_sub.add_parser(
+        "replay",
+        help="validate deterministic choice ledgers and attempt replay",
+    )
+    _add_release_argument(synthesis_replay, default="v0.4")
 
     args = parser.parse_args()
 
@@ -140,6 +145,15 @@ def main() -> None:
         identity_result = validate_identities(args.release)
         _emit(identity_result.to_dict(), args.output)
         if not identity_result.success:
+            raise SystemExit(1)
+        return
+
+    if args.command == "synthesize" and args.synthesis_command == "replay":
+        from csd_foundry.synthesis.v0_4.replay_validation import validate_replay
+
+        replay_result = validate_replay(args.release)
+        _emit(replay_result.to_dict(), args.output)
+        if not replay_result.success:
             raise SystemExit(1)
         return
 

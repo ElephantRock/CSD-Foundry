@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "policy_id": {"const": "csd-replay-contract"},
+    "policy_version": {"const": 1},
+    "semantic_execution_mode": {"const": "lowest-valid-attempt"}
+  },
+  "required": ["policy_id", "policy_version", "semantic_execution_mode"],
+  "type": "object"
+}
