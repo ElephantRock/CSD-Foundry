@@ -1,0 +1,78 @@
+name: Fix v0.4 choice lint
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Repair strict lint findings
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          choice_paths = Path("src/csd_foundry/synthesis/v0_4/choice_paths.py")
+          text = choice_paths.read_text(encoding="utf-8")
+          old = '''        if self.provenance is SeedProvenance.UNIFORM_RANDOM_256:
+              if self.material == bytes(ROOT_SEED_BYTES) or len(set(self.material)) == 1:
+                  raise ChoiceValidationError(
+                      "release seed cannot use all-zero or repeated-byte fixture material"
+                  )
+          '''
+          new = '''        if (
+              self.provenance is SeedProvenance.UNIFORM_RANDOM_256
+              and (self.material == bytes(ROOT_SEED_BYTES) or len(set(self.material)) == 1)
+          ):
+              raise ChoiceValidationError(
+                  "release seed cannot use all-zero or repeated-byte fixture material"
+              )
+          '''
+          if old not in text:
+              raise SystemExit("choice-path lint anchor missing")
+          choice_paths.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          runner = Path(".github/workflows/run-v04-choice-integration.yml")
+          text = runner.read_text(encoding="utf-8")
+          long_import = (
+              "          from csd_foundry.synthesis.v0_4.choice_paths import "
+              "AttemptKey, ChoicePath, RootSeed, SampleKey, SeedProvenance\n"
+          )
+          short_import = '''          from csd_foundry.synthesis.v0_4.choice_paths import (
+              AttemptKey,
+              ChoicePath,
+              RootSeed,
+              SampleKey,
+              SeedProvenance,
+          )
+          '''
+          long_path = (
+              "          path = ChoicePath(AttemptKey(SampleKey('v0.4', "
+              "'known-answer', 1), 0), 'known-answer', ('redraw', 1))\n"
+          )
+          short_path = '''          path = ChoicePath(
+              AttemptKey(SampleKey('v0.4', 'known-answer', 1), 0),
+              'known-answer',
+              ('redraw', 1),
+          )
+          '''
+          if long_import not in text or long_path not in text:
+              raise SystemExit("runner lint anchors missing")
+          text = text.replace(long_import, short_import, 1)
+          text = text.replace(long_path, short_path, 1)
+          runner.write_text(text, encoding="utf-8")
+          PY
+      - name: Commit repairs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-v04-choice-lint.yml
+          git add .
+          git commit -m "Fix deterministic choice lint findings"
+          git push
