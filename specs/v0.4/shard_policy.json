@@ -1,0 +1,5 @@
+{
+  "policy_id": "csd-shard-contract",
+  "policy_version": 1,
+  "semantic_assignment": "global-ordinal-modulo-shard-count"
+}

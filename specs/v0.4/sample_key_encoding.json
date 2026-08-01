@@ -1,0 +1,10 @@
+{
+  "canonical_fields": [
+    "release",
+    "sample_index",
+    "target_id"
+  ],
+  "canonical_serialization": "canonical-json-with-terminal-newline",
+  "policy_id": "csd-sample-key-canonical-json",
+  "policy_version": 1
+}

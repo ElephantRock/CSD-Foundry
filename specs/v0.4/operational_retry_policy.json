@@ -1,0 +1,5 @@
+{
+  "maximum_operational_retries": 2,
+  "maximum_total_executions": 3,
+  "schema_version": "csd-operational-retry-policy/0.4"
+}
