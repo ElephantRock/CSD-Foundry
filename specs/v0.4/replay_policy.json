@@ -1,0 +1,5 @@
+{
+  "policy_id": "csd-replay-contract",
+  "policy_version": 1,
+  "semantic_execution_mode": "lowest-valid-attempt"
+}
