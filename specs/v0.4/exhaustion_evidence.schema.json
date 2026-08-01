@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "attempt_range": {"minimum": 1, "type": "integer"},
+    "cause_histogram": {"type": "object"},
+    "choice_ledger_digest_aggregate": {"$ref": "#/$defs/digest"},
+    "constraint_frequency": {"type": "object"},
+    "detail_code_histogram": {"type": "object"},
+    "generation_namespace_digest": {"$ref": "#/$defs/digest"},
+    "identity_ledger_digest_aggregate": {"$ref": "#/$defs/digest"},
+    "owner_histogram": {"type": "object"},
+    "rejected_attempt_digests": {
+      "items": {"$ref": "#/$defs/digest"},
+      "minItems": 1,
+      "type": "array"
+    },
+    "sample_key": {"type": "object"},
+    "schema_version": {"const": "csd-exhaustion-evidence/0.4"},
+    "status": {"const": "exhausted"}
+  },
+  "required": [
+    "attempt_range",
+    "cause_histogram",
+    "choice_ledger_digest_aggregate",
+    "constraint_frequency",
+    "detail_code_histogram",
+    "generation_namespace_digest",
+    "identity_ledger_digest_aggregate",
+    "owner_histogram",
+    "rejected_attempt_digests",
+    "sample_key",
+    "schema_version",
+    "status"
+  ],
+  "type": "object"
+}
