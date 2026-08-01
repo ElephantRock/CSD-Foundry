@@ -88,14 +88,23 @@ class IdentityVolumeEnvelope:
         if type(self.status) is not str or self.status != "provisional":
             raise ChoiceValidationError("PR 2A identity volume status must remain provisional")
 
+    def margined_count(self, item: IdentityKindVolume) -> int:
+        if type(item) is not IdentityKindVolume:
+            raise ChoiceValidationError(
+                "margined identity volume requires an exact IdentityKindVolume"
+            )
+        numerator = item.projected_count * self.safety_margin_numerator
+        return (
+            numerator + self.safety_margin_denominator - 1
+        ) // self.safety_margin_denominator
+
     @property
     def raw_projected_count(self) -> int:
         return sum(item.projected_count for item in self.per_kind)
 
     @property
     def projected_count_with_margin(self) -> int:
-        numerator = self.raw_projected_count * self.safety_margin_numerator
-        return (numerator + self.safety_margin_denominator - 1) // self.safety_margin_denominator
+        return sum(self.margined_count(item) for item in self.per_kind)
 
 
 def birthday_collision_bound(identity_count: int, digest_bits: int) -> RationalBound:
@@ -115,15 +124,16 @@ def per_kind_collision_bound(
     envelope: IdentityVolumeEnvelope,
     digest_bits: int,
 ) -> RationalBound:
-    """Return the union bound across entity-kind display-prefix domains."""
+    """Return the union bound across margined entity-kind display-prefix domains."""
 
     if type(envelope) is not IdentityVolumeEnvelope:
         raise ChoiceValidationError("envelope must be an exact IdentityVolumeEnvelope")
     if type(digest_bits) is not int or digest_bits <= 0:
         raise ChoiceValidationError("digest bits must be a positive integer")
-    numerator = sum(
-        item.projected_count * max(0, item.projected_count - 1) for item in envelope.per_kind
-    )
+    numerator = 0
+    for item in envelope.per_kind:
+        count = envelope.margined_count(item)
+        numerator += count * max(0, count - 1)
     return RationalBound(numerator=numerator, denominator=1 << (digest_bits + 1))
 
 
