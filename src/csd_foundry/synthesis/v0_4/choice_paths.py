@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TypeAlias
@@ -39,11 +40,12 @@ class ChoiceOperation(StrEnum):
 ChoiceSegment: TypeAlias = str | int
 
 
-def _require_token(value: str, field_name: str) -> None:
-    if _TOKEN_PATTERN.fullmatch(value) is None:
+def _require_token(value: object, field_name: str) -> str:
+    if type(value) is not str or _TOKEN_PATTERN.fullmatch(value) is None:
         raise ChoiceValidationError(
             f"{field_name} must match [a-z0-9][a-z0-9._-]* using ASCII lowercase tokens"
         )
+    return value
 
 
 def _require_nonnegative_integer(value: object, field_name: str) -> int:
@@ -58,6 +60,10 @@ class RootSeed:
     provenance: SeedProvenance
 
     def __post_init__(self) -> None:
+        if type(self.material) is not bytes:
+            raise ChoiceValidationError("root seed material must be immutable bytes")
+        if not isinstance(self.provenance, SeedProvenance):
+            raise ChoiceValidationError("root seed provenance must be a SeedProvenance value")
         if len(self.material) != ROOT_SEED_BYTES:
             raise ChoiceValidationError("root seed must contain exactly 32 bytes")
         if self.provenance is SeedProvenance.UNIFORM_RANDOM_256 and (
@@ -69,7 +75,7 @@ class RootSeed:
 
     @classmethod
     def from_hex(cls, value: str, provenance: SeedProvenance) -> RootSeed:
-        if _HEX_256_PATTERN.fullmatch(value) is None:
+        if type(value) is not str or _HEX_256_PATTERN.fullmatch(value) is None:
             raise ChoiceValidationError(
                 "hex root seed must be exactly 64 lowercase hexadecimal characters"
             )
@@ -77,10 +83,10 @@ class RootSeed:
 
     @classmethod
     def from_text(cls, value: str, provenance: SeedProvenance) -> RootSeed:
+        if type(value) is not str or not value:
+            raise ChoiceValidationError("text seed must be a nonempty string")
         if provenance is SeedProvenance.UNIFORM_RANDOM_256:
             raise ChoiceValidationError("release seed provenance cannot be derived from text")
-        if not value:
-            raise ChoiceValidationError("text seed must be nonempty")
         material = hashlib.sha256(b"csd-root-seed-text/v1\x00" + value.encode("utf-8")).digest()
         return cls(material, provenance)
 
@@ -100,7 +106,7 @@ class SampleKey:
     sample_index: int
 
     def __post_init__(self) -> None:
-        if self.release != "v0.4":
+        if type(self.release) is not str or self.release != "v0.4":
             raise ChoiceValidationError("sample release must be v0.4")
         _require_token(self.target_id, "target_id")
         _require_nonnegative_integer(self.sample_index, "sample_index")
@@ -112,6 +118,8 @@ class AttemptKey:
     attempt_index: int
 
     def __post_init__(self) -> None:
+        if not isinstance(self.sample_key, SampleKey):
+            raise ChoiceValidationError("sample_key must be a SampleKey")
         attempt_index = _require_nonnegative_integer(self.attempt_index, "attempt_index")
         if attempt_index > MAX_ATTEMPT_INDEX:
             raise ChoiceValidationError(f"attempt_index must be between 0 and {MAX_ATTEMPT_INDEX}")
@@ -135,6 +143,27 @@ class AttemptRange:
         return range(self.maximum_attempts)
 
 
+def lowest_accepted_attempt(
+    attempt_range: AttemptRange,
+    is_valid: Callable[[int], bool],
+) -> int:
+    """Return the lowest valid attempt or raise deterministic budget exhaustion."""
+
+    if not isinstance(attempt_range, AttemptRange):
+        raise ChoiceValidationError("attempt_range must be an AttemptRange")
+    if not callable(is_valid):
+        raise ChoiceValidationError("is_valid must be callable")
+    for attempt_index in attempt_range.indices():
+        accepted = is_valid(attempt_index)
+        if type(accepted) is not bool:
+            raise ChoiceValidationError("attempt validator must return an exact boolean")
+        if accepted:
+            return attempt_index
+    raise AttemptBudgetExhausted(
+        f"no accepted attempt in deterministic range 0..{attempt_range.maximum_attempts - 1}"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ChoicePath:
     attempt_key: AttemptKey
@@ -142,14 +171,16 @@ class ChoicePath:
     segments: tuple[ChoiceSegment, ...]
 
     def __post_init__(self) -> None:
+        if not isinstance(self.attempt_key, AttemptKey):
+            raise ChoiceValidationError("attempt_key must be an AttemptKey")
         _require_token(self.namespace, "namespace")
-        if not self.segments:
-            raise ChoiceValidationError("choice path requires at least one segment")
+        if type(self.segments) is not tuple or not self.segments:
+            raise ChoiceValidationError("choice path requires a nonempty immutable tuple")
         for segment in self.segments:
             if type(segment) is int:
                 if segment < 0:
                     raise ChoiceValidationError("integer choice-path segments must be nonnegative")
-            elif isinstance(segment, str):
+            elif type(segment) is str:
                 _require_token(segment, "choice path string segment")
             else:
                 raise ChoiceValidationError(
