@@ -25,8 +25,10 @@ jobs:
           python-version: '3.11'
       - name: Apply implementation patch
         run: python scripts/apply_issue_23.py
+      - name: Normalize generated sources
+        run: python scripts/normalize_issue_23_generated.py
       - name: Remove one-shot patch machinery
-        run: rm scripts/apply_issue_23.py .github/workflows/issue-23-bootstrap.yml
+        run: rm scripts/apply_issue_23.py scripts/normalize_issue_23_generated.py .github/workflows/issue-23-bootstrap.yml
       - name: Install development environment
         run: |
           python -m pip install --upgrade pip
