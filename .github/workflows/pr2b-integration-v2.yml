@@ -1,0 +1,126 @@
+name: PR 2B Source Integration
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e '.[dev]'
+      - name: Apply compatibility integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          specs = Path("src/csd_foundry/synthesis/v0_4/specs.py")
+          text = specs.read_text(encoding="utf-8")
+          text = text.replace(
+              '    "identity_policy.schema.json",\n)',
+              '    "identity_policy.schema.json",\n'
+              '    "replay_policy.schema.json",\n'
+              '    "attempt_input.schema.json",\n'
+              ')',
+          )
+          if "REPLAY_POLICY_SPEC:" not in text:
+              marker = "\n\n\nSPEC_DOCUMENTS: dict[str, dict[str, object]] = {"
+              policy = (
+                  "\n\nREPLAY_POLICY_SPEC: dict[str, object] = {\n"
+                  '    "policy_id": "csd-replay-contract",\n'
+                  '    "policy_version": 1,\n'
+                  '    "semantic_execution_mode": "lowest-valid-attempt",\n'
+                  "}\n"
+              )
+              text = text.replace(marker, policy + marker)
+          text = text.replace(
+              '    "identity_policy.json": IDENTITY_POLICY_SPEC,\n}',
+              '    "identity_policy.json": IDENTITY_POLICY_SPEC,\n'
+              '    "replay_policy.json": REPLAY_POLICY_SPEC,\n'
+              '}',
+          )
+          specs.write_text(text, encoding="utf-8")
+
+          namespace = Path("src/csd_foundry/synthesis/v0_4/generation_namespace.py")
+          text = namespace.read_text(encoding="utf-8")
+          text = text.replace(
+              "        RELEASE_POLICY_SPEC,\n",
+              "        RELEASE_POLICY_SPEC,\n        REPLAY_POLICY_SPEC,\n",
+          )
+          text = text.replace(
+              '    replay_contract = {\n'
+              '        "policy_id": REPLAY_POLICY_ID,\n'
+              '        "policy_version": REPLAY_POLICY_VERSION,\n'
+              '        "semantic_execution_mode": "lowest-valid-attempt",\n'
+              '    }\n',
+              "",
+          )
+          text = text.replace(
+              "replay_policy_digest=canonical_sha256(replay_contract),",
+              "replay_policy_digest=canonical_sha256(REPLAY_POLICY_SPEC),",
+          )
+          namespace.write_text(text, encoding="utf-8")
+
+          cli = Path("src/csd_foundry/cli.py")
+          text = cli.read_text(encoding="utf-8")
+          if 'synthesis_replay = synthesis_sub.add_parser(' not in text:
+              anchor = '    _add_release_argument(synthesis_identities, default="v0.4")\n'
+              text = text.replace(
+                  anchor,
+                  anchor
+                  + '    synthesis_replay = synthesis_sub.add_parser(\n'
+                  + '        "replay",\n'
+                  + '        help="validate deterministic choice ledgers and attempt replay",\n'
+                  + '    )\n'
+                  + '    _add_release_argument(synthesis_replay, default="v0.4")\n',
+              )
+          if 'args.synthesis_command == "replay"' not in text:
+              anchor = '    if args.command == "synthesize" and args.synthesis_command == "contracts":\n'
+              block = (
+                  '    if args.command == "synthesize" and args.synthesis_command == "replay":\n'
+                  '        from csd_foundry.synthesis.v0_4.replay_validation import validate_replay\n\n'
+                  '        replay_result = validate_replay(args.release)\n'
+                  '        _emit(replay_result.to_dict(), args.output)\n'
+                  '        if not replay_result.success:\n'
+                  '            raise SystemExit(1)\n'
+                  '        return\n\n'
+              )
+              text = text.replace(anchor, block + anchor)
+          cli.write_text(text, encoding="utf-8")
+
+          validation = Path("src/csd_foundry/synthesis/v0_4/replay_validation.py")
+          text = validation.read_text(encoding="utf-8")
+          text = text.replace(
+              "    try:\n        session.weighted_choice(\n            _path(session._attempt_key, \"invalid\")",
+              "    try:  # noqa: SIM105\n        session.weighted_choice(\n            _path(session._attempt_key, \"invalid\")",
+          )
+          validation.write_text(text, encoding="utf-8")
+
+          tests = Path("tests/synthesis_v0_4/test_replay_contracts.py")
+          text = tests.read_text(encoding="utf-8").replace(
+              "pytest.raises(Exception)",
+              "pytest.raises(ValueError)",
+          )
+          tests.write_text(text, encoding="utf-8")
+          PY
+      - run: ruff format src/csd_foundry/synthesis/v0_4 tests/synthesis_v0_4 src/csd_foundry/cli.py
+      - run: ruff check --fix src/csd_foundry/synthesis/v0_4 tests/synthesis_v0_4 src/csd_foundry/cli.py
+      - name: Commit source integration
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "csd-foundry-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/csd_foundry/synthesis/v0_4 src/csd_foundry/cli.py tests/synthesis_v0_4
+          git commit -m "Integrate and format replay contracts"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
