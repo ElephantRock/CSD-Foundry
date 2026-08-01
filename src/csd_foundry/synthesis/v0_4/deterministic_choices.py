@@ -26,7 +26,8 @@ DIGEST_PRIMITIVE = "hmac-sha256"
 PATH_SCHEMA_VERSION = "csd-choice-path/0.4"
 IDENTITY_SCHEMA_VERSION = "csd-identity/0.4"
 COUNTER_ENCODING = "uint64-big-endian"
-CANDIDATE_BYTE_ORDER: Literal["big"] = "big"
+CANDIDATE_BYTE_ORDER = "big-endian"
+_CANDIDATE_BYTEORDER_LITERAL: Literal["big"] = "big"
 
 _PREFIX = b"csd-choice-hmac-sha256-rejection/v1\x00"
 
@@ -187,7 +188,7 @@ def _bounded_integer_for_domain(
             draw_index,
             width,
         )
-        candidate = int.from_bytes(candidate_bytes, CANDIDATE_BYTE_ORDER)
+        candidate = int.from_bytes(candidate_bytes, _CANDIDATE_BYTEORDER_LITERAL)
         draw = CandidateDraw(
             draw_index=draw_index,
             candidate_hex=candidate_bytes.hex(),
