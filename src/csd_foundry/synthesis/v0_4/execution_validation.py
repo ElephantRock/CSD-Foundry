@@ -31,13 +31,13 @@ from csd_foundry.synthesis.v0_4.execution_protocol import (
     shard_policy_document,
     validate_failure_chain,
 )
-from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
 from csd_foundry.synthesis.v0_4.execution_vectors import (
     EXECUTION_VECTOR_IDS,
     EXPECTED_EXECUTION_DIGESTS,
     FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST,
     validate_execution_vector_catalog,
 )
+from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
 _TARGET_ALPHA_DEFINITION_DIGEST = "0c249247fe8fe1bc74c067a535846dedf0df922e69688ac20f726289f78901c5"
