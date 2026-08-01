@@ -14,6 +14,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
     ChoiceSegment,
     ChoiceValidationError,
     RootSeed,
+    SampleKey,
 )
 from csd_foundry.synthesis.v0_4.generation_namespace import GenerationNamespace
 from csd_foundry.synthesis.v0_4.identity_policy import (
@@ -101,10 +102,16 @@ class IdentityRequest:
     ordinal: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.attempt_key, AttemptKey):
-            raise ChoiceValidationError("identity attempt_key must be an AttemptKey")
-        if not isinstance(self.entity_kind, EntityKind):
-            raise ChoiceValidationError("identity entity_kind must be an EntityKind")
+        if type(self) is not IdentityRequest:
+            raise ChoiceValidationError("identity requests must use the exact contract class")
+        if type(self.attempt_key) is not AttemptKey:
+            raise ChoiceValidationError("identity attempt_key must be an exact AttemptKey")
+        if type(self.attempt_key.sample_key) is not SampleKey:
+            raise ChoiceValidationError(
+                "identity sample_key must be an exact SampleKey"
+            )
+        if type(self.entity_kind) is not EntityKind:
+            raise ChoiceValidationError("identity entity_kind must be an exact EntityKind")
         if type(self.role_segments) is not tuple or not self.role_segments:
             raise ChoiceValidationError("identity role_segments require a nonempty tuple")
         for segment in self.role_segments:
@@ -136,8 +143,10 @@ class EntityIdentity:
     generation_namespace_digest: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.entity_kind, EntityKind):
-            raise IdentityError("entity identity kind must be an EntityKind")
+        if type(self) is not EntityIdentity:
+            raise IdentityError("entity identities must use the exact contract class")
+        if type(self.entity_kind) is not EntityKind:
+            raise IdentityError("entity identity kind must be an exact EntityKind")
         full_digest = _require_digest(self.full_digest, "identity full_digest")
         _require_digest(self.material_digest, "identity material_digest")
         _require_digest(
@@ -167,10 +176,12 @@ class IdentityRecord:
     identity: EntityIdentity
 
     def __post_init__(self) -> None:
-        if not isinstance(self.request, IdentityRequest):
-            raise IdentityError("identity record request must be an IdentityRequest")
-        if not isinstance(self.identity, EntityIdentity):
-            raise IdentityError("identity record identity must be an EntityIdentity")
+        if type(self) is not IdentityRecord:
+            raise IdentityError("identity records must use the exact contract class")
+        if type(self.request) is not IdentityRequest:
+            raise IdentityError("identity record request must be an exact IdentityRequest")
+        if type(self.identity) is not EntityIdentity:
+            raise IdentityError("identity record identity must be an exact EntityIdentity")
         if self.request.entity_kind is not self.identity.entity_kind:
             raise IdentityError("identity record request and identity kinds must match")
 
@@ -185,10 +196,12 @@ def canonical_identity_material(
     namespace: GenerationNamespace,
     request: IdentityRequest,
 ) -> bytes:
-    if not isinstance(namespace, GenerationNamespace):
-        raise ChoiceValidationError("identity namespace must be a GenerationNamespace")
-    if not isinstance(request, IdentityRequest):
-        raise ChoiceValidationError("identity request must be an IdentityRequest")
+    if type(namespace) is not GenerationNamespace:
+        raise ChoiceValidationError(
+            "identity namespace must be an exact GenerationNamespace"
+        )
+    if type(request) is not IdentityRequest:
+        raise ChoiceValidationError("identity request must be an exact IdentityRequest")
     return canonical_json_bytes(
         {
             "algorithm_id": IDENTITY_ALGORITHM_ID,
@@ -200,6 +213,10 @@ def canonical_identity_material(
 
 
 def _identity_digest(seed: RootSeed, material: bytes) -> bytes:
+    if type(seed) is not RootSeed:
+        raise ChoiceValidationError("identity seed must be an exact RootSeed")
+    if type(material) is not bytes:
+        raise IdentityError("identity material must be immutable bytes")
     message = _PREFIX + len(material).to_bytes(8, "big") + material
     return hmac.new(seed.material, message, hashlib.sha256).digest()
 
@@ -210,6 +227,14 @@ def _identity_from_digest(
     material: bytes,
     digest: bytes,
 ) -> EntityIdentity:
+    if type(namespace) is not GenerationNamespace:
+        raise ChoiceValidationError(
+            "identity namespace must be an exact GenerationNamespace"
+        )
+    if type(request) is not IdentityRequest:
+        raise ChoiceValidationError("identity request must be an exact IdentityRequest")
+    if type(material) is not bytes:
+        raise IdentityError("identity material must be immutable bytes")
     if type(digest) is not bytes or len(digest) * 8 != FULL_DIGEST_BITS:
         raise IdentityError("identity digest must contain exactly 256 immutable bits")
     full_digest = digest.hex()
@@ -231,8 +256,8 @@ def derive_identity(
 ) -> EntityIdentity:
     """Derive one identity using the sole normative identity algorithm."""
 
-    if not isinstance(seed, RootSeed):
-        raise ChoiceValidationError("identity seed must be a RootSeed")
+    if type(seed) is not RootSeed:
+        raise ChoiceValidationError("identity seed must be an exact RootSeed")
     material = canonical_identity_material(namespace, request)
     return _identity_from_digest(
         namespace,
@@ -246,10 +271,12 @@ class IdentityLedger:
     """Fail-closed allocation ledger with order-independent commitments."""
 
     def __init__(self, seed: RootSeed, namespace: GenerationNamespace) -> None:
-        if not isinstance(seed, RootSeed):
-            raise ChoiceValidationError("identity ledger seed must be a RootSeed")
-        if not isinstance(namespace, GenerationNamespace):
-            raise ChoiceValidationError("identity ledger namespace must be a GenerationNamespace")
+        if type(seed) is not RootSeed:
+            raise ChoiceValidationError("identity ledger seed must be an exact RootSeed")
+        if type(namespace) is not GenerationNamespace:
+            raise ChoiceValidationError(
+                "identity ledger namespace must be an exact GenerationNamespace"
+            )
         self._seed = seed
         self._namespace = namespace
         self._records: dict[str, IdentityRecord] = {}
@@ -257,8 +284,10 @@ class IdentityLedger:
         self._display_ids: dict[str, str] = {}
 
     def _request_key(self, request: IdentityRequest) -> str:
-        if not isinstance(request, IdentityRequest):
-            raise ChoiceValidationError("identity ledger request must be an IdentityRequest")
+        if type(request) is not IdentityRequest:
+            raise ChoiceValidationError(
+                "identity ledger request must be an exact IdentityRequest"
+            )
         return canonical_sha256(request.to_json_value())
 
     def _record_identity(
@@ -266,6 +295,8 @@ class IdentityLedger:
         request: IdentityRequest,
         identity: EntityIdentity,
     ) -> EntityIdentity:
+        if type(identity) is not EntityIdentity:
+            raise IdentityError("identity ledger requires an exact EntityIdentity")
         request_key = self._request_key(request)
         if request_key in self._records:
             raise DuplicateIdentityRoleError("semantic identity role has already been allocated")
