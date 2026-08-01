@@ -48,9 +48,7 @@ def _inventory() -> ExecutionInventory:
         root_seed_commitment=_ROOT_SEED_COMMITMENT,
         sample_key_encoding_id=SAMPLE_KEY_ENCODING_ID,
         sample_key_encoding_version=SAMPLE_KEY_ENCODING_VERSION,
-        sample_key_encoding_policy_digest=canonical_sha256(
-            sample_key_encoding_policy_document()
-        ),
+        sample_key_encoding_policy_digest=canonical_sha256(sample_key_encoding_policy_document()),
         shard_policy_id=SHARD_POLICY_ID,
         shard_policy_version=SHARD_POLICY_VERSION,
         shard_policy_digest=canonical_sha256(shard_policy_document()),
@@ -71,9 +69,7 @@ def test_constant_versions_reject_subclasses_and_booleans() -> None:
             schema_version=DerivedString("csd-operational-retry-policy/0.4"),
         )
     with pytest.raises(ExecutionProtocolError):
-        RequiredSchemaVersions(
-            schema_version=DerivedString("csd-required-schema-versions/0.4")
-        )
+        RequiredSchemaVersions(schema_version=DerivedString("csd-required-schema-versions/0.4"))
     with pytest.raises(ExecutionProtocolError):
         replace(_inventory(), sample_key_encoding_version=True)
     with pytest.raises(ExecutionProtocolError):
