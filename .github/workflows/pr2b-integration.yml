@@ -106,8 +106,9 @@ jobs:
               text = text.replace(command_anchor, command_block + command_anchor)
           cli.write_text(text, encoding="utf-8")
           PY
+      - run: sed -i 's/pytest.raises(Exception)/pytest.raises(ValueError)/' tests/synthesis_v0_4/test_replay_contracts.py
       - run: ruff format src/csd_foundry/synthesis/v0_4 tests/synthesis_v0_4 src/csd_foundry/cli.py
-      - run: ruff check --fix src/csd_foundry/synthesis/v0_4 tests/synthesis_v0_4 src/csd_foundry/cli.py
+      - run: ruff check --fix --unsafe-fixes src/csd_foundry/synthesis/v0_4 tests/synthesis_v0_4 src/csd_foundry/cli.py
       - name: Commit integration
         run: |
           if git diff --quiet; then
