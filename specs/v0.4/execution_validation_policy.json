@@ -1,0 +1,6 @@
+{
+  "attested_commitment_enabled": false,
+  "policy_id": "csd-execution-validation",
+  "policy_version": 1,
+  "release_validation_mode": "full-replay"
+}
