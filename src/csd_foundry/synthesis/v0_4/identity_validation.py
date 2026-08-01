@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from csd_foundry.synthesis.v0_4.canonical_values import (
+    CanonicalArray,
     CanonicalField,
     CanonicalObject,
     CanonicalValueError,
@@ -18,9 +19,13 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
     SampleKey,
     SeedProvenance,
 )
-from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
+from csd_foundry.synthesis.v0_4.generation_namespace import (
+    GenerationNamespace,
+    build_generation_namespace,
+)
 from csd_foundry.synthesis.v0_4.identities import (
     DuplicateIdentityRoleError,
+    EntityIdentity,
     EntityKind,
     IdentityCollisionError,
     IdentityLedger,
@@ -163,6 +168,12 @@ def _request_from_vector(data: dict[str, object]) -> IdentityRequest:
 
 
 def _canonical_assurance() -> tuple[bool, int]:
+    class CanonicalArraySubclass(CanonicalArray):
+        __slots__ = ()
+
+    class CanonicalObjectSubclass(CanonicalObject):
+        __slots__ = ()
+
     values = (
         canonical_value_bytes(1),
         canonical_value_bytes("1"),
@@ -176,6 +187,8 @@ def _canonical_assurance() -> tuple[bool, int]:
         set(),
         b"bytes",
         bytearray(b"mutable"),
+        CanonicalArraySubclass((1,)),
+        CanonicalObjectSubclass(()),
     )
     rejected = 0
     for value in invalid_values:
@@ -205,14 +218,10 @@ def _canonical_assurance() -> tuple[bool, int]:
 
 
 def _synthetic_identity(
-    namespace_digest_source: object,
+    namespace: GenerationNamespace,
     request: IdentityRequest,
     digest: bytes,
-) -> object:
-    del namespace_digest_source
-    namespace = build_generation_namespace(
-        _exact_str(KNOWN_ANSWER_IDENTITY_VECTORS[0], "target_definition_digest")
-    )
+) -> EntityIdentity:
     return _identity_from_digest(
         namespace,
         request,
@@ -222,9 +231,15 @@ def _synthetic_identity(
 
 
 def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
-    target_digest = _exact_str(KNOWN_ANSWER_IDENTITY_VECTORS[0], "target_definition_digest")
+    target_digest = _exact_str(
+        KNOWN_ANSWER_IDENTITY_VECTORS[0],
+        "target_definition_digest",
+    )
     namespace = build_generation_namespace(target_digest)
-    requests = tuple(_request_from_vector(vector) for vector in KNOWN_ANSWER_IDENTITY_VECTORS[:3])
+    requests = tuple(
+        _request_from_vector(vector)
+        for vector in KNOWN_ANSWER_IDENTITY_VECTORS[:3]
+    )
     forward = IdentityLedger(seed, namespace)
     reverse = IdentityLedger(seed, namespace)
     for request in requests:
@@ -251,29 +266,29 @@ def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
     except UnknownIdentityRoleError:
         unknown_role_rejected = True
 
-    collision_a = IdentityRequest(requests[0].attempt_key, EntityKind.EVIDENCE, ("a",), 0)
-    collision_b = IdentityRequest(requests[0].attempt_key, EntityKind.EVIDENCE, ("b",), 0)
+    collision_a = IdentityRequest(
+        requests[0].attempt_key,
+        EntityKind.EVIDENCE,
+        ("a",),
+        0,
+    )
+    collision_b = IdentityRequest(
+        requests[0].attempt_key,
+        EntityKind.EVIDENCE,
+        ("b",),
+        0,
+    )
 
     full_ledger = IdentityLedger(seed, namespace)
     full_ledger._record_identity(
         collision_a,
-        _identity_from_digest(
-            namespace,
-            collision_a,
-            canonical_identity_material(namespace, collision_a),
-            b"\x11" * 32,
-        ),
+        _synthetic_identity(namespace, collision_a, b"\x11" * 32),
     )
     full_collision_rejected = False
     try:
         full_ledger._record_identity(
             collision_b,
-            _identity_from_digest(
-                namespace,
-                collision_b,
-                canonical_identity_material(namespace, collision_b),
-                b"\x11" * 32,
-            ),
+            _synthetic_identity(namespace, collision_b, b"\x11" * 32),
         )
     except IdentityCollisionError:
         full_collision_rejected = True
@@ -281,10 +296,9 @@ def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
     display_ledger = IdentityLedger(seed, namespace)
     display_ledger._record_identity(
         collision_a,
-        _identity_from_digest(
+        _synthetic_identity(
             namespace,
             collision_a,
-            canonical_identity_material(namespace, collision_a),
             b"\xaa" * 16 + b"\x22" * 16,
         ),
     )
@@ -292,10 +306,9 @@ def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
     try:
         display_ledger._record_identity(
             collision_b,
-            _identity_from_digest(
+            _synthetic_identity(
                 namespace,
                 collision_b,
-                canonical_identity_material(namespace, collision_b),
                 b"\xaa" * 16 + b"\x33" * 16,
             ),
         )
@@ -339,7 +352,9 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
         try:
             validate_identity_policy_document()
             if catalog_digest != FROZEN_IDENTITY_VECTOR_CATALOG_DIGEST:
-                raise ValueError("identity vector catalog differs from frozen version-1 digest")
+                raise ValueError(
+                    "identity vector catalog differs from frozen version-1 digest"
+                )
             seed = RootSeed.from_hex(
                 KNOWN_ANSWER_IDENTITY_SEED_HEX,
                 SeedProvenance.KNOWN_ANSWER_FIXTURE,
@@ -348,10 +363,16 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
                 namespace = build_generation_namespace(
                     _exact_str(vector, "target_definition_digest")
                 )
-                actual = derive_identity(seed, namespace, _request_from_vector(vector))
+                actual = derive_identity(
+                    seed,
+                    namespace,
+                    _request_from_vector(vector),
+                )
                 expected = vector["expected"]
                 if not isinstance(expected, dict) or actual.to_json_value() != expected:
-                    raise ValueError(f"identity vector failed: {_exact_str(vector, 'vector_id')}")
+                    raise ValueError(
+                        f"identity vector failed: {_exact_str(vector, 'vector_id')}"
+                    )
                 vectors_passed += 1
             canonical_type_separation, invalid_rejected = _canonical_assurance()
             (
@@ -366,8 +387,10 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
 
     if not canonical_type_separation:
         errors.append("canonical integer, string, and Boolean values are not separated")
-    if invalid_rejected != 8:
-        errors.append("canonical-value rejection campaign did not kill every invalid input")
+    if invalid_rejected != 10:
+        errors.append(
+            "canonical-value rejection campaign did not kill every invalid input"
+        )
     if not allocation_order_stable:
         errors.append("identity ledger digest depends on allocation order")
     if not duplicate_role_rejected:
@@ -379,9 +402,16 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
     if not display_collision_rejected:
         errors.append("injected display identity collision was accepted")
     if not policy_satisfied:
-        errors.append("128-bit display identity exceeds the exact collision-risk ceiling")
-    if PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count != PROVISIONAL_DESIGN_IDENTITY_CEILING:
-        errors.append("provisional per-kind identity counts do not match the design envelope")
+        errors.append(
+            "128-bit display identity exceeds the exact collision-risk ceiling"
+        )
+    if (
+        PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count
+        != PROVISIONAL_DESIGN_IDENTITY_CEILING
+    ):
+        errors.append(
+            "provisional per-kind identity counts do not match the design envelope"
+        )
 
     return IdentityValidationReport(
         release=release,
