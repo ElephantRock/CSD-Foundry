@@ -1,0 +1,20 @@
+{
+  "catalog_digest": "955da9ed90735187574dbf0cbf9813447f34658e22643abbe4f148f06976448a",
+  "evidence_version": 1,
+  "expected_digests": {
+    "accepted-completion-envelope": "ccc9916213583526dfb4a0df590622741a723fc657fc4d2b9f48ceae6e17d94e",
+    "inventory-completion-reference": "09252fb469206e4fae82a9bc24f6fa4cb16d5e758e947f519eb9d9f320605dc6",
+    "no-clobber-layout": "f5a4264264927a30babb1052de0ef3835d860e74806e232a70a120faae1d76e1",
+    "publication-receipt-chain": "ac542a8de0360a2a8a2004ae34e901fd46e5fb1b751c097683fd0d38678daa74",
+    "rejected-completion-envelope": "0f0ee7df7230dccf5db2be3cf789c2cbb8b0b5eb7ef1ed1299f25c65e2260507"
+  },
+  "release": "v0.4",
+  "schema_version": "0.4.0",
+  "vector_ids": [
+    "accepted-completion-envelope",
+    "rejected-completion-envelope",
+    "inventory-completion-reference",
+    "publication-receipt-chain",
+    "no-clobber-layout"
+  ]
+}

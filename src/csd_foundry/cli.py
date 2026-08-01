@@ -81,6 +81,11 @@ def main() -> None:
         help="validate execution inventories and bounded operational evidence",
     )
     _add_release_argument(synthesis_execution, default="v0.4")
+    synthesis_publication = synthesis_sub.add_parser(
+        "publication",
+        help="validate append-only content-addressed publication",
+    )
+    _add_release_argument(synthesis_publication, default="v0.4")
 
     args = parser.parse_args()
 
@@ -170,6 +175,17 @@ def main() -> None:
         execution_result = validate_execution_protocol(args.release)
         _emit(execution_result.to_dict(), args.output)
         if not execution_result.success:
+            raise SystemExit(1)
+        return
+
+    if args.command == "synthesize" and args.synthesis_command == "publication":
+        from csd_foundry.synthesis.v0_4.publication_validation import (
+            validate_publication_protocol,
+        )
+
+        publication_result = validate_publication_protocol(args.release)
+        _emit(publication_result.to_dict(), args.output)
+        if not publication_result.success:
             raise SystemExit(1)
         return
 

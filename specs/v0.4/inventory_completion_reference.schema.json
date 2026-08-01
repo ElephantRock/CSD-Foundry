@@ -1,0 +1,87 @@
+{
+  "$id": "urn:csd-foundry:inventory-completion-reference:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "attempt_key": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_index": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "release": {
+          "const": "v0.4"
+        },
+        "sample_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_index",
+        "release",
+        "sample_index",
+        "target_id"
+      ],
+      "type": "object"
+    },
+    "completion_envelope_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "global_ordinal": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "inventory_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "sample_execution_spec_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "sample_key": {
+      "additionalProperties": false,
+      "properties": {
+        "release": {
+          "const": "v0.4"
+        },
+        "sample_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release",
+        "sample_index",
+        "target_id"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "csd-inventory-completion-reference/0.4"
+    }
+  },
+  "required": [
+    "attempt_key",
+    "completion_envelope_digest",
+    "global_ordinal",
+    "inventory_digest",
+    "sample_execution_spec_digest",
+    "sample_key",
+    "schema_version"
+  ],
+  "type": "object"
+}
