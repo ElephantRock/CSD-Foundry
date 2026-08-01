@@ -60,9 +60,8 @@ class RootSeed:
     def __post_init__(self) -> None:
         if len(self.material) != ROOT_SEED_BYTES:
             raise ChoiceValidationError("root seed must contain exactly 32 bytes")
-        if (
-            self.provenance is SeedProvenance.UNIFORM_RANDOM_256
-            and (self.material == bytes(ROOT_SEED_BYTES) or len(set(self.material)) == 1)
+        if self.provenance is SeedProvenance.UNIFORM_RANDOM_256 and (
+            self.material == bytes(ROOT_SEED_BYTES) or len(set(self.material)) == 1
         ):
             raise ChoiceValidationError(
                 "release seed cannot use all-zero or repeated-byte fixture material"
@@ -82,9 +81,7 @@ class RootSeed:
             raise ChoiceValidationError("release seed provenance cannot be derived from text")
         if not value:
             raise ChoiceValidationError("text seed must be nonempty")
-        material = hashlib.sha256(
-            b"csd-root-seed-text/v1\x00" + value.encode("utf-8")
-        ).digest()
+        material = hashlib.sha256(b"csd-root-seed-text/v1\x00" + value.encode("utf-8")).digest()
         return cls(material, provenance)
 
     @property
@@ -93,9 +90,7 @@ class RootSeed:
 
     @property
     def commitment(self) -> str:
-        return hashlib.sha256(
-            b"csd-root-seed-commitment/v1\x00" + self.material
-        ).hexdigest()
+        return hashlib.sha256(b"csd-root-seed-commitment/v1\x00" + self.material).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,9 +114,7 @@ class AttemptKey:
     def __post_init__(self) -> None:
         attempt_index = _require_nonnegative_integer(self.attempt_index, "attempt_index")
         if attempt_index > MAX_ATTEMPT_INDEX:
-            raise ChoiceValidationError(
-                f"attempt_index must be between 0 and {MAX_ATTEMPT_INDEX}"
-            )
+            raise ChoiceValidationError(f"attempt_index must be between 0 and {MAX_ATTEMPT_INDEX}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,9 +122,7 @@ class AttemptRange:
     maximum_attempts: int
 
     def __post_init__(self) -> None:
-        maximum_attempts = _require_nonnegative_integer(
-            self.maximum_attempts, "maximum_attempts"
-        )
+        maximum_attempts = _require_nonnegative_integer(self.maximum_attempts, "maximum_attempts")
         if not 1 <= maximum_attempts <= MAX_ATTEMPT_INDEX + 1:
             raise ChoiceValidationError(
                 f"maximum_attempts must be between 1 and {MAX_ATTEMPT_INDEX + 1}"
@@ -157,9 +148,7 @@ class ChoicePath:
         for segment in self.segments:
             if type(segment) is int:
                 if segment < 0:
-                    raise ChoiceValidationError(
-                        "integer choice-path segments must be nonnegative"
-                    )
+                    raise ChoiceValidationError("integer choice-path segments must be nonnegative")
             elif isinstance(segment, str):
                 _require_token(segment, "choice path string segment")
             else:

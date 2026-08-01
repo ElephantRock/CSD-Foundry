@@ -4,8 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "choice_path_schema_version": {
-      "minLength": 1,
-      "type": "string"
+      "const": "csd-choice-path/0.4"
     },
     "maximum_trajectory_steps": {
       "minimum": 1,
@@ -28,16 +27,17 @@
       "type": "boolean"
     },
     "rng_algorithm": {
-      "minLength": 1,
-      "type": "string"
+      "const": "csd-choice-hmac-sha256-rejection"
     },
     "rng_version": {
-      "minLength": 1,
-      "type": "string"
+      "const": "1"
     },
     "root_seed": {
-      "minLength": 1,
+      "pattern": "^[0-9a-f]{64}$",
       "type": "string"
+    },
+    "root_seed_provenance": {
+      "const": "uniform-random-256"
     },
     "schema_version": {
       "const": "0.4.0"
@@ -64,6 +64,7 @@
     "pilot_trajectory_count",
     "maximum_trajectory_steps",
     "root_seed",
+    "root_seed_provenance",
     "rng_algorithm",
     "rng_version",
     "choice_path_schema_version",

@@ -5,8 +5,9 @@ from __future__ import annotations
 import bisect
 import hashlib
 import hmac
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Generic, Literal, Sequence, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from csd_foundry.synthesis.v0_4.choice_paths import (
     MAX_UINT64,

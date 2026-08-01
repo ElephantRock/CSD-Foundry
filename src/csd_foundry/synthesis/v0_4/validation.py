@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+from csd_foundry.synthesis.v0_4.choice_policy import load_choice_algorithm_policy
 from csd_foundry.synthesis.v0_4.contracts import (
     CompletenessEvidenceKind,
     CompletenessWitnessMap,
@@ -239,6 +240,7 @@ def load_release_policy() -> ReleasePolicy:
         pilot_trajectory_count=_integer(data, "pilot_trajectory_count"),
         maximum_trajectory_steps=_integer(data, "maximum_trajectory_steps"),
         root_seed=_string(data, "root_seed"),
+        root_seed_provenance=_string(data, "root_seed_provenance"),
         rng_algorithm=_string(data, "rng_algorithm"),
         rng_version=_string(data, "rng_version"),
         choice_path_schema_version=_string(data, "choice_path_schema_version"),
@@ -344,6 +346,7 @@ def validate_release(release: str = "v0.4") -> SynthesisContractReport:
             release_policy = load_release_policy()
             risk_policy = load_mutation_risk_policy()
             load_deterministic_arithmetic_policy()
+            load_choice_algorithm_policy()
         except (ContractValidationError, ValueError) as exc:
             errors.append(str(exc))
 
@@ -412,7 +415,7 @@ def validate_release(release: str = "v0.4") -> SynthesisContractReport:
         machine_proven_infeasible_targets=infeasible,
         unresolved_targets=unresolved,
         holdout_rule_count=len(holdouts),
-        policy_count=4,
+        policy_count=5,
         schema_document_count=len(SCHEMA_DOCUMENT_NAMES),
         rejection_cause_count=len(RejectionCause),
         rejection_owner_count=len({cause.owner for cause in RejectionCause}),

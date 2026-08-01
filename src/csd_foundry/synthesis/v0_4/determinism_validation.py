@@ -179,8 +179,7 @@ def _validate_vector(
         ):
             raise ValueError("weighted vector values must contain strings")
         if not isinstance(weights_raw, list) or not all(
-            isinstance(item, int) and not isinstance(item, bool)
-            for item in weights_raw
+            isinstance(item, int) and not isinstance(item, bool) for item in weights_raw
         ):
             raise ValueError("weighted vector weights must contain integers")
         weighted_result = weighted_choice(
@@ -284,8 +283,7 @@ def validate_determinism(release: str = "v0.4") -> DeterminismReport:
 
     typed_segment_separation = bool(
         len(segment_digests) == 2
-        and segment_digests["path-integer-segment"]
-        != segment_digests["path-string-segment"]
+        and segment_digests["path-integer-segment"] != segment_digests["path-string-segment"]
     )
     if not typed_segment_separation:
         errors.append("integer and string choice-path segments are not separated")

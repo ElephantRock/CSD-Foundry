@@ -70,8 +70,7 @@ class ChoiceAlgorithmPolicy:
         for field_name, expected_value in expected.items():
             if getattr(self, field_name) != expected_value:
                 raise ChoiceValidationError(
-                    f"{field_name} must equal the algorithm-v1 normative value "
-                    f"{expected_value!r}"
+                    f"{field_name} must equal the algorithm-v1 normative value {expected_value!r}"
                 )
         if self.display_digest_bits < 128 or self.display_digest_bits % 8:
             raise ChoiceValidationError(
@@ -80,13 +79,9 @@ class ChoiceAlgorithmPolicy:
         if self.design_identity_ceiling <= 0:
             raise ChoiceValidationError("design_identity_ceiling must be positive")
         if self.collision_risk_ceiling_numerator <= 0:
-            raise ChoiceValidationError(
-                "collision risk ceiling numerator must be positive"
-            )
+            raise ChoiceValidationError("collision risk ceiling numerator must be positive")
         if self.collision_risk_ceiling_denominator <= 0:
-            raise ChoiceValidationError(
-                "collision risk ceiling denominator must be positive"
-            )
+            raise ChoiceValidationError("collision risk ceiling denominator must be positive")
         if self.collision_probability_upper_bound > self.collision_risk_ceiling:
             raise ChoiceValidationError(
                 "display identity prefix does not satisfy the declared collision-risk ceiling"
@@ -152,13 +147,7 @@ def load_choice_algorithm_policy() -> ChoiceAlgorithmPolicy:
         candidate_byte_order=_string(data, "candidate_byte_order"),
         display_digest_bits=_integer(data, "display_digest_bits"),
         design_identity_ceiling=_integer(data, "design_identity_ceiling"),
-        collision_risk_ceiling_numerator=_integer(
-            data, "collision_risk_ceiling_numerator"
-        ),
-        collision_risk_ceiling_denominator=_integer(
-            data, "collision_risk_ceiling_denominator"
-        ),
-        semantic_floating_point_permitted=_boolean(
-            data, "semantic_floating_point_permitted"
-        ),
+        collision_risk_ceiling_numerator=_integer(data, "collision_risk_ceiling_numerator"),
+        collision_risk_ceiling_denominator=_integer(data, "collision_risk_ceiling_denominator"),
+        semantic_floating_point_permitted=_boolean(data, "semantic_floating_point_permitted"),
     )

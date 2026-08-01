@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-KNOWN_ANSWER_SEED_HEX = (
-    "000102030405060708090a0b0c0d0e0f"
-    "101112131415161718191a1b1c1d1e1f"
-)
+KNOWN_ANSWER_SEED_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
     {
@@ -30,14 +27,8 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
                     "block_count": 1,
                 }
             ],
-            "domain_digest": (
-                "c59b2647f72a9bd0c9bc95ea853a4e49"
-                "eefa5c6abf6a1dd4502f962ac326d845"
-            ),
-            "material_digest": (
-                "09590bcc4f489edd3614c022d6ab946eb"
-                "436178f4281746aab2de52169bdcdb7"
-            ),
+            "domain_digest": ("c59b2647f72a9bd0c9bc95ea853a4e49eefa5c6abf6a1dd4502f962ac326d845"),
+            "material_digest": ("09590bcc4f489edd3614c022d6ab946eb436178f4281746aab2de52169bdcdb7"),
         },
     },
     {
@@ -74,14 +65,8 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
                     "block_count": 1,
                 },
             ],
-            "domain_digest": (
-                "5e4272db7d6c1d2f3b1234ac39a5ca51"
-                "7507987e56046b24d28ac95d6bbddf58"
-            ),
-            "material_digest": (
-                "c5139073d58b47bdb7a0ce526e7ef3b7"
-                "29a79591514088a1ec9acacdcb21a913"
-            ),
+            "domain_digest": ("5e4272db7d6c1d2f3b1234ac39a5ca517507987e56046b24d28ac95d6bbddf58"),
+            "material_digest": ("c5139073d58b47bdb7a0ce526e7ef3b729a79591514088a1ec9acacdcb21a913"),
         },
     },
     {
@@ -98,8 +83,7 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
             ),
             "draw_index": 0,
             "candidate_hex": (
-                "dff5aaea19f189217ccd10cf2beb7aa038"
-                "a7fbc8b314005a7dab2d515e6cac247291"
+                "dff5aaea19f189217ccd10cf2beb7aa038a7fbc8b314005a7dab2d515e6cac247291"
             ),
             "candidate": (
                 6638785159048577193024017995718683384671669877475061841227835091783189484856963729
@@ -113,8 +97,7 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
                 {
                     "draw_index": 0,
                     "candidate_hex": (
-                        "dff5aaea19f189217ccd10cf2beb7aa038"
-                        "a7fbc8b314005a7dab2d515e6cac247291"
+                        "dff5aaea19f189217ccd10cf2beb7aa038a7fbc8b314005a7dab2d515e6cac247291"
                     ),
                     "candidate": (
                         6638785159048577193024017995718683384671669877475061841227835091783189484856963729
@@ -122,14 +105,8 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
                     "block_count": 2,
                 }
             ],
-            "domain_digest": (
-                "38346770454dcc67c1e11ef2a06d24844"
-                "f0665090ffaafc2542c8b7ddda82a17"
-            ),
-            "material_digest": (
-                "7380f5eecf7a5a20385486dbdadfa8abe"
-                "7b633fe56fafb56345d57123023c129"
-            ),
+            "domain_digest": ("38346770454dcc67c1e11ef2a06d24844f0665090ffaafc2542c8b7ddda82a17"),
+            "material_digest": ("7380f5eecf7a5a20385486dbdadfa8abe7b633fe56fafb56345d57123023c129"),
         },
     },
     {
@@ -154,14 +131,8 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
                     "block_count": 1,
                 }
             ],
-            "domain_digest": (
-                "8b239c23ec616ae8ae470eef66367228e5"
-                "694294381e22d338d8aadfe2036607"
-            ),
-            "material_digest": (
-                "e68c4f6a37878004316237bd0b9daaf0d"
-                "9eabfa88e35c01334999b42ad371c50"
-            ),
+            "domain_digest": ("8b239c23ec616ae8ae470eef66367228e5694294381e22d338d8aadfe2036607"),
+            "material_digest": ("e68c4f6a37878004316237bd0b9daaf0d9eabfa88e35c01334999b42ad371c50"),
         },
     },
     {
@@ -186,14 +157,8 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
                     "block_count": 1,
                 }
             ],
-            "domain_digest": (
-                "8b239c23ec616ae8ae470eef66367228e5"
-                "694294381e22d338d8aadfe2036607"
-            ),
-            "material_digest": (
-                "503f1f60d3cb8a9ed9ec584f2ebd7344"
-                "3d296374c8d3783ff0bee2baf2c6c50c"
-            ),
+            "domain_digest": ("8b239c23ec616ae8ae470eef66367228e5694294381e22d338d8aadfe2036607"),
+            "material_digest": ("503f1f60d3cb8a9ed9ec584f2ebd73443d296374c8d3783ff0bee2baf2c6c50c"),
         },
     },
     {
@@ -214,14 +179,8 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
             "width": 1,
             "block_count": 1,
             "cumulative_weights": [3, 10, 21],
-            "domain_digest": (
-                "ff27e4d95d1b80ab5ea747e2a1ff1e2a"
-                "fa72fcf852e65cd74fe3796f8172e91d"
-            ),
-            "material_digest": (
-                "89fcca0a9de8a1ab32a0645c1badc909"
-                "14ac41254bb92b1e80fd6f3abd6894a3"
-            ),
+            "domain_digest": ("ff27e4d95d1b80ab5ea747e2a1ff1e2afa72fcf852e65cd74fe3796f8172e91d"),
+            "material_digest": ("89fcca0a9de8a1ab32a0645c1badc90914ac41254bb92b1e80fd6f3abd6894a3"),
         },
     },
     {
@@ -240,14 +199,8 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
             "limit": 255,
             "width": 1,
             "block_count": 1,
-            "domain_digest": (
-                "f61c35fe4162b5c8295801a314a0521fcc"
-                "cb0593ce310ce3a864feed58967d52"
-            ),
-            "material_digest": (
-                "804ea3ff097d26e03b4ea1a086579066"
-                "3e144307a3823d830d534d6607597409"
-            ),
+            "domain_digest": ("f61c35fe4162b5c8295801a314a0521fcccb0593ce310ce3a864feed58967d52"),
+            "material_digest": ("804ea3ff097d26e03b4ea1a0865790663e144307a3823d830d534d6607597409"),
         },
     },
 )

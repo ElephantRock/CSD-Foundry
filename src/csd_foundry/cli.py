@@ -61,6 +61,11 @@ def main() -> None:
         help="validate synthesis contracts and release policies",
     )
     _add_release_argument(synthesis_contracts, default="v0.4")
+    synthesis_determinism = synthesis_sub.add_parser(
+        "determinism",
+        help="validate deterministic choice primitives and frozen vectors",
+    )
+    _add_release_argument(synthesis_determinism, default="v0.4")
 
     args = parser.parse_args()
 
@@ -108,6 +113,17 @@ def main() -> None:
         temporal_mutation_result = evaluate_temporal_mutations(args.release)
         _emit(temporal_mutation_result.to_dict(), args.output)
         if not temporal_mutation_result.success:
+            raise SystemExit(1)
+        return
+
+    if args.command == "synthesize" and args.synthesis_command == "determinism":
+        from csd_foundry.synthesis.v0_4.determinism_validation import (
+            validate_determinism,
+        )
+
+        determinism_result = validate_determinism(args.release)
+        _emit(determinism_result.to_dict(), args.output)
+        if not determinism_result.success:
             raise SystemExit(1)
         return
 

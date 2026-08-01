@@ -9,6 +9,7 @@ SCHEMA_DOCUMENT_NAMES = (
     "mutation_risk_policy.schema.json",
     "performance_policy.schema.json",
     "deterministic_arithmetic_policy.schema.json",
+    "choice_algorithm.schema.json",
 )
 
 COVERAGE_TARGETS_SPEC: dict[str, object] = {
@@ -199,10 +200,11 @@ RELEASE_POLICY_SPEC: dict[str, object] = {
     "target_trajectory_count": 100000,
     "pilot_trajectory_count": 10000,
     "maximum_trajectory_steps": 8,
-    "root_seed": "csd-foundry-v0.4-release-seed",
-    "rng_algorithm": "sha256-integer-choice-path",
-    "rng_version": "0.4.0",
-    "choice_path_schema_version": "0.4.0",
+    "root_seed": "f44e3f73e886fb09389790455b985efd8bcfcc7e096940bcdbab3e0ebacecd1b",
+    "root_seed_provenance": "uniform-random-256",
+    "rng_algorithm": "csd-choice-hmac-sha256-rejection",
+    "rng_version": "1",
+    "choice_path_schema_version": "csd-choice-path/0.4",
     "split_hash_salt": "csd-foundry-v0.4-structural-family-split",
     "performance_policy_status": "unfrozen",
     "stochastic_risk_policy_status": "unfrozen",
@@ -266,6 +268,30 @@ DETERMINISTIC_ARITHMETIC_POLICY_SPEC: dict[str, object] = {
     "ordering": "unsigned-byte-lexicographic",
 }
 
+
+CHOICE_ALGORITHM_SPEC: dict[str, object] = {
+    "release": "v0.4",
+    "schema_version": "0.4.0",
+    "algorithm_id": "csd-choice-hmac-sha256-rejection",
+    "algorithm_version": 1,
+    "digest_primitive": "hmac-sha256",
+    "root_seed_bytes": 32,
+    "release_seed_encoding": "lowercase-hex",
+    "release_seed_provenance": "uniform-random-256",
+    "path_schema_version": "csd-choice-path/0.4",
+    "identity_schema_version": "csd-identity/0.4",
+    "draw_counter_encoding": "uint64-big-endian",
+    "block_counter_encoding": "uint64-big-endian",
+    "attempt_index_encoding": "uint32",
+    "maximum_attempt_index": 4294967295,
+    "candidate_byte_order": "big-endian",
+    "display_digest_bits": 128,
+    "design_identity_ceiling": 10000000,
+    "collision_risk_ceiling_numerator": 15,
+    "collision_risk_ceiling_denominator": 100000000000000000000000000,
+    "semantic_floating_point_permitted": False,
+}
+
 SPEC_DOCUMENTS: dict[str, dict[str, object]] = {
     "coverage_targets.json": COVERAGE_TARGETS_SPEC,
     "holdouts.json": HOLDOUTS_SPEC,
@@ -273,4 +299,5 @@ SPEC_DOCUMENTS: dict[str, dict[str, object]] = {
     "mutation_risk_policy.json": MUTATION_RISK_POLICY_SPEC,
     "performance_policy.json": PERFORMANCE_POLICY_SPEC,
     "deterministic_arithmetic_policy.json": DETERMINISTIC_ARITHMETIC_POLICY_SPEC,
+    "choice_algorithm.json": CHOICE_ALGORITHM_SPEC,
 }
