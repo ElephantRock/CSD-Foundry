@@ -49,8 +49,10 @@ publication claim. The claim owner commits the execution run, inventory, attempt
 object digest, receipt ordinal, and predecessor receipt. Same-run workers therefore converge on
 one `published` receipt choice even when they race; a different run observes
 `existing-identical`. Because the claim is durable before object installation, recovery across
-the object-to-receipt gap reproduces the uninterrupted receipt chain. Reused receipt objects
-are routed through the durable-existing path before success is returned.
+the object-to-receipt gap reproduces the uninterrupted receipt chain. A different run may
+finish installing verified bytes under an abandoned claim while retaining an
+`existing-identical` disposition, so a lost owner cannot permanently wedge publication.
+Reused receipt objects are routed through the durable-existing path before success is returned.
 
 ## No-clobber object publication
 

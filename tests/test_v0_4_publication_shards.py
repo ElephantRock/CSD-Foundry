@@ -73,6 +73,40 @@ def test_cross_run_duplicate_receipts_report_existing_identical(tmp_path: Path) 
     )
 
 
+def test_nonowner_finishes_an_abandoned_claim(tmp_path: Path) -> None:
+    store = ContentAddressedPublicationStore(tmp_path)
+    inventory = publication_fixture_inventory(shard_count=2, sample_count=1)
+    coordinator = ShardPublicationCoordinator(store)
+
+    def crash_after_claim(stage: str) -> None:
+        if stage == "completion-claim-persisted":
+            raise InjectedPublicationCrash(stage)
+
+    with suppress(InjectedPublicationCrash):
+        coordinator.publish_completion(
+            inventory,
+            publication_fixture_accepted(0),
+            execution_run_id="run-abandoned-owner",
+            fault_injector=crash_after_claim,
+        )
+
+    recovered = coordinator.publish_completion(
+        inventory,
+        publication_fixture_accepted(0),
+        execution_run_id="run-finishing-nonowner",
+    )
+
+    assert recovered.receipts[0].disposition.value == "existing-identical"
+    assert store.read_verified(recovered.envelope.digest) == recovered.envelope.canonical_bytes
+    published = coordinator.publish_shard(inventory, 0, (recovered,))
+    assert store.reference_exists_verified(
+        category="seals",
+        inventory_digest=inventory.digest,
+        shard_index=0,
+        digest=published.manifest.digest,
+    )
+
+
 def test_concurrent_same_run_retries_converge_on_one_receipt_chain(
     tmp_path: Path,
 ) -> None:

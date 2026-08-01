@@ -476,8 +476,25 @@ def _validate_shards() -> tuple[bool, bool, bool, bool, bool]:
     )
     recovery_idempotent = True
     for stage in stages:
-        with TemporaryDirectory() as directory:
-            store = ContentAddressedPublicationStore(Path(directory))
+        with (
+            TemporaryDirectory() as baseline_directory,
+            TemporaryDirectory() as recovery_directory,
+        ):
+            run_id = f"run-recovery-{stage}"
+            baseline_store = ContentAddressedPublicationStore(Path(baseline_directory))
+            baseline_coordinator = ShardPublicationCoordinator(baseline_store)
+            baseline_publication = baseline_coordinator.publish_completion(
+                inventory,
+                publication_fixture_accepted(0),
+                execution_run_id=run_id,
+            )
+            baseline_shard = baseline_coordinator.publish_shard(
+                inventory,
+                0,
+                (baseline_publication,),
+            )
+
+            store = ContentAddressedPublicationStore(Path(recovery_directory))
             coordinator = ShardPublicationCoordinator(store)
 
             def inject(current: str, *, expected: str = stage) -> None:
@@ -497,25 +514,19 @@ def _validate_shards() -> tuple[bool, bool, bool, bool, bool]:
                     coordinator.publish_completion(
                         inventory,
                         publication_fixture_accepted(0),
-                        execution_run_id=f"run-recovery-{stage}",
+                        execution_run_id=run_id,
                         fault_injector=inject,
                     )
                 publication = coordinator.publish_completion(
                     inventory,
                     publication_fixture_accepted(0),
-                    execution_run_id=f"run-recovery-{stage}",
-                )
-                recovery_idempotent = recovery_idempotent and (
-                    publication.envelope.digest
-                    == AttemptCompletionEnvelope.from_completion(
-                        publication_fixture_accepted(0)
-                    ).digest
+                    execution_run_id=run_id,
                 )
             else:
                 publication = coordinator.publish_completion(
                     inventory,
                     publication_fixture_accepted(0),
-                    execution_run_id=f"run-recovery-{stage}",
+                    execution_run_id=run_id,
                 )
                 with suppress(InjectedPublicationCrash):
                     coordinator.publish_shard(
@@ -524,13 +535,19 @@ def _validate_shards() -> tuple[bool, bool, bool, bool, bool]:
                         (publication,),
                         fault_injector=inject,
                     )
-                published = coordinator.publish_shard(inventory, 0, (publication,))
-                recovery_idempotent = recovery_idempotent and store.reference_exists_verified(
+            published = coordinator.publish_shard(inventory, 0, (publication,))
+            recovery_idempotent = recovery_idempotent and (
+                tuple(receipt.digest for receipt in publication.receipts)
+                == tuple(receipt.digest for receipt in baseline_publication.receipts)
+                and published.index.digest == baseline_shard.index.digest
+                and published.manifest.digest == baseline_shard.manifest.digest
+                and store.reference_exists_verified(
                     category="seals",
                     inventory_digest=inventory.digest,
                     shard_index=0,
                     digest=published.manifest.digest,
                 )
+            )
     return canonical, conflict_rejected, objects_verified, premature_rejected, recovery_idempotent
 
 

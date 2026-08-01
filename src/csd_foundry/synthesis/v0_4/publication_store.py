@@ -237,10 +237,6 @@ class ContentAddressedPublicationStore:
             fault_stage=claim_fault_stage,
             fault_injector=fault_injector,
         )
-        if not owned and not object_path.exists():
-            raise PublicationStoreError(
-                "publication object is claimed by another execution run but not installed"
-            )
         result = self.publish_bytes(payload, expected_digest=digest)
         if object_fault_stage is not None:
             self._invoke(fault_injector, object_fault_stage)
