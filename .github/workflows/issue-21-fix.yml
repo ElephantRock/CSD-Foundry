@@ -4,13 +4,23 @@ on:
   push:
     branches:
       - fix/21-execution-evidence-schema-v2
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   apply-and-validate:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.ref == 'fix/21-execution-evidence-schema-v2')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
