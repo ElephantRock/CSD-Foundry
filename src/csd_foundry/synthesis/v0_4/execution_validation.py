@@ -23,6 +23,7 @@ from csd_foundry.synthesis.v0_4.execution_protocol import (
     OperationalRetryPolicy,
     RequiredSchemaVersions,
     SampleExecutionSpec,
+    append_inventory_supersession,
     assigned_shard,
     canonical_sample_key_bytes,
     execution_validation_policy_document,
@@ -30,6 +31,7 @@ from csd_foundry.synthesis.v0_4.execution_protocol import (
     shard_policy_document,
     validate_failure_chain,
 )
+from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
 from csd_foundry.synthesis.v0_4.execution_vectors import (
     EXECUTION_VECTOR_IDS,
     EXPECTED_EXECUTION_DIGESTS,
@@ -121,7 +123,7 @@ def _sample_specs() -> tuple[SampleExecutionSpec, ...]:
 def _inventory() -> ExecutionInventory:
     return ExecutionInventory(
         release="v0.4",
-        generation_namespace_digest=_TARGET_ALPHA_NAMESPACE_DIGEST,
+        generation_namespace=build_generation_namespace(_TARGET_ALPHA_DEFINITION_DIGEST),
         root_seed_commitment=_RELEASE_ROOT_SEED_COMMITMENT,
         sample_key_encoding_id=SAMPLE_KEY_ENCODING_ID,
         sample_key_encoding_version=SAMPLE_KEY_ENCODING_VERSION,
@@ -270,14 +272,16 @@ def validate_execution_protocol(release: str) -> ExecutionProtocolValidationRepo
     )
 
     supersession_append_only = False
+    first_supersession = _supersession()
+    reactivation = InventorySupersessionRecord(
+        superseded_inventory_digest=first_supersession.replacement_inventory_digest,
+        replacement_inventory_digest=first_supersession.superseded_inventory_digest,
+        superseding_run_id="run-v3",
+        reason_code="reactivation-attempt",
+        reason_facts=CanonicalObject.from_pairs((("reason", "cycle"),)),
+    )
     try:
-        InventorySupersessionRecord(
-            superseded_inventory_digest=inventory.digest,
-            replacement_inventory_digest=inventory.digest,
-            superseding_run_id="run-v2",
-            reason_code="target-change",
-            reason_facts=CanonicalObject.from_pairs((("reason", "same-inventory"),)),
-        )
+        append_inventory_supersession((first_supersession,), reactivation)
     except ExecutionProtocolError:
         supersession_append_only = True
 

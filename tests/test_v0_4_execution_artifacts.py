@@ -89,3 +89,28 @@ def test_execution_schema_matches_runtime_bounds_and_canonical_values() -> None:
         "string",
     }
     assert all(variant.get("type") != "number" for variant in canonical_variants)
+
+
+def test_execution_schema_pins_policies_and_exhaustion_cardinality() -> None:
+    document = _load("specs/v0.4/execution_protocol.schema.json")
+    assert type(document) is dict
+    definitions = document["$defs"]
+    inventory_properties = definitions["executionInventory"]["properties"]
+    assert inventory_properties["sample_key_encoding_policy_digest"] == {
+        "const": "b035f20b7e9c8232798b5409c14d7559742e32051d924db01fec01fa995f4e25"
+    }
+    assert inventory_properties["shard_policy_digest"] == {
+        "const": "625417f57640b047bf26f87c17311a86da97dd0a5defcb746ece1c9d19a40114"
+    }
+    assert inventory_properties["validation_policy_digest"] == {
+        "const": "f318b92ac128a35d16123559353f28dd8a2255d2c767e98e2e27035bca382569"
+    }
+    branches = definitions["operationalExhaustion"]["allOf"][0]["oneOf"]
+    assert len(branches) == 256
+    retry_two = branches[2]["properties"]
+    assert retry_two["maximum_operational_retries"] == {"const": 2}
+    assert retry_two["total_execution_count"] == {"const": 3}
+    assert retry_two["failure_receipt_digests"] == {
+        "maxItems": 3,
+        "minItems": 3,
+    }

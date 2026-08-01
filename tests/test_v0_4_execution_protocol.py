@@ -37,8 +37,10 @@ from csd_foundry.synthesis.v0_4.execution_vectors import (
     EXPECTED_EXECUTION_DIGESTS,
     validate_execution_vector_catalog,
 )
+from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
+_TARGET_DEFINITION_DIGEST = "0c249247fe8fe1bc74c067a535846dedf0df922e69688ac20f726289f78901c5"
 _NAMESPACE_DIGEST = "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
 _ROOT_SEED_COMMITMENT = "6e5306d9779ade6c6e8bdf5d3d88431e8a4a9fb5ea2e4526949923319400661e"
 
@@ -65,7 +67,7 @@ def _policy() -> OperationalRetryPolicy:
 def _inventory() -> ExecutionInventory:
     return ExecutionInventory(
         release="v0.4",
-        generation_namespace_digest=_NAMESPACE_DIGEST,
+        generation_namespace=build_generation_namespace(_TARGET_DEFINITION_DIGEST),
         root_seed_commitment=_ROOT_SEED_COMMITMENT,
         sample_key_encoding_id=SAMPLE_KEY_ENCODING_ID,
         sample_key_encoding_version=SAMPLE_KEY_ENCODING_VERSION,

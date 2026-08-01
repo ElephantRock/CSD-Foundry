@@ -40,8 +40,10 @@ separate from choice and identity algorithm versions.
 
 ## Execution inventory
 
-An `ExecutionInventory` is immutable, content-addressed authority. It commits the generation
-namespace, root-seed commitment, sample-key encoding policy, shard policy, shard count,
+An `ExecutionInventory` is immutable, content-addressed authority. Construction requires the
+exact `GenerationNamespace` object and verifies that its digest and shard-policy tuple match
+the inventory before canonical bytes can be emitted. The inventory also commits the root-seed
+commitment, sample-key encoding policy, shard policy, shard count,
 operational retry policy, validation policy, required schema registry, and ordered sample
 specifications.
 
@@ -80,8 +82,10 @@ Implicit migration and field dropping are prohibited.
 ## Inventory supersession
 
 Inventories and their evidence are never modified or deleted in place. A replacement
-inventory is linked through a new append-only `InventorySupersessionRecord`. The previous
-inventory and all partial evidence remain addressable under their original digests.
+inventory is linked through a new append-only `InventorySupersessionRecord`. New records
+are validated against the ordered supersession history; duplicate supersession and any path
+that reactivates a previously superseded inventory fail closed. The previous inventory and all
+partial evidence remain addressable under their original digests.
 
 ## Frozen evidence
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from csd_foundry.synthesis.v0_4.canonical_values import CanonicalObject
 from csd_foundry.synthesis.v0_4.choice_paths import AttemptKey, AttemptRange, SampleKey
+from csd_foundry.synthesis.v0_4.generation_namespace import GenerationNamespace
 from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canonical_sha256
 
 SAMPLE_KEY_ENCODING_ID = "csd-sample-key-canonical-json"
@@ -274,7 +275,7 @@ class OperationalRetryPolicy:
 @dataclass(frozen=True, slots=True)
 class ExecutionInventory:
     release: str
-    generation_namespace_digest: str
+    generation_namespace: GenerationNamespace
     root_seed_commitment: str
     sample_key_encoding_id: str
     sample_key_encoding_version: int
@@ -295,7 +296,12 @@ class ExecutionInventory:
         if type(self) is not ExecutionInventory:
             raise ExecutionProtocolError("execution inventories must use the exact class")
         _require_constant(self.release, "v0.4", "release")
-        _require_digest(self.generation_namespace_digest, "generation_namespace_digest")
+        if type(self.generation_namespace) is not GenerationNamespace:
+            raise ExecutionProtocolError(
+                "generation_namespace must use the exact GenerationNamespace class"
+            )
+        if self.generation_namespace.release != self.release:
+            raise ExecutionProtocolError("generation namespace and inventory releases must match")
         _require_digest(self.root_seed_commitment, "root_seed_commitment")
         _require_constant(
             self.sample_key_encoding_id, SAMPLE_KEY_ENCODING_ID, "sample_key_encoding_id"
@@ -314,6 +320,20 @@ class ExecutionInventory:
         _require_constant(self.shard_policy_version, SHARD_POLICY_VERSION, "shard_policy_version")
         if self.shard_policy_digest != canonical_sha256(shard_policy_document()):
             raise ExecutionProtocolError("shard policy digest does not match version 1")
+        namespace_shard_tuple = (
+            self.generation_namespace.shard_policy_id,
+            self.generation_namespace.shard_policy_version,
+            self.generation_namespace.shard_policy_digest,
+        )
+        inventory_shard_tuple = (
+            self.shard_policy_id,
+            self.shard_policy_version,
+            self.shard_policy_digest,
+        )
+        if namespace_shard_tuple != inventory_shard_tuple:
+            raise ExecutionProtocolError(
+                "inventory shard policy does not match the generation namespace"
+            )
         if type(self.shard_count) is not int or not 1 <= self.shard_count <= MAX_SHARD_COUNT:
             raise ExecutionProtocolError("shard_count must be an exact uint32 in 1..2^32-1")
         _require_digest(self.operational_retry_policy_digest, "operational_retry_policy_digest")
@@ -351,6 +371,10 @@ class ExecutionInventory:
                 "inventory samples must use canonical sample-key byte order"
             )
         _require_constant(self.schema_version, EXECUTION_INVENTORY_SCHEMA_VERSION, "schema_version")
+
+    @property
+    def generation_namespace_digest(self) -> str:
+        return self.generation_namespace.digest
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -661,3 +685,39 @@ class InventorySupersessionRecord:
     @property
     def digest(self) -> str:
         return canonical_sha256(self.to_json_value())
+
+
+def validate_supersession_history(
+    records: tuple[InventorySupersessionRecord, ...],
+) -> tuple[InventorySupersessionRecord, ...]:
+    """Validate append-only supersession order without reactivating prior inventories."""
+
+    if type(records) is not tuple:
+        raise ExecutionProtocolError("supersession history must be an immutable tuple")
+    superseded: set[str] = set()
+    record_digests: set[str] = set()
+    for record in records:
+        if type(record) is not InventorySupersessionRecord:
+            raise ExecutionProtocolError(
+                "supersession history must contain exact supersession records"
+            )
+        if record.digest in record_digests:
+            raise ExecutionProtocolError("supersession history contains a duplicate record")
+        if record.superseded_inventory_digest in superseded:
+            raise ExecutionProtocolError("an inventory cannot be superseded more than once")
+        if record.replacement_inventory_digest in superseded:
+            raise ExecutionProtocolError("a previously superseded inventory cannot be reactivated")
+        record_digests.add(record.digest)
+        superseded.add(record.superseded_inventory_digest)
+    return records
+
+
+def append_inventory_supersession(
+    history: tuple[InventorySupersessionRecord, ...],
+    record: InventorySupersessionRecord,
+) -> tuple[InventorySupersessionRecord, ...]:
+    if type(history) is not tuple:
+        raise ExecutionProtocolError("supersession history must be an immutable tuple")
+    if type(record) is not InventorySupersessionRecord:
+        raise ExecutionProtocolError("new supersession must use the exact record class")
+    return validate_supersession_history((*history, record))
