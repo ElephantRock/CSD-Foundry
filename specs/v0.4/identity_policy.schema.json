@@ -1,0 +1,105 @@
+{
+  "$id": "https://elephantrock.dev/csd-foundry/v0.4/identity_policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "algorithm_id": {
+      "const": "csd-identity-hmac-sha256"
+    },
+    "algorithm_version": {
+      "const": 1
+    },
+    "collision_risk_ceiling_denominator": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "collision_risk_ceiling_numerator": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "design_identity_ceiling": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "digest_primitive": {
+      "const": "hmac-sha256"
+    },
+    "display_digest_bits": {
+      "const": 128
+    },
+    "full_digest_bits": {
+      "const": 256
+    },
+    "identity_schema_version": {
+      "const": "csd-identity/0.4"
+    },
+    "per_kind_projected_counts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "projected_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entity_kind",
+          "projected_count"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "release": {
+      "const": "v0.4"
+    },
+    "replay_policy_id": {
+      "const": "csd-replay-contract"
+    },
+    "replay_policy_version": {
+      "const": 1
+    },
+    "role_ordinal_encoding": {
+      "const": "uint32"
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    },
+    "shard_policy_id": {
+      "const": "csd-shard-contract"
+    },
+    "shard_policy_version": {
+      "const": 1
+    },
+    "volume_policy_status": {
+      "const": "provisional"
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "algorithm_id",
+    "algorithm_version",
+    "identity_schema_version",
+    "digest_primitive",
+    "full_digest_bits",
+    "display_digest_bits",
+    "role_ordinal_encoding",
+    "volume_policy_status",
+    "design_identity_ceiling",
+    "collision_risk_ceiling_numerator",
+    "collision_risk_ceiling_denominator",
+    "replay_policy_id",
+    "replay_policy_version",
+    "shard_policy_id",
+    "shard_policy_version",
+    "per_kind_projected_counts"
+  ],
+  "title": "CSD Foundry v0.4 deterministic identity policy",
+  "type": "object"
+}

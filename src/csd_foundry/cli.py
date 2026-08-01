@@ -66,6 +66,11 @@ def main() -> None:
         help="validate deterministic choice primitives and frozen vectors",
     )
     _add_release_argument(synthesis_determinism, default="v0.4")
+    synthesis_identities = synthesis_sub.add_parser(
+        "identities",
+        help="validate canonical values and deterministic entity identities",
+    )
+    _add_release_argument(synthesis_identities, default="v0.4")
 
     args = parser.parse_args()
 
@@ -124,6 +129,17 @@ def main() -> None:
         determinism_result = validate_determinism(args.release)
         _emit(determinism_result.to_dict(), args.output)
         if not determinism_result.success:
+            raise SystemExit(1)
+        return
+
+    if args.command == "synthesize" and args.synthesis_command == "identities":
+        from csd_foundry.synthesis.v0_4.identity_validation import (
+            validate_identities,
+        )
+
+        identity_result = validate_identities(args.release)
+        _emit(identity_result.to_dict(), args.output)
+        if not identity_result.success:
             raise SystemExit(1)
         return
 

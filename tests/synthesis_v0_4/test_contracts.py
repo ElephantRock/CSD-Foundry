@@ -60,8 +60,8 @@ def test_v04_contract_release_is_valid_but_release_scale_is_blocked() -> None:
     assert report.machine_proven_infeasible_targets == 0
     assert report.unresolved_targets == 0
     assert report.release_scale_blocked
-    assert report.schema_document_count == 7
-    assert report.policy_count == 5
+    assert report.schema_document_count == 8
+    assert report.policy_count == 6
     assert len(report.canonical_digest) == 64
 
 
