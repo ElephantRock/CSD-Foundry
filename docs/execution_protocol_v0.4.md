@@ -108,7 +108,9 @@ byte-identical historical artifacts. They are not rewritten. Evidence version 2 
 current catalog authority: its catalog digest commits the ordered vector IDs and the
 complete expected-digest mapping. Schema document version 2 is the current ingestion
 authority: it exhaustively binds each uint8 retry count to exactly one derived total
-execution count.
+execution count. Current validators and external ingestion consumers must select the
+version-2 authority explicitly; version-1 artifacts remain available only for historical
+verification.
 
 This supersession changes neither execution-protocol semantics nor any vector value,
 generation namespace, choice identity, replay commitment, inventory digest, or runtime
