@@ -56,9 +56,11 @@ class ContentAddressedPublicationStore:
             raise PublicationStoreError("publication root must be a pathlib Path")
         self.root = root
         self.objects_root = root / "objects"
+        self.references_root = root / "references"
         self.temporary_root = root / ".tmp"
         self._ensure_directory(self.root)
         self._ensure_directory(self.objects_root)
+        self._ensure_directory(self.references_root)
         self._ensure_directory(self.temporary_root)
 
     @staticmethod
@@ -185,6 +187,74 @@ class ContentAddressedPublicationStore:
             expected_digest=expected_digest,
             fault_injector=fault_injector,
         )
+
+    def reference_path(
+        self,
+        category: str,
+        inventory_digest: str,
+        shard_index: int,
+        digest: str,
+    ) -> Path:
+        if category not in {"indexes", "manifests", "seals"}:
+            raise PublicationStoreError("unknown publication reference category")
+        inventory = self._require_digest(inventory_digest)
+        object_digest = self._require_digest(digest)
+        if type(shard_index) is not int or not 0 <= shard_index <= (1 << 32) - 1:
+            raise PublicationStoreError("shard_index must be an exact uint32")
+        return self.references_root / category / inventory / str(shard_index) / object_digest
+
+    def install_digest_reference(
+        self,
+        *,
+        category: str,
+        inventory_digest: str,
+        shard_index: int,
+        digest: str,
+        fault_stage: str | None = None,
+        fault_injector: FaultInjector | None = None,
+    ) -> PublicationResult:
+        source = self.object_path(digest)
+        payload = self.read_verified(digest)
+        final_path = self.reference_path(
+            category,
+            inventory_digest,
+            shard_index,
+            digest,
+        )
+        self._ensure_directory(final_path.parent)
+        if final_path.exists():
+            return self._durable_existing(final_path, payload, digest)
+        try:
+            os.link(source, final_path)
+        except FileExistsError:
+            return self._durable_existing(final_path, payload, digest)
+        self._fsync_directory(final_path.parent)
+        if fault_stage is not None:
+            self._invoke(fault_injector, fault_stage)
+        return PublicationResult(
+            digest=digest,
+            relative_path=final_path.relative_to(self.root).as_posix(),
+            disposition=PublicationDisposition.PUBLISHED,
+        )
+
+    def reference_exists_verified(
+        self,
+        *,
+        category: str,
+        inventory_digest: str,
+        shard_index: int,
+        digest: str,
+    ) -> bool:
+        path = self.reference_path(category, inventory_digest, shard_index, digest)
+        if not path.is_file():
+            return False
+        payload = path.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != digest:
+            raise PublicationCorruptionError(
+                "publication reference bytes do not match the referenced digest"
+            )
+        self._fsync_directory(path.parent)
+        return True
 
     def read_verified(self, digest: str) -> bytes:
         path = self.object_path(digest)

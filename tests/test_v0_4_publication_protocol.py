@@ -255,7 +255,7 @@ def test_publication_vectors_and_report_are_frozen() -> None:
     assert generate_publication_protocol_digests() == EXPECTED_PUBLICATION_DIGESTS
     report = validate_publication_protocol("v0.4")
     assert report.success
-    assert report.vectors_passed == report.vector_count == 5
+    assert report.vectors_passed == report.vector_count == 9
     assert report.semantic_envelope_topology_independent
     assert report.no_clobber_enforced
     assert report.crash_debris_recoverable

@@ -7,9 +7,9 @@ execution protocol. It persists semantic attempt completion without allowing wor
 execution-run identity, retry history, timestamps, storage location, or crash timing to alter
 semantic commitment bytes.
 
-This first implementation slice establishes the three-record separation and the minimal
-content-addressed no-clobber object store. Shard indexes, manifests, seals, streaming
-reconciliation, and canonical corpus merge remain outside this slice.
+The protocol establishes the three-record separation, durable content-addressed no-clobber
+publication, canonical shard-index snapshots, factory-verified manifests, and append-only seal
+references. Streaming reconciliation and canonical corpus merge remain outside this slice.
 
 ## Commitment separation
 
@@ -88,3 +88,38 @@ This protocol does not yet establish shard indexes, manifests, seals, global
 lowest-valid-attempt resolution, bounded k-way merge, conflict escalation across shards,
 semantic corpus publication, run-evidence publication, planner completeness, oracle-valid
 trajectories, infeasibility, or release-scale readiness.
+
+## Canonical shard indexes
+
+A `ShardIndex` is an immutable content-addressed snapshot. Entries are sorted by global
+ordinal, attempt index, completion-envelope digest, completion-reference digest, and final
+publication-receipt digest. Construction collapses exact duplicates and fails closed when two
+different completions occupy one inventory-attempt position.
+
+Index snapshots do not commit construction order or predecessor snapshots. Old snapshots
+remain addressable in the append-only store, while the final snapshot remains invariant to
+worker count and completion order.
+
+## Manifest sealing
+
+`SealedShardManifest` has no public constructor. Its factory requires the exact execution
+inventory, canonical shard index, complete published-completion set, and publication store.
+Before issuing the manifest it verifies:
+
+- shard-policy-v1 assignment for every index entry;
+- the durable content-addressed index object and append-only index reference;
+- every completion envelope, inventory reference, and receipt-chain object;
+- exact inventory, namespace, and required-schema commitments;
+- complete entry-aligned digest lists and aggregate object-set commitment.
+
+The manifest's construction is the logical seal. Publication then installs append-only hard
+links for the index, manifest, and seal under inventory-and-shard namespaces. A seal is
+therefore a durable reference to verified manifest bytes, not a mutable status flag.
+
+## Staged crash recovery
+
+Completion receipts, inventory references, shard indexes, manifests, and seals are individually
+content addressed and installed with no-clobber semantics. Re-executing after interruption
+classifies already installed bytes as identical and finishes the remaining stages. Tests inject
+failures after each durable stage and require convergence to the same semantic envelope and a
+verified seal.

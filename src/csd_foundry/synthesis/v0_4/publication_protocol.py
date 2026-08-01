@@ -34,6 +34,8 @@ class CompletionStatus(StrEnum):
 class PublicationObjectKind(StrEnum):
     ATTEMPT_COMPLETION_ENVELOPE = "attempt-completion-envelope"
     INVENTORY_COMPLETION_REFERENCE = "inventory-completion-reference"
+    SHARD_INDEX = "shard-index"
+    SHARD_MANIFEST = "shard-manifest"
 
 
 class PublicationDisposition(StrEnum):

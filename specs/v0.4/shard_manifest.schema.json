@@ -1,0 +1,54 @@
+{
+  "$id": "urn:csd-foundry:shard-manifest:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "completion_envelope_digests": {
+      "items": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+      "type": "array"
+    },
+    "entry_count": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "entry_digests": {
+      "items": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+      "type": "array"
+    },
+    "generation_namespace_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "inventory_completion_reference_digests": {
+      "items": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+      "type": "array"
+    },
+    "inventory_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "object_set_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "publication_receipt_digests": {
+      "items": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+      "type": "array"
+    },
+    "required_schema_versions_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": "csd-shard-manifest/0.4"},
+    "sealed": {"const": true},
+    "shard_count": {"maximum": 4294967295, "minimum": 1, "type": "integer"},
+    "shard_index": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "shard_index_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "shard_policy_id": {"const": "csd-shard-contract"},
+    "shard_policy_version": {"const": 1}
+  },
+  "required": [
+    "completion_envelope_digests",
+    "entry_count",
+    "entry_digests",
+    "generation_namespace_digest",
+    "inventory_completion_reference_digests",
+    "inventory_digest",
+    "object_set_digest",
+    "publication_receipt_digests",
+    "required_schema_versions_digest",
+    "schema_version",
+    "sealed",
+    "shard_count",
+    "shard_index",
+    "shard_index_digest",
+    "shard_policy_id",
+    "shard_policy_version"
+  ],
+  "type": "object"
+}

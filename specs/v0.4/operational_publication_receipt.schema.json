@@ -81,7 +81,9 @@
     "object_kind": {
       "enum": [
         "attempt-completion-envelope",
-        "inventory-completion-reference"
+        "inventory-completion-reference",
+        "shard-index",
+        "shard-manifest"
       ]
     },
     "previous_publication_receipt_digest": {
