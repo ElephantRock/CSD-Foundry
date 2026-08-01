@@ -94,7 +94,13 @@ class ContentAddressedPublicationStore:
             missing.append(cursor)
             cursor = cursor.parent
         for directory in reversed(missing):
-            directory.mkdir()
+            try:
+                directory.mkdir()
+            except FileExistsError:
+                if not directory.is_dir():
+                    raise PublicationStoreError(
+                        "publication path was concurrently created as a non-directory"
+                    ) from None
             cls._fsync_directory(directory)
             cls._fsync_directory(directory.parent)
         if not path.is_dir():

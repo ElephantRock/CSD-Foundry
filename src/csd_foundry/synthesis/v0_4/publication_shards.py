@@ -16,6 +16,7 @@ from csd_foundry.synthesis.v0_4.publication_protocol import (
     AttemptCompletionEnvelope,
     InventoryCompletionReference,
     OperationalPublicationReceipt,
+    PublicationDisposition,
     PublicationObjectKind,
     validate_publication_receipt_chain,
 )
@@ -23,6 +24,7 @@ from csd_foundry.synthesis.v0_4.publication_store import (
     ContentAddressedPublicationStore,
     FaultInjector,
     PublicationResult,
+    PublicationStoreError,
 )
 from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canonical_sha256
 
@@ -44,7 +46,7 @@ def _require_uint32(value: object, field_name: str) -> int:
 def _require_digest(value: object, field_name: str) -> str:
     try:
         return ContentAddressedPublicationStore._require_digest(value)
-    except ValueError as exc:
+    except PublicationStoreError as exc:
         raise ShardPublicationError(f"invalid {field_name}") from exc
 
 
@@ -561,7 +563,7 @@ class ShardPublicationCoordinator:
         fault_injector: FaultInjector | None = None,
     ) -> PublishedCompletion:
         envelope = AttemptCompletionEnvelope.from_completion(completion)
-        envelope_result = self.store.publish_bytes(
+        self.store.publish_bytes(
             envelope.canonical_bytes,
             expected_digest=envelope.digest,
         )
@@ -572,7 +574,7 @@ class ShardPublicationCoordinator:
             attempt_key=envelope.attempt_key,
             object_kind=PublicationObjectKind.ATTEMPT_COMPLETION_ENVELOPE,
             object_digest=envelope.digest,
-            disposition=envelope_result.disposition,
+            disposition=PublicationDisposition.PUBLISHED,
         )
         self.store.publish_bytes(
             envelope_receipt.canonical_bytes,
@@ -581,7 +583,7 @@ class ShardPublicationCoordinator:
         self._invoke(fault_injector, "completion-receipt-persisted")
 
         reference = InventoryCompletionReference.from_inventory(inventory, envelope)
-        reference_result = self.store.publish_bytes(
+        self.store.publish_bytes(
             reference.canonical_bytes,
             expected_digest=reference.digest,
         )
@@ -592,7 +594,7 @@ class ShardPublicationCoordinator:
             attempt_key=envelope.attempt_key,
             object_kind=PublicationObjectKind.INVENTORY_COMPLETION_REFERENCE,
             object_digest=reference.digest,
-            disposition=reference_result.disposition,
+            disposition=PublicationDisposition.PUBLISHED,
         )
         self.store.publish_bytes(
             reference_receipt.canonical_bytes,

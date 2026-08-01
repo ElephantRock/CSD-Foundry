@@ -166,6 +166,32 @@ def test_store_fsyncs_new_directory_ancestors_before_success(
     assert final_parent in synced
 
 
+def test_concurrent_directory_creation_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    envelope = AttemptCompletionEnvelope.from_completion(publication_fixture_accepted())
+    store = ContentAddressedPublicationStore(tmp_path)
+    target = store.object_path(envelope.digest).parent
+    original_mkdir = Path.mkdir
+    raced = False
+
+    def racing_mkdir(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal raced
+        if path == target and not raced:
+            original_mkdir(path, *args, **kwargs)  # type: ignore[arg-type]
+            raced = True
+            raise FileExistsError(path)
+        original_mkdir(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "mkdir", racing_mkdir)
+    result = store.publish_bytes(envelope.canonical_bytes, expected_digest=envelope.digest)
+
+    assert raced
+    assert result.disposition is PublicationDisposition.PUBLISHED
+    assert store.read_verified(envelope.digest) == envelope.canonical_bytes
+
+
 def test_duplicate_existing_success_fsyncs_authoritative_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

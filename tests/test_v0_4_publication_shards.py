@@ -143,8 +143,23 @@ def test_semantic_envelope_is_stable_across_1_2_7_shard_inventories() -> None:
     ),
 )
 def test_staged_publication_is_crash_idempotent(tmp_path: Path, stage: str) -> None:
-    store = ContentAddressedPublicationStore(tmp_path)
     inventory = publication_fixture_inventory(shard_count=2, sample_count=1)
+    run_id = f"run-{stage}"
+
+    baseline_store = ContentAddressedPublicationStore(tmp_path / "baseline")
+    baseline_coordinator = ShardPublicationCoordinator(baseline_store)
+    baseline_publication = baseline_coordinator.publish_completion(
+        inventory,
+        publication_fixture_accepted(0),
+        execution_run_id=run_id,
+    )
+    baseline_shard = baseline_coordinator.publish_shard(
+        inventory,
+        0,
+        (baseline_publication,),
+    )
+
+    store = ContentAddressedPublicationStore(tmp_path / "subject")
     coordinator = ShardPublicationCoordinator(store)
 
     def inject(current: str) -> None:
@@ -156,19 +171,19 @@ def test_staged_publication_is_crash_idempotent(tmp_path: Path, stage: str) -> N
             coordinator.publish_completion(
                 inventory,
                 publication_fixture_accepted(0),
-                execution_run_id=f"run-{stage}",
+                execution_run_id=run_id,
                 fault_injector=inject,
             )
         publication = coordinator.publish_completion(
             inventory,
             publication_fixture_accepted(0),
-            execution_run_id=f"run-{stage}",
+            execution_run_id=run_id,
         )
     else:
         publication = coordinator.publish_completion(
             inventory,
             publication_fixture_accepted(0),
-            execution_run_id=f"run-{stage}",
+            execution_run_id=run_id,
         )
         with suppress(InjectedPublicationCrash):
             coordinator.publish_shard(
@@ -178,7 +193,12 @@ def test_staged_publication_is_crash_idempotent(tmp_path: Path, stage: str) -> N
                 fault_injector=inject,
             )
 
+    assert tuple(receipt.digest for receipt in publication.receipts) == tuple(
+        receipt.digest for receipt in baseline_publication.receipts
+    )
     published = coordinator.publish_shard(inventory, 0, (publication,))
+    assert published.index.digest == baseline_shard.index.digest
+    assert published.manifest.digest == baseline_shard.manifest.digest
     assert store.reference_exists_verified(
         category="seals",
         inventory_digest=inventory.digest,
