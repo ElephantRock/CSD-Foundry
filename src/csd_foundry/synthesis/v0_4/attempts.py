@@ -256,11 +256,22 @@ class AcceptedSampleReplay:
             raise AttemptReplayError("rejected_prefix must contain exact rejections")
         if type(self.accepted_attempt) is not AttemptAccepted:
             raise AttemptReplayError("accepted_attempt must use the exact contract class")
-        expected = tuple(range(self.accepted_attempt.attempt_key.attempt_index))
-        if tuple(item.attempt_key.attempt_index for item in self.rejected_prefix) != expected:
-            raise AttemptReplayError("rejected prefix must cover every lower attempt")
+        accepted_index = self.accepted_attempt.attempt_key.attempt_index
+        if not self.attempt_range.contains(accepted_index):
+            raise AttemptReplayError("accepted attempt is outside the declared range")
         if self.accepted_attempt.attempt_key.sample_key != self.sample_key:
             raise AttemptReplayError("accepted attempt belongs to a different sample")
+        namespace_digest = self.accepted_attempt.generation_namespace_digest
+        for rejected in self.rejected_prefix:
+            if rejected.attempt_key.sample_key != self.sample_key:
+                raise AttemptReplayError("rejected prefix belongs to a different sample")
+            if rejected.generation_namespace_digest != namespace_digest:
+                raise AttemptReplayError("rejected prefix belongs to a different namespace")
+            if not self.attempt_range.contains(rejected.attempt_key.attempt_index):
+                raise AttemptReplayError("rejected prefix attempt is outside the declared range")
+        expected = tuple(range(accepted_index))
+        if tuple(item.attempt_key.attempt_index for item in self.rejected_prefix) != expected:
+            raise AttemptReplayError("rejected prefix must cover every lower attempt")
 
     def to_json_value(self) -> dict[str, object]:
         return {
