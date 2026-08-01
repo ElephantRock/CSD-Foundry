@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "base": {
+      "additionalProperties": true,
+      "properties": {
+        "generation_namespace_digest": {"$ref": "#/$defs/digest"},
+        "operation": {
+          "enum": ["bounded_integer", "integer_weighted_index", "boolean_ratio"]
+        },
+        "path": {"type": "object"},
+        "schema_version": {"const": "csd-choice-record/0.4"},
+        "seed_commitment": {"$ref": "#/$defs/digest"}
+      },
+      "required": [
+        "generation_namespace_digest",
+        "operation",
+        "path",
+        "schema_version",
+        "seed_commitment"
+      ],
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {"$ref": "#/$defs/base"},
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "operation": {"const": "bounded_integer"},
+            "upper_exclusive": {"minimum": 1, "type": "integer"}
+          },
+          "required": ["evidence", "upper_exclusive"]
+        },
+        {
+          "properties": {
+            "operation": {"const": "integer_weighted_index"},
+            "selected_index": {"minimum": 0, "type": "integer"},
+            "weights": {
+              "items": {"minimum": 1, "type": "integer"},
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": ["selected_index", "ticket", "values", "weights"]
+        },
+        {
+          "properties": {
+            "denominator": {"minimum": 1, "type": "integer"},
+            "numerator": {"minimum": 0, "type": "integer"},
+            "operation": {"const": "boolean_ratio"},
+            "selected": {"type": "boolean"}
+          },
+          "required": ["denominator", "numerator", "selected", "ticket"]
+        }
+      ]
+    }
+  ],
+  "type": "object"
+}
