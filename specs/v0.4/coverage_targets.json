@@ -1,0 +1,214 @@
+{
+  "release": "v0.4",
+  "schema_version": "0.4.0",
+  "targets": [
+    {
+      "completeness": {
+        "alternative_witness_id": null,
+        "bounded_projection_id": "micro-v0.4-e3-b2",
+        "evidence_kind": "fully_bounded",
+        "justification": "The complete target fits the bounded evidence and basis domain.",
+        "omitted_dimensions": []
+      },
+      "disposition": "required",
+      "event_pattern": [
+        "AdvanceClock"
+      ],
+      "holdout_tags": [
+        "expiry",
+        "last-basis"
+      ],
+      "infeasibility_witness": null,
+      "minimum_count": 200,
+      "profile_pattern": "stable",
+      "rarity_weight": 5,
+      "request_pattern": "none",
+      "required_consequences": [
+        "source-becomes-unknown",
+        "basis-removed"
+      ],
+      "required_invariants": [
+        "T-INV-02",
+        "T-INV-03",
+        "T-INV-04"
+      ],
+      "search_budget": {
+        "maximum_construction_attempts_per_plan": 8,
+        "maximum_elapsed_milliseconds": 2000,
+        "maximum_oracle_attempts": 8,
+        "maximum_plan_attempts": 8
+      },
+      "target_id": "v04-source-expiry-last-basis",
+      "temporal_pattern": "source-expiry-equals-target-time",
+      "topology_pattern": "single-source-basis"
+    },
+    {
+      "completeness": {
+        "alternative_witness_id": "constructive-profile-family-v0.4",
+        "bounded_projection_id": "micro-v0.4-profile-e3-b2-r1",
+        "evidence_kind": "projected_bounded",
+        "justification": "The profile and request joint is preserved in a bounded projection.",
+        "omitted_dimensions": [
+          "large-support-multiplicity"
+        ]
+      },
+      "disposition": "required",
+      "event_pattern": [
+        "ProfileChange"
+      ],
+      "holdout_tags": [
+        "profile",
+        "request"
+      ],
+      "infeasibility_witness": null,
+      "minimum_count": 250,
+      "profile_pattern": "monotonic-strengthening",
+      "rarity_weight": 7,
+      "request_pattern": "created-pending",
+      "required_consequences": [
+        "historical-support-preserved",
+        "incompatible-current-basis-removed",
+        "request-pending"
+      ],
+      "required_invariants": [
+        "P-INV-01",
+        "P-INV-02",
+        "P-INV-03",
+        "P-INV-04"
+      ],
+      "search_budget": {
+        "maximum_construction_attempts_per_plan": 8,
+        "maximum_elapsed_milliseconds": 3000,
+        "maximum_oracle_attempts": 8,
+        "maximum_plan_attempts": 12
+      },
+      "target_id": "v04-profile-strengthening-request",
+      "temporal_pattern": "request-due-after-profile-change",
+      "topology_pattern": "profile-bound-source-and-verdict-bases"
+    },
+    {
+      "completeness": {
+        "alternative_witness_id": "constructive-heartbeat-expiry-family-v0.4",
+        "bounded_projection_id": "micro-v0.4-heartbeat-expiry-e3-b2",
+        "evidence_kind": "projected_bounded",
+        "justification": "The rare temporal joint is preserved while incidental bases are omitted.",
+        "omitted_dimensions": [
+          "additional-dormant-bases"
+        ]
+      },
+      "disposition": "required",
+      "event_pattern": [
+        "AdvanceClock"
+      ],
+      "holdout_tags": [
+        "joint-boundary",
+        "heartbeat",
+        "expiry"
+      ],
+      "infeasibility_witness": null,
+      "minimum_count": 300,
+      "profile_pattern": "stable",
+      "rarity_weight": 11,
+      "request_pattern": "none",
+      "required_consequences": [
+        "source-survives",
+        "assurance-stales"
+      ],
+      "required_invariants": [
+        "T-INV-02",
+        "T-INV-03",
+        "T-INV-06"
+      ],
+      "search_budget": {
+        "maximum_construction_attempts_per_plan": 12,
+        "maximum_elapsed_milliseconds": 4000,
+        "maximum_oracle_attempts": 12,
+        "maximum_plan_attempts": 16
+      },
+      "target_id": "v04-heartbeat-expiry-joint",
+      "temporal_pattern": "expiry-equals-heartbeat-deadline",
+      "topology_pattern": "two-independent-source-bases-one-expiring"
+    },
+    {
+      "completeness": {
+        "alternative_witness_id": null,
+        "bounded_projection_id": "micro-v0.4-request-e2-b2-r1",
+        "evidence_kind": "fully_bounded",
+        "justification": "The complete request lifecycle fits the bounded request domain.",
+        "omitted_dimensions": []
+      },
+      "disposition": "required",
+      "event_pattern": [
+        "RequestReassessment",
+        "Reassess"
+      ],
+      "holdout_tags": [
+        "request-lifecycle"
+      ],
+      "infeasibility_witness": null,
+      "minimum_count": 250,
+      "profile_pattern": "stable",
+      "rarity_weight": 7,
+      "request_pattern": "created-then-explicitly-closed",
+      "required_consequences": [
+        "substantive-state-preserved",
+        "request-closed"
+      ],
+      "required_invariants": [
+        "R-INV-01",
+        "R-INV-03",
+        "R-INV-04"
+      ],
+      "search_budget": {
+        "maximum_construction_attempts_per_plan": 10,
+        "maximum_elapsed_milliseconds": 3000,
+        "maximum_oracle_attempts": 10,
+        "maximum_plan_attempts": 12
+      },
+      "target_id": "v04-request-lifecycle",
+      "temporal_pattern": "closure-at-current-logical-time",
+      "topology_pattern": "stable-support-with-governance-request"
+    },
+    {
+      "completeness": {
+        "alternative_witness_id": "convergence-metamorphic-family-v0.4",
+        "bounded_projection_id": null,
+        "evidence_kind": "alternative_assurance",
+        "justification": "A constructive witness family and metamorphic event-order check are required.",
+        "omitted_dimensions": [
+          "full-commutativity-class"
+        ]
+      },
+      "disposition": "exploratory",
+      "event_pattern": [
+        "ProfileChange",
+        "RecordHeartbeat"
+      ],
+      "holdout_tags": [
+        "composition",
+        "convergence"
+      ],
+      "infeasibility_witness": null,
+      "minimum_count": 50,
+      "profile_pattern": "monotonic-strengthening",
+      "rarity_weight": 13,
+      "request_pattern": "optional-profile-request",
+      "required_consequences": [
+        "substantive-convergence"
+      ],
+      "required_invariants": [
+        "P-INV-02",
+        "H-INV-02"
+      ],
+      "search_budget": {
+        "maximum_construction_attempts_per_plan": 16,
+        "maximum_elapsed_milliseconds": 6000,
+        "maximum_oracle_attempts": 16,
+        "maximum_plan_attempts": 24
+      },
+      "target_id": "v04-independent-event-convergence",
+      "temporal_pattern": "same-logical-time-independent-events",
+      "topology_pattern": "independent-profile-and-heartbeat-subsystems"
+    }
+  ]
+}
