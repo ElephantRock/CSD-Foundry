@@ -58,6 +58,13 @@ class AttemptReplayBundle:
             raise AttemptReplayError("choice ledger belongs to a different attempt")
         if any(record.request.attempt_key != attempt_key for record in ordered_identity_records):
             raise AttemptReplayError("identity record belongs to a different attempt")
+        if (
+            self.input_commitment.producer_contract_id
+            != self.choice_ledger.producer_contract_id
+        ):
+            raise AttemptReplayError(
+                "input commitment and choice ledger producer contracts must match"
+            )
         if self.input_commitment.generation_namespace_digest != namespace_digest:
             raise AttemptReplayError("input commitment belongs to a different namespace")
         if self.search_branch.generation_namespace_digest != namespace_digest:
