@@ -38,8 +38,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
-      - name: Format modified Python
+      - name: Normalize modified Python
         run: |
+          ruff check --fix \
+            src/csd_foundry/synthesis/v0_4/execution_vectors.py \
+            src/csd_foundry/synthesis/v0_4/execution_validation.py \
+            tests/test_v0_4_execution_artifacts.py \
+            tests/test_v0_4_execution_protocol.py
           ruff format \
             src/csd_foundry/synthesis/v0_4/execution_vectors.py \
             src/csd_foundry/synthesis/v0_4/execution_validation.py \
