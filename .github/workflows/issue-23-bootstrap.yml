@@ -100,6 +100,7 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout origin/main -- .github/workflows/ci.yml
           git add -A
           git commit -m "Implement append-only publication contracts and store (#23)"
           git push origin HEAD:feature/23-append-only-publication
