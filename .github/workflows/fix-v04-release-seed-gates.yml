@@ -47,18 +47,21 @@ jobs:
           end = contracts.find(end_marker, start)
           if start < 0 or end < 0:
               raise SystemExit("release-policy seed block markers missing")
-          replacement = '''        try:
-              release_seed = RootSeed.from_hex(
-                  self.root_seed,
-                  SeedProvenance(self.root_seed_provenance),
-              )
-          except (ChoiceValidationError, ValueError) as exc:
-              raise ContractValidationError(f"invalid release root seed: {exc}") from exc
-          if not release_seed.release_eligible:
-              raise ContractValidationError(
-                  "release root seed requires uniform-random-256 provenance"
-              )
-          '''
+          replacement = (
+              "        try:\n"
+              "            release_seed = RootSeed.from_hex(\n"
+              "                self.root_seed,\n"
+              "                SeedProvenance(self.root_seed_provenance),\n"
+              "            )\n"
+              "        except (ChoiceValidationError, ValueError) as exc:\n"
+              "            raise ContractValidationError(\n"
+              "                f\"invalid release root seed: {exc}\"\n"
+              "            ) from exc\n"
+              "        if not release_seed.release_eligible:\n"
+              "            raise ContractValidationError(\n"
+              "                \"release root seed requires uniform-random-256 provenance\"\n"
+              "            )\n"
+          )
           contracts = contracts[:start] + replacement + contracts[end:]
           contracts_path.write_text(contracts, encoding="utf-8")
 
@@ -67,11 +70,13 @@ jobs:
           )
           determinism = determinism_path.read_text(encoding="utf-8")
           line = "        release_seed_valid = release_seed.release_eligible\n"
-          replacement_line = line + '''        if not release_seed_valid:
-              errors.append(
-                  "release seed provenance is valid syntax but is not release eligible"
-              )
-          '''
+          replacement_line = line + (
+              "        if not release_seed_valid:\n"
+              "            errors.append(\n"
+              "                \"release seed provenance is valid syntax but is not "
+              "release eligible\"\n"
+              "            )\n"
+          )
           if determinism.count(line) != 1:
               raise SystemExit("determinism seed-validity anchor missing or ambiguous")
           determinism_path.write_text(
