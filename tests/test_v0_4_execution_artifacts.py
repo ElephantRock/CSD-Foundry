@@ -157,10 +157,22 @@ def test_current_execution_schema_is_versioned_and_well_formed() -> None:
     Draft202012Validator.check_schema(document)
 
 
-def test_retry_policy_schema_rejects_inconsistent_derived_count() -> None:
+def test_retry_policy_schema_enforces_every_derived_execution_count() -> None:
     document = _load(_CURRENT_EXECUTION_SCHEMA)
     assert type(document) is dict
     retry_schema = document["$defs"]["operationalRetryPolicy"]
+    branches = retry_schema["allOf"][0]["oneOf"]
+    assert len(branches) == 256
+    for retries, branch in enumerate(branches):
+        assert branch["properties"] == {
+            "maximum_operational_retries": {"const": retries},
+            "maximum_total_executions": {"const": retries + 1},
+        }
+        assert branch["required"] == [
+            "maximum_operational_retries",
+            "maximum_total_executions",
+        ]
+
     validator = Draft202012Validator(retry_schema)
     validator.validate(
         {
