@@ -225,6 +225,7 @@ def _bundle(index: int, *, accepted: bool, sample_index: int) -> AttemptReplayBu
     )
     completion: AttemptAccepted | AttemptRejected
     completion: AttemptAccepted | AttemptRejected
+    completion: AttemptAccepted | AttemptRejected
     if accepted:
         completion = AttemptAccepted(
             attempt_key=attempt,
@@ -370,6 +371,7 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
 
     cases += 1
     first_record = accepted.choice_ledger.records[0]
+    tampered_record: ChoiceRecord
     tampered_record: ChoiceRecord
     tampered_record: ChoiceRecord
     if type(first_record) is BoundedIntegerChoiceRecord:
