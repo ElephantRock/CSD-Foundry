@@ -7,13 +7,15 @@
   "additionalProperties": false,
   "properties": {
     "attempt_key": {"additionalProperties": false, "properties": {"attempt_index": {"minimum": 0, "type": "integer"}, "release": {"const": "v0.4"}, "sample_index": {"minimum": 0, "type": "integer"}, "target_id": {"$ref": "#/$defs/token"}}, "required": ["attempt_index", "release", "sample_index", "target_id"], "type": "object"},
+    "commitment_digest": {"$ref": "#/$defs/digest"},
     "generation_namespace_digest": {"$ref": "#/$defs/digest"},
+    "payload": {"type": "object"},
     "payload_digest": {"$ref": "#/$defs/digest"},
     "producer_contract_digest": {"$ref": "#/$defs/digest"},
     "producer_contract_id": {"$ref": "#/$defs/token"},
     "producer_contract_version": {"minimum": 1, "type": "integer"},
     "schema_version": {"const": "csd-attempt-input/0.4"}
   },
-  "required": ["attempt_key", "generation_namespace_digest", "payload_digest", "producer_contract_digest", "producer_contract_id", "producer_contract_version", "schema_version"],
+  "required": ["attempt_key", "commitment_digest", "generation_namespace_digest", "payload", "payload_digest", "producer_contract_digest", "producer_contract_id", "producer_contract_version", "schema_version"],
   "type": "object"
 }
