@@ -142,9 +142,7 @@ def _role_segments(data: dict[str, object]) -> tuple[ChoiceSegment, ...]:
         raise ValueError("identity vector role_segments must be an array")
     segments: list[ChoiceSegment] = []
     for segment in value:
-        if type(segment) is int:
-            segments.append(segment)
-        elif type(segment) is str:
+        if type(segment) is int or type(segment) is str:
             segments.append(segment)
         else:
             raise ValueError("identity vector role segment has an invalid type")
