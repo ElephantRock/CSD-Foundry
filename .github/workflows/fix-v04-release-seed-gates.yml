@@ -24,33 +24,30 @@ jobs:
           from pathlib import Path
           import json
 
-          def replace(path: str, old: str, new: str) -> None:
-              target = Path(path)
-              text = target.read_text(encoding="utf-8")
-              if old not in text:
-                  raise SystemExit(f"missing patch anchor in {path}: {old[:100]!r}")
-              target.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-          replace(
-              "src/csd_foundry/synthesis/v0_4/contracts.py",
-              "from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS\n",
-              "from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS\n"
+          contracts_path = Path("src/csd_foundry/synthesis/v0_4/contracts.py")
+          contracts = contracts_path.read_text(encoding="utf-8")
+          import_anchor = (
+              "from csd_foundry.kernel.invariant_registry import "
+              "EXECUTABLE_INVARIANT_IDS\n"
+          )
+          import_replacement = import_anchor + (
               "from csd_foundry.synthesis.v0_4.choice_paths import (\n"
               "    ChoiceValidationError,\n"
               "    RootSeed,\n"
               "    SeedProvenance,\n"
-              ")\n",
+              ")\n"
           )
-          replace(
-              "src/csd_foundry/synthesis/v0_4/contracts.py",
-              '''        if _SHA256_PATTERN.fullmatch(self.root_seed) is None:
-              raise ContractValidationError("root_seed must be a lowercase 256-bit hex seed")
-          if self.root_seed_provenance != "uniform-random-256":
-              raise ContractValidationError(
-                  "release root seed requires uniform-random-256 provenance"
-              )
-          ''',
-              '''        try:
+          if import_anchor not in contracts:
+              raise SystemExit("contracts import anchor missing")
+          contracts = contracts.replace(import_anchor, import_replacement, 1)
+
+          start_marker = "        if _SHA256_PATTERN.fullmatch(self.root_seed) is None:\n"
+          end_marker = "        if self.rng_algorithm != \"csd-choice-hmac-sha256-rejection\":\n"
+          start = contracts.find(start_marker)
+          end = contracts.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("release-policy seed block markers missing")
+          replacement = '''        try:
               release_seed = RootSeed.from_hex(
                   self.root_seed,
                   SeedProvenance(self.root_seed_provenance),
@@ -61,20 +58,25 @@ jobs:
               raise ContractValidationError(
                   "release root seed requires uniform-random-256 provenance"
               )
-          ''',
+          '''
+          contracts = contracts[:start] + replacement + contracts[end:]
+          contracts_path.write_text(contracts, encoding="utf-8")
+
+          determinism_path = Path(
+              "src/csd_foundry/synthesis/v0_4/determinism_validation.py"
           )
-          replace(
-              "src/csd_foundry/synthesis/v0_4/determinism_validation.py",
-              '''        release_seed = RootSeed.from_hex(root_seed, SeedProvenance(provenance))
-              release_seed_valid = release_seed.release_eligible
-          ''',
-              '''        release_seed = RootSeed.from_hex(root_seed, SeedProvenance(provenance))
-              release_seed_valid = release_seed.release_eligible
-              if not release_seed_valid:
-                  errors.append(
-                      "release seed provenance is valid syntax but is not release eligible"
-                  )
-          ''',
+          determinism = determinism_path.read_text(encoding="utf-8")
+          line = "        release_seed_valid = release_seed.release_eligible\n"
+          replacement_line = line + '''        if not release_seed_valid:
+              errors.append(
+                  "release seed provenance is valid syntax but is not release eligible"
+              )
+          '''
+          if determinism.count(line) != 1:
+              raise SystemExit("determinism seed-validity anchor missing or ambiguous")
+          determinism_path.write_text(
+              determinism.replace(line, replacement_line, 1),
+              encoding="utf-8",
           )
 
           schema_path = Path("specs/v0.4/release_policy.schema.json")
@@ -92,22 +94,21 @@ jobs:
           )
 
           test_path = Path("tests/synthesis_v0_4/test_deterministic_choices.py")
-          text = test_path.read_text(encoding="utf-8")
-          import_anchor = '''from csd_foundry.synthesis.v0_4.specs import (
+          tests = test_path.read_text(encoding="utf-8")
+          tests_import = '''from csd_foundry.synthesis.v0_4.specs import (
               CHOICE_ALGORITHM_SPEC,
               RELEASE_POLICY_SPEC,
           )
           '''
-          import_replacement = import_anchor + '''from csd_foundry.synthesis.v0_4.validation import (
+          tests_import_replacement = tests_import + '''from csd_foundry.synthesis.v0_4.validation import (
               validate_release as validate_contract_release,
           )
           '''
-          if import_anchor not in text:
+          if tests_import not in tests:
               raise SystemExit("test import anchor missing")
-          text = text.replace(import_anchor, import_replacement, 1)
-          test_anchor = '''def test_choice_policy_satisfies_exact_collision_bound() -> None:
-          '''
-          new_tests = '''def test_determinism_rejects_release_ineligible_seed_provenance() -> None:
+          tests = tests.replace(tests_import, tests_import_replacement, 1)
+
+          insertion = '''def test_determinism_rejects_release_ineligible_seed_provenance() -> None:
               original = RELEASE_POLICY_SPEC["root_seed_provenance"]
               try:
                   RELEASE_POLICY_SPEC["root_seed_provenance"] = "developer-text"
@@ -131,10 +132,12 @@ jobs:
                   RELEASE_POLICY_SPEC["root_seed"] = original
 
 
-          ''' + test_anchor
-          if test_anchor not in text:
+          '''
+          insertion_anchor = "def test_choice_policy_satisfies_exact_collision_bound() -> None:\n"
+          if insertion_anchor not in tests:
               raise SystemExit("test insertion anchor missing")
-          test_path.write_text(text.replace(test_anchor, new_tests, 1), encoding="utf-8")
+          tests = tests.replace(insertion_anchor, insertion + insertion_anchor, 1)
+          test_path.write_text(tests, encoding="utf-8")
           PY
       - run: ruff format src tests
       - run: ruff check --fix src tests
