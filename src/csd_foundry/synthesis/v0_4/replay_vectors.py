@@ -12,6 +12,7 @@ REPLAY_VECTOR_IDS: tuple[str, ...] = (
     "forced-redraw",
     "identity-commitment",
 )
+REPLAY_VECTOR_COUNT = len(REPLAY_VECTOR_IDS)
 
 REPLAY_VECTOR_CATALOG: dict[str, object] = {
     "release": "v0.4",
