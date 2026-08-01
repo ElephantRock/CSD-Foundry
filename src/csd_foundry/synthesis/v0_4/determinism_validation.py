@@ -157,14 +157,18 @@ def _validate_vector(
     path = _path(vector)
 
     if operation == "bounded_integer":
-        result = bounded_integer(seed, path, _integer(vector, "upper_exclusive"))
-        if _bounded_payload(result) != expected:
+        bounded_result = bounded_integer(
+            seed,
+            path,
+            _integer(vector, "upper_exclusive"),
+        )
+        if _bounded_payload(bounded_result) != expected:
             raise ValueError("bounded result does not match expected vector")
         return (
-            int(result.draw_index > 0),
-            int(result.draw_index > 1),
-            result.block_count > 1,
-            result.material_digest,
+            int(bounded_result.draw_index > 0),
+            int(bounded_result.draw_index > 1),
+            bounded_result.block_count > 1,
+            bounded_result.material_digest,
         )
 
     if operation == "integer_weighted_index":
@@ -179,52 +183,62 @@ def _validate_vector(
             for item in weights_raw
         ):
             raise ValueError("weighted vector weights must contain integers")
-        result = weighted_choice(
+        weighted_result = weighted_choice(
             seed,
             path,
             cast(list[str], values_raw),
             cast(list[int], weights_raw),
         )
         payload = {
-            "selected_index": result.selected_index,
-            "selected_value": result.selected_value,
-            "ticket_value": result.ticket.value,
-            "draw_index": result.ticket.draw_index,
-            "candidate_hex": result.ticket.candidate_hex,
-            "candidate": result.ticket.candidate,
-            "limit": result.ticket.limit,
-            "width": result.ticket.width,
-            "block_count": result.ticket.block_count,
-            "cumulative_weights": list(result.cumulative_weights),
-            "domain_digest": result.ticket.domain_digest,
-            "material_digest": result.ticket.material_digest,
+            "selected_index": weighted_result.selected_index,
+            "selected_value": weighted_result.selected_value,
+            "ticket_value": weighted_result.ticket.value,
+            "draw_index": weighted_result.ticket.draw_index,
+            "candidate_hex": weighted_result.ticket.candidate_hex,
+            "candidate": weighted_result.ticket.candidate,
+            "limit": weighted_result.ticket.limit,
+            "width": weighted_result.ticket.width,
+            "block_count": weighted_result.ticket.block_count,
+            "cumulative_weights": list(weighted_result.cumulative_weights),
+            "domain_digest": weighted_result.ticket.domain_digest,
+            "material_digest": weighted_result.ticket.material_digest,
         }
         if payload != expected:
             raise ValueError("weighted result does not match expected vector")
-        return (0, 0, result.ticket.block_count > 1, result.ticket.material_digest)
+        return (
+            0,
+            0,
+            weighted_result.ticket.block_count > 1,
+            weighted_result.ticket.material_digest,
+        )
 
     if operation == "boolean_ratio":
-        result = choose_ratio(
+        boolean_result = choose_ratio(
             seed,
             path,
             _integer(vector, "numerator"),
             _integer(vector, "denominator"),
         )
         payload = {
-            "selected": result.selected,
-            "ticket_value": result.ticket.value,
-            "draw_index": result.ticket.draw_index,
-            "candidate_hex": result.ticket.candidate_hex,
-            "candidate": result.ticket.candidate,
-            "limit": result.ticket.limit,
-            "width": result.ticket.width,
-            "block_count": result.ticket.block_count,
-            "domain_digest": result.ticket.domain_digest,
-            "material_digest": result.ticket.material_digest,
+            "selected": boolean_result.selected,
+            "ticket_value": boolean_result.ticket.value,
+            "draw_index": boolean_result.ticket.draw_index,
+            "candidate_hex": boolean_result.ticket.candidate_hex,
+            "candidate": boolean_result.ticket.candidate,
+            "limit": boolean_result.ticket.limit,
+            "width": boolean_result.ticket.width,
+            "block_count": boolean_result.ticket.block_count,
+            "domain_digest": boolean_result.ticket.domain_digest,
+            "material_digest": boolean_result.ticket.material_digest,
         }
         if payload != expected:
             raise ValueError("ratio result does not match expected vector")
-        return (0, 0, result.ticket.block_count > 1, result.ticket.material_digest)
+        return (
+            0,
+            0,
+            boolean_result.ticket.block_count > 1,
+            boolean_result.ticket.material_digest,
+        )
 
     raise ValueError(f"unsupported known-answer operation: {operation}")
 
