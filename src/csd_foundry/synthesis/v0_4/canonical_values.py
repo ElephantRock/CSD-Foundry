@@ -93,6 +93,11 @@ class CanonicalObject:
     def from_pairs(cls, pairs: tuple[tuple[str, CanonicalValue], ...]) -> CanonicalObject:
         if type(pairs) is not tuple:
             raise CanonicalValueError("canonical object pairs must be an immutable tuple")
+        for pair in pairs:
+            if type(pair) is not tuple or len(pair) != 2:
+                raise CanonicalValueError(
+                    "canonical object pairs must contain exact two-element tuples"
+                )
         fields = tuple(CanonicalField(name, value) for name, value in pairs)
         return cls(tuple(sorted(fields, key=lambda field: field.name.encode("utf-8"))))
 
