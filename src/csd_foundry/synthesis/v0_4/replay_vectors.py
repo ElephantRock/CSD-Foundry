@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+REPLAY_VECTOR_VERSION = 1
+
 REPLAY_VECTOR_CATALOG: dict[str, object] = {
     "release": "v0.4",
     "schema_version": "0.4.0",
