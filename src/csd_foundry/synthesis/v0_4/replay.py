@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from csd_foundry.synthesis.v0_4.choice_ledger import ChoiceLedger
@@ -25,9 +26,17 @@ from csd_foundry.synthesis.v0_4.generation_namespace import GenerationNamespace
 from csd_foundry.synthesis.v0_4.identities import IdentityRecord, derive_identity
 from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canonical_sha256
 
+_HEX_256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
 
 class ReplayMismatchError(ValueError):
     """Raised when deterministic evidence cannot be reproduced exactly."""
+
+
+def _require_digest(value: object, field_name: str) -> str:
+    if type(value) is not str or _HEX_256_PATTERN.fullmatch(value) is None:
+        raise ReplayMismatchError(f"{field_name} must be a lowercase SHA-256 digest")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,9 +53,8 @@ class ReplayVerification:
             raise ReplayMismatchError("choice_record_count must be nonnegative")
         if type(self.identity_record_count) is not int or self.identity_record_count < 0:
             raise ReplayMismatchError("identity_record_count must be nonnegative")
-        for value in (self.choice_ledger_digest, self.identity_ledger_digest):
-            if type(value) is not str or len(value) != 64:
-                raise ReplayMismatchError("replay digests must be lowercase SHA-256 values")
+        _require_digest(self.choice_ledger_digest, "choice_ledger_digest")
+        _require_digest(self.identity_ledger_digest, "identity_ledger_digest")
 
 
 def _replayed_record(
@@ -57,7 +65,9 @@ def _replayed_record(
     if type(seed) is not RootSeed:
         raise ReplayMismatchError("replay seed must use the exact RootSeed class")
     if type(namespace) is not GenerationNamespace:
-        raise ReplayMismatchError("replay namespace must use the exact GenerationNamespace class")
+        raise ReplayMismatchError(
+            "replay namespace must use the exact GenerationNamespace class"
+        )
     if record.seed_commitment != seed.commitment:
         raise ReplayMismatchError("choice record seed commitment does not match")
     if record.generation_namespace_digest != namespace.digest:
@@ -142,25 +152,31 @@ def replay_choice_ledger(
     return ledger.canonical_digest
 
 
+def canonical_identity_records(
+    records: tuple[IdentityRecord, ...],
+) -> tuple[IdentityRecord, ...]:
+    """Return exact identity records in the canonical ledger request order."""
+
+    if type(records) is not tuple:
+        raise ReplayMismatchError("identity records must be an immutable tuple")
+    if not all(type(record) is IdentityRecord for record in records):
+        raise ReplayMismatchError("identity records must use exact IdentityRecord values")
+    return tuple(
+        sorted(
+            records,
+            key=lambda record: canonical_json_bytes(record.request.to_json_value()),
+        )
+    )
+
+
 def replay_identity_records(
     seed: RootSeed,
     namespace: GenerationNamespace,
     records: tuple[IdentityRecord, ...],
     expected_digest: str,
 ) -> str:
-    if type(records) is not tuple:
-        raise ReplayMismatchError("identity records must be an immutable tuple")
-    if not all(type(record) is IdentityRecord for record in records):
-        raise ReplayMismatchError("identity records must use exact IdentityRecord values")
-    if type(expected_digest) is not str or len(expected_digest) != 64:
-        raise ReplayMismatchError("expected identity digest must be lowercase SHA-256")
-
-    ordered = tuple(
-        sorted(
-            records,
-            key=lambda record: canonical_json_bytes(record.request.to_json_value()),
-        )
-    )
+    _require_digest(expected_digest, "expected identity digest")
+    ordered = canonical_identity_records(records)
     seen_requests: set[bytes] = set()
     seen_full: set[str] = set()
     seen_display: set[str] = set()
@@ -193,10 +209,12 @@ def replay_bundle_commitment(
 ) -> str:
     """Commit independently replayable ledger evidence without retaining it in completions."""
 
+    _require_digest(identity_ledger_digest, "identity_ledger_digest")
+    ordered = canonical_identity_records(identity_records)
     return canonical_sha256(
         {
             "choice_ledger": choice_ledger.to_json_value(),
             "identity_ledger_digest": identity_ledger_digest,
-            "identity_records": [record.to_json_value() for record in identity_records],
+            "identity_records": [record.to_json_value() for record in ordered],
         }
     )
