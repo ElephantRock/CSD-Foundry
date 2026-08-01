@@ -113,7 +113,9 @@ class ReplayValidationReport:
             "incomplete_prefixes_nonsemantic": self.incomplete_prefixes_nonsemantic,
             "post_acceptance_rejected": self.post_acceptance_rejected,
             "complete_exhaustion_verified": self.complete_exhaustion_verified,
-            "exhaustion_converted_to_infeasibility": (self.exhaustion_converted_to_infeasibility),
+            "exhaustion_converted_to_infeasibility": (
+                self.exhaustion_converted_to_infeasibility
+            ),
             "operational_abort_has_semantic_completion": (
                 self.operational_abort_has_semantic_completion
             ),
@@ -221,7 +223,9 @@ def _bundle(index: int, *, accepted: bool, sample_index: int) -> AttemptReplayBu
         generation_namespace_digest=_namespace().digest,
         attempt_input_commitment_digest=input_commitment.digest,
         choice_ledger_digest=ledger.canonical_digest,
-        branch_facts=CanonicalObject.from_pairs((("accepted", accepted), ("attempt_index", index))),
+        branch_facts=CanonicalObject.from_pairs(
+            (("accepted", accepted), ("attempt_index", index))
+        ),
     )
     completion: AttemptAccepted | AttemptRejected
     if accepted:
@@ -232,7 +236,9 @@ def _bundle(index: int, *, accepted: bool, sample_index: int) -> AttemptReplayBu
             search_branch_digest=branch.digest,
             choice_ledger_digest=ledger.canonical_digest,
             identity_ledger_digest=identity_digest,
-            result=CanonicalObject.from_pairs((("accepted", True), ("attempt_index", index))),
+            result=CanonicalObject.from_pairs(
+                (("accepted", True), ("attempt_index", index))
+            ),
         )
     else:
         rejection = AttemptRejection(
@@ -273,7 +279,9 @@ def _forced_redraw_record() -> BoundedIntegerChoiceRecord:
         record = ledger.records[0]
         if type(record) is BoundedIntegerChoiceRecord and record.evidence.draw_index > 0:
             return record
-    raise RuntimeError("bounded forced-redraw canary was not found in the finite fixture domain")
+    raise RuntimeError(
+        "bounded forced-redraw canary was not found in the finite fixture domain"
+    )
 
 
 def generate_replay_digests() -> dict[str, str]:
@@ -281,14 +289,16 @@ def generate_replay_digests() -> dict[str, str]:
 
     accepted_zero = _bundle(0, accepted=True, sample_index=10)
     rejected_prefix = tuple(
-        _bundle(index, accepted=index == 2, sample_index=11).completion for index in range(3)
+        _bundle(index, accepted=index == 2, sample_index=11).completion
+        for index in range(3)
     )
     accepted_replay = resolve_attempt_prefix(AttemptRange(4), rejected_prefix)
     if type(accepted_replay) is not AcceptedSampleReplay:
         raise RuntimeError("accepted-prefix fixture did not resolve")
 
     exhausted_completions = tuple(
-        _bundle(index, accepted=False, sample_index=12).completion for index in range(3)
+        _bundle(index, accepted=False, sample_index=12).completion
+        for index in range(3)
     )
     exhausted = resolve_attempt_prefix(AttemptRange(3), exhausted_completions)
     if type(exhausted) is not ExhaustionEvidence:
@@ -299,7 +309,9 @@ def generate_replay_digests() -> dict[str, str]:
     reverse = _ledger(attempt, ("ratio", "weighted", "bounded"))
     if forward.canonical_digest != reverse.canonical_digest:
         raise RuntimeError("call-order canary diverged")
-    weighted = next(record for record in forward.records if type(record) is WeightedChoiceRecord)
+    weighted = next(
+        record for record in forward.records if type(record) is WeightedChoiceRecord
+    )
     forced = _forced_redraw_record()
 
     return {
@@ -369,12 +381,15 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
 
     cases += 1
     first_record = accepted.choice_ledger.records[0]
-    tampered_record: ChoiceRecord
-    if type(first_record) is BoundedIntegerChoiceRecord:
-        tampered_record = replace(first_record, upper_exclusive=first_record.upper_exclusive + 1)
-    else:
-        tampered_record = replace(first_record, schema_version="bad")
     try:
+        tampered_record: ChoiceRecord
+        if type(first_record) is BoundedIntegerChoiceRecord:
+            tampered_record = replace(
+                first_record,
+                upper_exclusive=first_record.upper_exclusive + 1,
+            )
+        else:
+            tampered_record = replace(first_record, schema_version="bad")
         tampered_ledger = replace(
             accepted.choice_ledger,
             records=(tampered_record, *accepted.choice_ledger.records[1:]),
@@ -398,7 +413,10 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
     cases += 1
     try:
         replay_choice_ledger(
-            RootSeed.from_text("different-seed", SeedProvenance.KNOWN_ANSWER_FIXTURE),
+            RootSeed.from_text(
+                "different-seed",
+                SeedProvenance.KNOWN_ANSWER_FIXTURE,
+            ),
             _namespace(),
             accepted.choice_ledger,
         )
@@ -455,7 +473,11 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
             rejected += 1
 
     cases += 1
-    operational = OperationalAttemptBlock(_attempt(0, sample_index=23), "worker-timeout", 1)
+    operational = OperationalAttemptBlock(
+        _attempt(0, sample_index=23),
+        "worker-timeout",
+        1,
+    )
     operational_has_semantic_completion = isinstance(
         operational,
         (AttemptAccepted, AttemptRejected),
@@ -521,7 +543,9 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
             if type(vector_id) is not str:
                 errors.append("replay vector IDs must be exact strings")
                 continue
-            if actual_digests.get(vector_id) == EXPECTED_REPLAY_DIGESTS.get(vector_id):
+            if actual_digests.get(vector_id) == EXPECTED_REPLAY_DIGESTS.get(
+                vector_id
+            ):
                 vectors_passed += 1
             else:
                 errors.append(f"replay vector {vector_id} diverged")
@@ -573,7 +597,8 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
     exhaustion_verified = False
     try:
         prefix = tuple(
-            _bundle(index, accepted=index == 2, sample_index=40).completion for index in range(3)
+            _bundle(index, accepted=index == 2, sample_index=40).completion
+            for index in range(3)
         )
         accepted = resolve_attempt_prefix(AttemptRange(4), prefix)
         lowest_valid = (
@@ -582,7 +607,10 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
         )
         exhausted = resolve_attempt_prefix(
             AttemptRange(3),
-            tuple(_bundle(index, accepted=False, sample_index=41).completion for index in range(3)),
+            tuple(
+                _bundle(index, accepted=False, sample_index=41).completion
+                for index in range(3)
+            ),
         )
         exhaustion_verified = (
             type(exhausted) is ExhaustionEvidence
@@ -601,7 +629,9 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
         "incomplete prefix became semantic": incomplete_nonsemantic,
         "post-acceptance completion was accepted": post_acceptance_rejected,
         "complete exhaustion was not verified": exhaustion_verified,
-        "operational abort entered semantic completion": (not operational_has_semantic_completion),
+        "operational abort entered semantic completion": (
+            not operational_has_semantic_completion
+        ),
         "tamper campaign had escapes": tamper_rejected == tamper_cases,
     }
     for message, passed in checks.items():
@@ -625,7 +655,9 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
         post_acceptance_rejected=post_acceptance_rejected,
         complete_exhaustion_verified=exhaustion_verified,
         exhaustion_converted_to_infeasibility=False,
-        operational_abort_has_semantic_completion=operational_has_semantic_completion,
+        operational_abort_has_semantic_completion=(
+            operational_has_semantic_completion
+        ),
         tamper_cases=tamper_cases,
         tamper_cases_rejected=tamper_rejected,
         errors=tuple(errors),
