@@ -25,10 +25,8 @@ jobs:
           python-version: '3.11'
       - name: Apply implementation patch
         run: python scripts/apply_issue_23.py
-      - name: Normalize generated sources
-        run: python scripts/normalize_issue_23_generated.py
-      - name: Remove one-shot patch machinery
-        run: rm scripts/apply_issue_23.py scripts/normalize_issue_23_generated.py .github/workflows/issue-23-bootstrap.yml
+      - name: Remove bootstrap machinery
+        run: rm scripts/apply_issue_23.py .github/workflows/issue-23-bootstrap.yml
       - name: Install development environment
         run: |
           python -m pip install --upgrade pip
@@ -43,6 +41,10 @@ jobs:
             src/csd_foundry/synthesis/v0_4/publication_vectors.py \
             tests/test_v0_4_publication_artifacts.py \
             tests/test_v0_4_publication_protocol.py
+          python scripts/normalize_issue_23_generated.py
+          ruff format \
+            src/csd_foundry/synthesis/v0_4/publication_validation.py \
+            src/csd_foundry/synthesis/v0_4/publication_vectors.py
           ruff check --fix \
             src/csd_foundry/cli.py \
             src/csd_foundry/synthesis/v0_4/publication_protocol.py \
@@ -51,6 +53,7 @@ jobs:
             src/csd_foundry/synthesis/v0_4/publication_vectors.py \
             tests/test_v0_4_publication_artifacts.py \
             tests/test_v0_4_publication_protocol.py
+          rm scripts/normalize_issue_23_generated.py
       - name: Run complete validation suite
         run: |
           ruff format --check .
