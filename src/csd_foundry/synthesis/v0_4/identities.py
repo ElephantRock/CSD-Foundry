@@ -107,9 +107,7 @@ class IdentityRequest:
         if type(self.attempt_key) is not AttemptKey:
             raise ChoiceValidationError("identity attempt_key must be an exact AttemptKey")
         if type(self.attempt_key.sample_key) is not SampleKey:
-            raise ChoiceValidationError(
-                "identity sample_key must be an exact SampleKey"
-            )
+            raise ChoiceValidationError("identity sample_key must be an exact SampleKey")
         if type(self.entity_kind) is not EntityKind:
             raise ChoiceValidationError("identity entity_kind must be an exact EntityKind")
         if type(self.role_segments) is not tuple or not self.role_segments:
@@ -197,9 +195,7 @@ def canonical_identity_material(
     request: IdentityRequest,
 ) -> bytes:
     if type(namespace) is not GenerationNamespace:
-        raise ChoiceValidationError(
-            "identity namespace must be an exact GenerationNamespace"
-        )
+        raise ChoiceValidationError("identity namespace must be an exact GenerationNamespace")
     if type(request) is not IdentityRequest:
         raise ChoiceValidationError("identity request must be an exact IdentityRequest")
     return canonical_json_bytes(
@@ -228,9 +224,7 @@ def _identity_from_digest(
     digest: bytes,
 ) -> EntityIdentity:
     if type(namespace) is not GenerationNamespace:
-        raise ChoiceValidationError(
-            "identity namespace must be an exact GenerationNamespace"
-        )
+        raise ChoiceValidationError("identity namespace must be an exact GenerationNamespace")
     if type(request) is not IdentityRequest:
         raise ChoiceValidationError("identity request must be an exact IdentityRequest")
     if type(material) is not bytes:
@@ -285,9 +279,7 @@ class IdentityLedger:
 
     def _request_key(self, request: IdentityRequest) -> str:
         if type(request) is not IdentityRequest:
-            raise ChoiceValidationError(
-                "identity ledger request must be an exact IdentityRequest"
-            )
+            raise ChoiceValidationError("identity ledger request must be an exact IdentityRequest")
         return canonical_sha256(request.to_json_value())
 
     def _record_identity(
