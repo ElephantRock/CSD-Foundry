@@ -29,9 +29,7 @@ from csd_foundry.synthesis.v0_4.deterministic_choices import (
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 from csd_foundry.synthesis.v0_4.specs import RELEASE_POLICY_SPEC
 
-FROZEN_VECTOR_CATALOG_DIGEST = (
-    "b82da1b55b3bd5cb45369018b9b3fc227c8a2d8c727af0df2c9f950f7bfb7a60"
-)
+FROZEN_VECTOR_CATALOG_DIGEST = "b82da1b55b3bd5cb45369018b9b3fc227c8a2d8c727af0df2c9f950f7bfb7a60"
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,9 +254,7 @@ def validate_determinism(release: str = "v0.4") -> DeterminismReport:
     vector_catalog_digest = canonical_sha256(KNOWN_ANSWER_VECTORS)
 
     if vector_catalog_digest != FROZEN_VECTOR_CATALOG_DIGEST:
-        errors.append(
-            "version-1 vector catalog digest does not match the frozen replay oracle"
-        )
+        errors.append("version-1 vector catalog digest does not match the frozen replay oracle")
 
     if release != "v0.4":
         errors.append(f"unsupported deterministic-choice release: {release}")
