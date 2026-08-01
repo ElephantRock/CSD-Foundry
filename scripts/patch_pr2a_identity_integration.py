@@ -22,38 +22,30 @@ def write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def main() -> None:
-    from csd_foundry.synthesis.v0_4.identity_policy import expected_identity_policy_spec
-    from csd_foundry.synthesis.v0_4.identity_vectors import KNOWN_ANSWER_IDENTITY_VECTORS
-
-    specs_path = ROOT / "src/csd_foundry/synthesis/v0_4/specs.py"
+def integrate_specs(identity_policy: dict[str, object]) -> None:
+    path = ROOT / "src/csd_foundry/synthesis/v0_4/specs.py"
     replace_once(
-        specs_path,
+        path,
         '    "choice_algorithm.schema.json",\n)',
         '    "choice_algorithm.schema.json",\n    "identity_policy.schema.json",\n)',
     )
-    identity_spec = pprint.pformat(
-        expected_identity_policy_spec(),
-        width=100,
-        sort_dicts=False,
-    )
+    rendered = pprint.pformat(identity_policy, width=100, sort_dicts=False)
     replace_once(
-        specs_path,
+        path,
         "\nSPEC_DOCUMENTS: dict[str, dict[str, object]] = {",
-        f"\nIDENTITY_POLICY_SPEC: dict[str, object] = {identity_spec}\n\n\n"
+        f"\nIDENTITY_POLICY_SPEC: dict[str, object] = {rendered}\n\n\n"
         "SPEC_DOCUMENTS: dict[str, dict[str, object]] = {",
     )
     replace_once(
-        specs_path,
+        path,
         '    "choice_algorithm.json": CHOICE_ALGORITHM_SPEC,\n}',
         '    "choice_algorithm.json": CHOICE_ALGORITHM_SPEC,\n'
         '    "identity_policy.json": IDENTITY_POLICY_SPEC,\n}',
     )
 
-    validation_path = ROOT / "src/csd_foundry/synthesis/v0_4/validation.py"
-    replace_once(validation_path, "        policy_count=5,", "        policy_count=6,")
 
-    cli_path = ROOT / "src/csd_foundry/cli.py"
+def integrate_cli() -> None:
+    path = ROOT / "src/csd_foundry/cli.py"
     parser_anchor = (
         '    synthesis_determinism = synthesis_sub.add_parser(\n'
         '        "determinism",\n'
@@ -61,14 +53,15 @@ def main() -> None:
         '    )\n'
         '    _add_release_argument(synthesis_determinism, default="v0.4")\n'
     )
-    parser_replacement = parser_anchor + (
+    parser_addition = (
         '    synthesis_identities = synthesis_sub.add_parser(\n'
         '        "identities",\n'
         '        help="validate canonical values and deterministic entity identities",\n'
         '    )\n'
         '    _add_release_argument(synthesis_identities, default="v0.4")\n'
     )
-    replace_once(cli_path, parser_anchor, parser_replacement)
+    replace_once(path, parser_anchor, parser_anchor + parser_addition)
+
     handler_anchor = (
         '    if args.command == "synthesize" and args.synthesis_command == "contracts":\n'
     )
@@ -83,43 +76,31 @@ def main() -> None:
         '            raise SystemExit(1)\n'
         '        return\n\n'
     )
-    replace_once(cli_path, handler_anchor, handler + handler_anchor)
+    replace_once(path, handler_anchor, handler + handler_anchor)
 
-    ci_path = ROOT / ".github/workflows/ci.yml"
-    replace_once(
-        ci_path,
-        "      - run: csd-foundry synthesize determinism --release v0.4\n",
-        "      - run: csd-foundry synthesize determinism --release v0.4\n"
-        "      - run: csd-foundry synthesize identities --release v0.4\n",
-    )
-    replace_once(
-        ci_path,
-        "          /tmp/csd-installed/bin/csd-foundry synthesize determinism --release v0.4 > determinism-report.json\n",
-        "          /tmp/csd-installed/bin/csd-foundry synthesize determinism --release v0.4 > determinism-report.json\n"
-        "          /tmp/csd-installed/bin/csd-foundry synthesize identities --release v0.4 > identities-report.json\n",
-    )
-    replace_once(
-        ci_path,
-        "          test -s determinism-report.json\n",
-        "          test -s determinism-report.json\n"
-        "          test -s identities-report.json\n",
-    )
 
-    contracts_test = ROOT / "tests/synthesis_v0_4/test_contracts.py"
+def integrate_ci() -> None:
+    path = ROOT / ".github/workflows/ci.yml"
+    editable = "      - run: csd-foundry synthesize determinism --release v0.4\n"
     replace_once(
-        contracts_test,
-        "    assert report.schema_document_count == 7",
-        "    assert report.schema_document_count == 8",
+        path,
+        editable,
+        editable + "      - run: csd-foundry synthesize identities --release v0.4\n",
     )
+    prefix = "          /tmp/csd-installed/bin/csd-foundry synthesize "
+    determinism = prefix + "determinism --release v0.4 > determinism-report.json\n"
+    identities = prefix + "identities --release v0.4 > identities-report.json\n"
+    replace_once(path, determinism, determinism + identities)
+    report_check = "          test -s determinism-report.json\n"
     replace_once(
-        contracts_test,
-        "    assert report.policy_count == 5",
-        "    assert report.policy_count == 6",
+        path,
+        report_check,
+        report_check + "          test -s identities-report.json\n",
     )
 
-    identity_policy = expected_identity_policy_spec()
-    write_json(ROOT / "specs/v0.4/identity_policy.json", identity_policy)
-    identity_schema = {
+
+def identity_schema(identity_policy: dict[str, object]) -> dict[str, object]:
+    return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://elephantrock.dev/csd-foundry/v0.4/identity_policy.schema.json",
         "title": "CSD Foundry v0.4 deterministic identity policy",
@@ -159,25 +140,38 @@ def main() -> None:
             },
         },
     }
-    write_json(ROOT / "specs/v0.4/identity_policy.schema.json", identity_schema)
 
-    vector_catalog = {
+
+def main() -> None:
+    from csd_foundry.synthesis.v0_4.identity_policy import expected_identity_policy_spec
+    from csd_foundry.synthesis.v0_4.identity_vectors import KNOWN_ANSWER_IDENTITY_VECTORS
+
+    policy = expected_identity_policy_spec()
+    integrate_specs(policy)
+    integrate_cli()
+    integrate_ci()
+
+    validation = ROOT / "src/csd_foundry/synthesis/v0_4/validation.py"
+    replace_once(validation, "        policy_count=5,", "        policy_count=6,")
+    tests = ROOT / "tests/synthesis_v0_4/test_contracts.py"
+    replace_once(tests, "    assert report.schema_document_count == 7", "    assert report.schema_document_count == 8")
+    replace_once(tests, "    assert report.policy_count == 5", "    assert report.policy_count == 6")
+
+    write_json(ROOT / "specs/v0.4/identity_policy.json", policy)
+    write_json(ROOT / "specs/v0.4/identity_policy.schema.json", identity_schema(policy))
+    catalog = {
         "release": "v0.4",
         "schema_version": "0.4.0",
         "algorithm_id": "csd-identity-hmac-sha256",
         "algorithm_version": 1,
         "vectors": list(KNOWN_ANSWER_IDENTITY_VECTORS),
     }
-    write_json(
-        ROOT / "data/canary/v0.4/identity-v1/identity_vectors.json",
-        vector_catalog,
-    )
+    write_json(ROOT / "data/canary/v0.4/identity-v1/identity_vectors.json", catalog)
 
     import csd_foundry.synthesis.v0_4.specs as packaged_specs
 
     importlib.invalidate_caches()
     importlib.reload(packaged_specs)
-
     from csd_foundry.synthesis.v0_4.identity_validation import validate_identities
 
     report = validate_identities("v0.4")
