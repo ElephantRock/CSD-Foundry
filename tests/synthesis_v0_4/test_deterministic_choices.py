@@ -38,6 +38,9 @@ from csd_foundry.synthesis.v0_4.specs import (
     CHOICE_ALGORITHM_SPEC,
     RELEASE_POLICY_SPEC,
 )
+from csd_foundry.synthesis.v0_4.validation import (
+    validate_release as validate_contract_release,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -232,6 +235,30 @@ def test_release_seed_is_explicit_and_release_eligible() -> None:
         RootSeed.from_text("test", SeedProvenance.UNIFORM_RANDOM_256)
     with pytest.raises(ChoiceValidationError):
         RootSeed.from_hex("00" * 32, SeedProvenance.UNIFORM_RANDOM_256)
+
+
+def test_determinism_rejects_release_ineligible_seed_provenance() -> None:
+    original = RELEASE_POLICY_SPEC["root_seed_provenance"]
+    try:
+        RELEASE_POLICY_SPEC["root_seed_provenance"] = "developer-text"
+        report = validate_determinism("v0.4")
+        assert not report.success
+        assert not report.release_seed_valid
+        assert any("not release eligible" in error for error in report.errors)
+    finally:
+        RELEASE_POLICY_SPEC["root_seed_provenance"] = original
+
+
+@pytest.mark.parametrize("fixture_seed", ["00" * 32, "ab" * 32])
+def test_contract_rejects_repeated_byte_release_seed(fixture_seed: str) -> None:
+    original = RELEASE_POLICY_SPEC["root_seed"]
+    try:
+        RELEASE_POLICY_SPEC["root_seed"] = fixture_seed
+        report = validate_contract_release("v0.4")
+        assert not report.success
+        assert any("repeated-byte fixture" in error for error in report.errors)
+    finally:
+        RELEASE_POLICY_SPEC["root_seed"] = original
 
 
 def test_choice_policy_satisfies_exact_collision_bound() -> None:

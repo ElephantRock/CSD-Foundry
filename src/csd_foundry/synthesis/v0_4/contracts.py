@@ -8,6 +8,11 @@ from decimal import Decimal
 from enum import StrEnum
 
 from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS
+from csd_foundry.synthesis.v0_4.choice_paths import (
+    ChoiceValidationError,
+    RootSeed,
+    SeedProvenance,
+)
 
 
 class ContractValidationError(ValueError):
@@ -606,9 +611,14 @@ class ReleasePolicy:
             ("split_hash_salt", self.split_hash_salt),
         ):
             _require_text(value, field_name)
-        if _SHA256_PATTERN.fullmatch(self.root_seed) is None:
-            raise ContractValidationError("root_seed must be a lowercase 256-bit hex seed")
-        if self.root_seed_provenance != "uniform-random-256":
+        try:
+            release_seed = RootSeed.from_hex(
+                self.root_seed,
+                SeedProvenance(self.root_seed_provenance),
+            )
+        except (ChoiceValidationError, ValueError) as exc:
+            raise ContractValidationError(f"invalid release root seed: {exc}") from exc
+        if not release_seed.release_eligible:
             raise ContractValidationError(
                 "release root seed requires uniform-random-256 provenance"
             )

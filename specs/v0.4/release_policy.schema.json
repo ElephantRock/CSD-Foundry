@@ -33,7 +33,16 @@
       "const": "1"
     },
     "root_seed": {
-      "pattern": "^[0-9a-f]{64}$",
+      "allOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "not": {
+            "pattern": "^([0-9a-f]{2})\\1{31}$"
+          }
+        }
+      ],
       "type": "string"
     },
     "root_seed_provenance": {

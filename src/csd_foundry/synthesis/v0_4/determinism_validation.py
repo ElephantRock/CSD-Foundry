@@ -302,6 +302,8 @@ def validate_determinism(release: str = "v0.4") -> DeterminismReport:
             raise ValueError("release seed fields must be strings")
         release_seed = RootSeed.from_hex(root_seed, SeedProvenance(provenance))
         release_seed_valid = release_seed.release_eligible
+        if not release_seed_valid:
+            errors.append("release seed provenance is valid syntax but is not release eligible")
     except (KeyError, ValueError) as exc:
         errors.append(f"release seed: {exc}")
 
