@@ -242,13 +242,9 @@ def test_choice_policy_satisfies_exact_collision_bound() -> None:
 
 
 def test_repository_policy_and_vector_catalog_match_packaged_values() -> None:
-    policy = load_json_text(
-        (ROOT / "specs/v0.4/choice_algorithm.json").read_text(encoding="utf-8")
-    )
+    policy = load_json_text((ROOT / "specs/v0.4/choice_algorithm.json").read_text(encoding="utf-8"))
     vector_document = load_json_text(
-        (ROOT / "data/canary/v0.4/algorithm-v1/choice_vectors.json").read_text(
-            encoding="utf-8"
-        )
+        (ROOT / "data/canary/v0.4/algorithm-v1/choice_vectors.json").read_text(encoding="utf-8")
     )
     assert policy == CHOICE_ALGORITHM_SPEC
     assert isinstance(vector_document, dict)
@@ -293,9 +289,7 @@ def test_choice_algorithm_schema_is_normative() -> None:
     schema = json.loads(
         (ROOT / "specs/v0.4/choice_algorithm.schema.json").read_text(encoding="utf-8")
     )
-    assert schema["properties"]["algorithm_id"]["const"] == (
-        "csd-choice-hmac-sha256-rejection"
-    )
+    assert schema["properties"]["algorithm_id"]["const"] == ("csd-choice-hmac-sha256-rejection")
     assert schema["properties"]["digest_primitive"]["const"] == "hmac-sha256"
     assert schema["properties"]["maximum_attempt_index"]["const"] == 4294967295
     assert schema["properties"]["display_digest_bits"]["const"] == 128
