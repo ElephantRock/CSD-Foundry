@@ -1,0 +1,123 @@
+{
+  "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/performance_policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "policy_status": {
+            "const": "frozen"
+          }
+        },
+        "required": [
+          "policy_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "benchmark_corpus_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "reference_environment": {
+            "minItems": 1
+          },
+          "thresholds": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "benchmark_corpus_digest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "policy_status": {
+      "enum": [
+        "unfrozen",
+        "frozen"
+      ]
+    },
+    "reference_environment": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "release": {
+      "const": "v0.4"
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    },
+    "thresholds": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "comparator": {
+            "enum": [
+              "eq",
+              "gte",
+              "lte"
+            ]
+          },
+          "metric_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "statistic": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "threshold_value": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unit": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric_id",
+          "statistic",
+          "comparator",
+          "threshold_value",
+          "unit"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "policy_status",
+    "reference_environment",
+    "benchmark_corpus_digest",
+    "thresholds"
+  ],
+  "title": "CSD Foundry v0.4 Performance Policy",
+  "type": "object"
+}

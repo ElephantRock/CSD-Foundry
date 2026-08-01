@@ -1,0 +1,81 @@
+{
+  "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/holdouts.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "release": {
+      "const": "v0.4"
+    },
+    "rules": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "holdout_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "invariant_patterns": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "priority": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "split": {
+            "enum": [
+              "train",
+              "validation",
+              "test"
+            ]
+          },
+          "temporal_patterns": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "topology_patterns": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "trace_patterns": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "holdout_id",
+          "split",
+          "topology_patterns",
+          "trace_patterns",
+          "temporal_patterns",
+          "invariant_patterns",
+          "priority"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "rules"
+  ],
+  "title": "CSD Foundry v0.4 Structural Holdout Grammar",
+  "type": "object"
+}

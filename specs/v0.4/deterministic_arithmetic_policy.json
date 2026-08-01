@@ -1,0 +1,10 @@
+{
+  "canonical_encoding": "utf-8",
+  "canonical_json_numbers": "integers-only",
+  "ordering": "unsigned-byte-lexicographic",
+  "release": "v0.4",
+  "rounding_mode": "ROUND_HALF_EVEN",
+  "schema_version": "0.4.0",
+  "semantic_floating_point_permitted": false,
+  "statistical_decimal_precision": 50
+}

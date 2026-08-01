@@ -1,0 +1,42 @@
+{
+  "release": "v0.4",
+  "rules": [
+    {
+      "holdout_id": "test-heartbeat-expiry-joint",
+      "invariant_patterns": [
+        "T-INV-02",
+        "T-INV-06"
+      ],
+      "priority": 100,
+      "split": "test",
+      "temporal_patterns": [
+        "expiry-equals-heartbeat-deadline"
+      ],
+      "topology_patterns": [
+        "two-independent-source-bases-one-expiring"
+      ],
+      "trace_patterns": [
+        "AdvanceClock"
+      ]
+    },
+    {
+      "holdout_id": "validation-profile-request",
+      "invariant_patterns": [
+        "P-INV-02",
+        "P-INV-03"
+      ],
+      "priority": 50,
+      "split": "validation",
+      "temporal_patterns": [
+        "request-due-after-profile-change"
+      ],
+      "topology_patterns": [
+        "profile-bound-source-and-verdict-bases"
+      ],
+      "trace_patterns": [
+        "ProfileChange"
+      ]
+    }
+  ],
+  "schema_version": "0.4.0"
+}

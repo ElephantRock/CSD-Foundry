@@ -1,0 +1,437 @@
+{
+  "$defs": {
+    "infeasibilityWitness": {
+      "additionalProperties": false,
+      "properties": {
+        "constraint_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "grammar_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "proof_method": {
+          "enum": [
+            "exhaustive_enumeration",
+            "typed_contradiction",
+            "checked_unsat_core",
+            "verified_pattern_reduction"
+          ]
+        },
+        "target_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "unsat_core": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "verifier_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "witness_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_id",
+        "grammar_version",
+        "constraint_ids",
+        "proof_method",
+        "unsat_core",
+        "verifier_version",
+        "witness_digest"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/coverage_targets.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "release": {
+      "const": "v0.4"
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    },
+    "targets": {
+      "items": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "else": {
+              "properties": {
+                "infeasibility_witness": {
+                  "type": "null"
+                }
+              }
+            },
+            "if": {
+              "properties": {
+                "disposition": {
+                  "const": "machine_proven_infeasible"
+                }
+              },
+              "required": [
+                "disposition"
+              ]
+            },
+            "then": {
+              "properties": {
+                "infeasibility_witness": {
+                  "$ref": "#/$defs/infeasibilityWitness"
+                },
+                "minimum_count": {
+                  "const": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "disposition": {
+                  "const": "required"
+                }
+              },
+              "required": [
+                "disposition"
+              ]
+            },
+            "then": {
+              "properties": {
+                "minimum_count": {
+                  "minimum": 1
+                },
+                "search_budget": {
+                  "properties": {
+                    "maximum_construction_attempts_per_plan": {
+                      "minimum": 1
+                    },
+                    "maximum_elapsed_milliseconds": {
+                      "minimum": 1
+                    },
+                    "maximum_oracle_attempts": {
+                      "minimum": 1
+                    },
+                    "maximum_plan_attempts": {
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "properties": {
+          "completeness": {
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "evidence_kind": {
+                      "const": "fully_bounded"
+                    }
+                  },
+                  "required": [
+                    "evidence_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "alternative_witness_id": {
+                      "type": "null"
+                    },
+                    "bounded_projection_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "omitted_dimensions": {
+                      "maxItems": 0
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "evidence_kind": {
+                      "const": "projected_bounded"
+                    }
+                  },
+                  "required": [
+                    "evidence_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "bounded_projection_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "omitted_dimensions": {
+                      "minItems": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "evidence_kind": {
+                      "const": "alternative_assurance"
+                    }
+                  },
+                  "required": [
+                    "evidence_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "alternative_witness_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "alternative_witness_id": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "bounded_projection_id": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "evidence_kind": {
+                "enum": [
+                  "fully_bounded",
+                  "projected_bounded",
+                  "alternative_assurance"
+                ]
+              },
+              "justification": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "omitted_dimensions": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "evidence_kind",
+              "bounded_projection_id",
+              "omitted_dimensions",
+              "justification",
+              "alternative_witness_id"
+            ],
+            "type": "object"
+          },
+          "disposition": {
+            "enum": [
+              "required",
+              "exploratory",
+              "machine_proven_infeasible",
+              "unresolved"
+            ]
+          },
+          "event_pattern": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "holdout_tags": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "infeasibility_witness": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/infeasibilityWitness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minimum_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "profile_pattern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rarity_weight": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "request_pattern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "required_consequences": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "required_invariants": {
+            "items": {
+              "enum": [
+                "G-INV-06",
+                "G-INV-10",
+                "G-INV-11",
+                "G-INV-13",
+                "H-INV-01",
+                "H-INV-02",
+                "H-INV-03",
+                "INV-04",
+                "INV-05",
+                "INV-07",
+                "INV-11",
+                "INV-13",
+                "INV-14",
+                "INV-15",
+                "INV-16",
+                "INV-18",
+                "INV-19",
+                "P-INV-01",
+                "P-INV-02",
+                "P-INV-03",
+                "P-INV-04",
+                "R-INV-01",
+                "R-INV-02",
+                "R-INV-03",
+                "R-INV-04",
+                "T-INV-01",
+                "T-INV-02",
+                "T-INV-03",
+                "T-INV-04",
+                "T-INV-06"
+              ],
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "search_budget": {
+            "additionalProperties": false,
+            "properties": {
+              "maximum_construction_attempts_per_plan": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maximum_elapsed_milliseconds": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maximum_oracle_attempts": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maximum_plan_attempts": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "maximum_plan_attempts",
+              "maximum_construction_attempts_per_plan",
+              "maximum_oracle_attempts",
+              "maximum_elapsed_milliseconds"
+            ],
+            "type": "object"
+          },
+          "target_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "temporal_pattern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "topology_pattern": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id",
+          "disposition",
+          "topology_pattern",
+          "event_pattern",
+          "temporal_pattern",
+          "request_pattern",
+          "profile_pattern",
+          "required_invariants",
+          "required_consequences",
+          "minimum_count",
+          "rarity_weight",
+          "holdout_tags",
+          "search_budget",
+          "completeness",
+          "infeasibility_witness"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "targets"
+  ],
+  "title": "CSD Foundry v0.4 Coverage Target Catalog",
+  "type": "object"
+}

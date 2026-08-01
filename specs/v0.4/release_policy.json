@@ -1,0 +1,15 @@
+{
+  "choice_path_schema_version": "0.4.0",
+  "maximum_trajectory_steps": 8,
+  "performance_policy_status": "unfrozen",
+  "pilot_trajectory_count": 10000,
+  "release": "v0.4",
+  "release_blocked_until_policies_frozen": true,
+  "rng_algorithm": "sha256-integer-choice-path",
+  "rng_version": "0.4.0",
+  "root_seed": "csd-foundry-v0.4-release-seed",
+  "schema_version": "0.4.0",
+  "split_hash_salt": "csd-foundry-v0.4-structural-family-split",
+  "stochastic_risk_policy_status": "unfrozen",
+  "target_trajectory_count": 100000
+}

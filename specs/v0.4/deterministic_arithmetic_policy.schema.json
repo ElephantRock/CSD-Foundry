@@ -1,0 +1,44 @@
+{
+  "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/deterministic_arithmetic_policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "canonical_encoding": {
+      "const": "utf-8"
+    },
+    "canonical_json_numbers": {
+      "const": "integers-only"
+    },
+    "ordering": {
+      "const": "unsigned-byte-lexicographic"
+    },
+    "release": {
+      "const": "v0.4"
+    },
+    "rounding_mode": {
+      "const": "ROUND_HALF_EVEN"
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    },
+    "semantic_floating_point_permitted": {
+      "const": false
+    },
+    "statistical_decimal_precision": {
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "semantic_floating_point_permitted",
+    "statistical_decimal_precision",
+    "rounding_mode",
+    "canonical_encoding",
+    "canonical_json_numbers",
+    "ordering"
+  ],
+  "title": "CSD Foundry v0.4 Deterministic Arithmetic Policy",
+  "type": "object"
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from csd_foundry.kernel.events import CsdEvent, DependencyChange, Reassess, RetireControl
+from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS
 from csd_foundry.kernel.models import (
     Assurance,
     Basis,
@@ -21,6 +22,10 @@ from csd_foundry.kernel.models import (
 class Violation:
     invariant_id: str
     message: str
+
+    def __post_init__(self) -> None:
+        if self.invariant_id not in EXECUTABLE_INVARIANT_IDS:
+            raise ValueError(f"unregistered executable invariant: {self.invariant_id}")
 
 
 def _basis_is_supported(basis: Basis, evidence: dict[str, Evidence]) -> bool:
