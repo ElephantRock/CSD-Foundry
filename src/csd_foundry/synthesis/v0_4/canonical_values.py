@@ -37,11 +37,11 @@ def validate_canonical_value(value: object) -> CanonicalValue:
         return value
     if type(value) is str:
         return _validate_string(value, "canonical string")
-    if isinstance(value, (CanonicalArray, CanonicalObject)):
+    if type(value) is CanonicalArray or type(value) is CanonicalObject:
         return value
     raise CanonicalValueError(
         "canonical values permit only null, exact booleans, exact integers, UTF-8 strings, "
-        "CanonicalArray, and CanonicalObject"
+        "exact CanonicalArray values, and exact CanonicalObject values"
     )
 
 
@@ -78,8 +78,8 @@ class CanonicalObject:
     def __post_init__(self) -> None:
         if type(self.fields) is not tuple:
             raise CanonicalValueError("canonical object fields must be an immutable tuple")
-        if not all(isinstance(field, CanonicalField) for field in self.fields):
-            raise CanonicalValueError("canonical object fields must contain CanonicalField values")
+        if not all(type(field) is CanonicalField for field in self.fields):
+            raise CanonicalValueError("canonical object fields must contain exact CanonicalField values")
         names = tuple(field.name for field in self.fields)
         if len(names) != len(set(names)):
             raise CanonicalValueError("canonical object field names must be unique")
@@ -91,6 +91,8 @@ class CanonicalObject:
 
     @classmethod
     def from_pairs(cls, pairs: tuple[tuple[str, CanonicalValue], ...]) -> CanonicalObject:
+        if cls is not CanonicalObject:
+            raise CanonicalValueError("canonical object construction requires the exact class")
         if type(pairs) is not tuple:
             raise CanonicalValueError("canonical object pairs must be an immutable tuple")
         for pair in pairs:
@@ -107,9 +109,9 @@ class CanonicalObject:
 
 def canonical_to_json_value(value: CanonicalValue) -> JSONValue:
     validated = validate_canonical_value(value)
-    if isinstance(validated, CanonicalArray):
+    if type(validated) is CanonicalArray:
         return validated.to_json_value()
-    if isinstance(validated, CanonicalObject):
+    if type(validated) is CanonicalObject:
         return validated.to_json_value()
     return cast(JSONValue, validated)
 
