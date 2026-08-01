@@ -10,6 +10,7 @@ import pytest
 
 from csd_foundry.synthesis.v0_4.choice_paths import (
     MAX_ATTEMPT_INDEX,
+    AttemptBudgetExhausted,
     AttemptKey,
     AttemptRange,
     ChoiceOperation,
@@ -18,6 +19,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
     RootSeed,
     SampleKey,
     SeedProvenance,
+    lowest_accepted_attempt,
 )
 from csd_foundry.synthesis.v0_4.choice_policy import load_choice_algorithm_policy
 from csd_foundry.synthesis.v0_4.choice_vectors import (
@@ -103,6 +105,19 @@ def test_invalid_choice_path_segments_fail_closed(bad_segment: object) -> None:
         )
 
 
+def test_choice_paths_require_immutable_runtime_types() -> None:
+    sample = SampleKey("v0.4", "known-answer", 0)
+    attempt = AttemptKey(sample, 0)
+    with pytest.raises(ChoiceValidationError):
+        RootSeed(bytearray(32), SeedProvenance.KNOWN_ANSWER_FIXTURE)  # type: ignore[arg-type]
+    with pytest.raises(ChoiceValidationError):
+        RootSeed(bytes(range(32)), "known-answer-fixture")  # type: ignore[arg-type]
+    with pytest.raises(ChoiceValidationError):
+        ChoicePath(attempt, "known-answer", ["mutable"])  # type: ignore[arg-type]
+    with pytest.raises(ChoiceValidationError):
+        AttemptKey("not-a-sample", 0)  # type: ignore[arg-type]
+
+
 def test_attempt_range_has_a_hard_uint32_ceiling() -> None:
     sample = SampleKey("v0.4", "known-answer", 0)
     assert AttemptKey(sample, MAX_ATTEMPT_INDEX).attempt_index == MAX_ATTEMPT_INDEX
@@ -113,6 +128,35 @@ def test_attempt_range_has_a_hard_uint32_ceiling() -> None:
         AttemptRange(0)
     with pytest.raises(ChoiceValidationError):
         AttemptRange(MAX_ATTEMPT_INDEX + 2)
+    for bad_value in (1.5, True):
+        with pytest.raises(ChoiceValidationError):
+            SampleKey("v0.4", "known-answer", bad_value)  # type: ignore[arg-type]
+        with pytest.raises(ChoiceValidationError):
+            AttemptKey(sample, bad_value)  # type: ignore[arg-type]
+        with pytest.raises(ChoiceValidationError):
+            AttemptRange(bad_value)  # type: ignore[arg-type]
+
+
+def test_lowest_accepted_attempt_is_bounded_and_ordered() -> None:
+    visited: list[int] = []
+
+    def accepts_two(attempt_index: int) -> bool:
+        visited.append(attempt_index)
+        return attempt_index == 2
+
+    assert lowest_accepted_attempt(AttemptRange(5), accepts_two) == 2
+    assert visited == [0, 1, 2]
+
+    exhausted: list[int] = []
+    with pytest.raises(AttemptBudgetExhausted):
+        lowest_accepted_attempt(
+            AttemptRange(3),
+            lambda attempt_index: exhausted.append(attempt_index) is None and False,
+        )
+    assert exhausted == [0, 1, 2]
+
+    with pytest.raises(ChoiceValidationError):
+        lowest_accepted_attempt(AttemptRange(1), lambda _: 1)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -198,9 +242,13 @@ def test_choice_policy_satisfies_exact_collision_bound() -> None:
 
 
 def test_repository_policy_and_vector_catalog_match_packaged_values() -> None:
-    policy = load_json_text((ROOT / "specs/v0.4/choice_algorithm.json").read_text(encoding="utf-8"))
+    policy = load_json_text(
+        (ROOT / "specs/v0.4/choice_algorithm.json").read_text(encoding="utf-8")
+    )
     vector_document = load_json_text(
-        (ROOT / "data/canary/v0.4/algorithm-v1/choice_vectors.json").read_text(encoding="utf-8")
+        (ROOT / "data/canary/v0.4/algorithm-v1/choice_vectors.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert policy == CHOICE_ALGORITHM_SPEC
     assert isinstance(vector_document, dict)
@@ -245,6 +293,10 @@ def test_choice_algorithm_schema_is_normative() -> None:
     schema = json.loads(
         (ROOT / "specs/v0.4/choice_algorithm.schema.json").read_text(encoding="utf-8")
     )
-    assert schema["properties"]["algorithm_id"]["const"] == ("csd-choice-hmac-sha256-rejection")
+    assert schema["properties"]["algorithm_id"]["const"] == (
+        "csd-choice-hmac-sha256-rejection"
+    )
     assert schema["properties"]["digest_primitive"]["const"] == "hmac-sha256"
     assert schema["properties"]["maximum_attempt_index"]["const"] == 4294967295
+    assert schema["properties"]["display_digest_bits"]["const"] == 128
+    assert schema["properties"]["design_identity_ceiling"]["const"] == 10_000_000
