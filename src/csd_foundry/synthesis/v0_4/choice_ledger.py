@@ -137,9 +137,7 @@ class ChoiceLedger:
             raise ChoiceRecordError("choice ledger records must be an immutable tuple")
         if not all(_record_type_valid(record) for record in self.records):
             raise ChoiceRecordError("choice ledger records must use exact record variants")
-        expected_order = tuple(
-            sorted(self.records, key=lambda record: _path_bytes(record.path))
-        )
+        expected_order = tuple(sorted(self.records, key=lambda record: _path_bytes(record.path)))
         if self.records != expected_order:
             raise ChoiceRecordError("choice ledger records must use canonical path order")
         seen: set[bytes] = set()
@@ -160,9 +158,7 @@ class ChoiceLedger:
             ):
                 raise ChoiceRecordError("choice record uses an undeclared namespace prefix")
         if self.schema_version != CHOICE_LEDGER_SCHEMA_VERSION:
-            raise ChoiceRecordError(
-                f"choice ledger schema must be {CHOICE_LEDGER_SCHEMA_VERSION}"
-            )
+            raise ChoiceRecordError(f"choice ledger schema must be {CHOICE_LEDGER_SCHEMA_VERSION}")
 
     def to_json_value(self) -> dict[str, object]:
         return _ledger_value(
@@ -368,9 +364,7 @@ class ChoiceSession:
         if self._state is not ChoiceSessionState.OPEN:
             raise ChoiceSessionError(f"cannot freeze a {self._state.value} choice session")
         try:
-            records = tuple(
-                sorted(self._records, key=lambda record: _path_bytes(record.path))
-            )
+            records = tuple(sorted(self._records, key=lambda record: _path_bytes(record.path)))
             ledger = ChoiceLedger(
                 seed_commitment=self._seed.commitment,
                 generation_namespace_digest=self._generation_namespace.digest,
@@ -397,7 +391,5 @@ class ChoiceSession:
         """Return immutable diagnostic bytes only while the session remains open."""
 
         if self._state is not ChoiceSessionState.OPEN:
-            raise ChoiceSessionError(
-                "diagnostic records are available only on an open session"
-            )
+            raise ChoiceSessionError("diagnostic records are available only on an open session")
         return tuple(choice_record_bytes(record) for record in self._records)
