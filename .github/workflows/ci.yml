@@ -16,6 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: web/19-execution-inventory-retry-v0.4
+          fetch-depth: 2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
