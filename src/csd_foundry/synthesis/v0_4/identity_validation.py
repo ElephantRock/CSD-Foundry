@@ -211,9 +211,7 @@ def _canonical_assurance() -> tuple[bool, int]:
 def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
     target_digest = _exact_str(KNOWN_ANSWER_IDENTITY_VECTORS[0], "target_definition_digest")
     namespace = build_generation_namespace(target_digest)
-    requests = tuple(
-        _request_from_vector(vector) for vector in KNOWN_ANSWER_IDENTITY_VECTORS[:3]
-    )
+    requests = tuple(_request_from_vector(vector) for vector in KNOWN_ANSWER_IDENTITY_VECTORS[:3])
     forward = IdentityLedger(seed, namespace)
     reverse = IdentityLedger(seed, namespace)
     for request in requests:
@@ -324,9 +322,7 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
                 actual = derive_identity(seed, namespace, _request_from_vector(vector))
                 expected = vector["expected"]
                 if not isinstance(expected, dict) or actual.to_json_value() != expected:
-                    raise ValueError(
-                        f"identity vector failed: {_exact_str(vector, 'vector_id')}"
-                    )
+                    raise ValueError(f"identity vector failed: {_exact_str(vector, 'vector_id')}")
                 vectors_passed += 1
             canonical_type_separation, invalid_rejected = _canonical_assurance()
             (
@@ -355,9 +351,7 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
         errors.append("injected display identity collision was accepted")
     if not policy_satisfied:
         errors.append("128-bit display identity exceeds the exact collision-risk ceiling")
-    if PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count != (
-        PROVISIONAL_DESIGN_IDENTITY_CEILING
-    ):
+    if PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count != (PROVISIONAL_DESIGN_IDENTITY_CEILING):
         errors.append("provisional per-kind identity counts do not match the design envelope")
 
     return IdentityValidationReport(

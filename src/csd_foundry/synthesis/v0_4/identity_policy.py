@@ -62,9 +62,10 @@ class IdentityVolumeEnvelope:
         kinds = tuple(item.entity_kind for item in self.per_kind)
         if len(kinds) != len(set(kinds)):
             raise ChoiceValidationError("identity volume kinds must be unique")
-        if type(self.safety_margin_numerator) is not int or type(
-            self.safety_margin_denominator
-        ) is not int:
+        if (
+            type(self.safety_margin_numerator) is not int
+            or type(self.safety_margin_denominator) is not int
+        ):
             raise ChoiceValidationError("identity safety margin must use exact integers")
         if self.safety_margin_denominator <= 0:
             raise ChoiceValidationError("identity safety-margin denominator must be positive")
@@ -107,8 +108,7 @@ def per_kind_collision_bound(
     if type(digest_bits) is not int or digest_bits <= 0:
         raise ChoiceValidationError("digest bits must be a positive integer")
     numerator = sum(
-        item.projected_count * max(0, item.projected_count - 1)
-        for item in envelope.per_kind
+        item.projected_count * max(0, item.projected_count - 1) for item in envelope.per_kind
     )
     return RationalBound(numerator=numerator, denominator=1 << (digest_bits + 1))
 
@@ -168,7 +168,7 @@ def expected_identity_policy_spec() -> dict[str, object]:
 def validate_identity_policy_document() -> None:
     from csd_foundry.synthesis.v0_4.specs import IDENTITY_POLICY_SPEC
 
-    if IDENTITY_POLICY_SPEC != expected_identity_policy_spec():
+    if expected_identity_policy_spec() != IDENTITY_POLICY_SPEC:
         raise ChoiceValidationError(
             "packaged identity policy does not match normative algorithm version 1"
         )

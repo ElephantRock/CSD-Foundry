@@ -1,0 +1,61 @@
+{
+  "algorithm_id": "csd-identity-hmac-sha256",
+  "algorithm_version": 1,
+  "collision_risk_ceiling_denominator": 100000000000000000000000000,
+  "collision_risk_ceiling_numerator": 15,
+  "design_identity_ceiling": 10000000,
+  "digest_primitive": "hmac-sha256",
+  "display_digest_bits": 128,
+  "full_digest_bits": 256,
+  "identity_schema_version": "csd-identity/0.4",
+  "per_kind_projected_counts": [
+    {
+      "entity_kind": "audit-event",
+      "projected_count": 3000000
+    },
+    {
+      "entity_kind": "basis",
+      "projected_count": 1500000
+    },
+    {
+      "entity_kind": "control",
+      "projected_count": 100000
+    },
+    {
+      "entity_kind": "event",
+      "projected_count": 800000
+    },
+    {
+      "entity_kind": "evidence",
+      "projected_count": 2500000
+    },
+    {
+      "entity_kind": "mutation",
+      "projected_count": 900000
+    },
+    {
+      "entity_kind": "plan",
+      "projected_count": 100000
+    },
+    {
+      "entity_kind": "profile",
+      "projected_count": 500000
+    },
+    {
+      "entity_kind": "request",
+      "projected_count": 500000
+    },
+    {
+      "entity_kind": "trajectory",
+      "projected_count": 100000
+    }
+  ],
+  "release": "v0.4",
+  "replay_policy_id": "csd-replay-contract",
+  "replay_policy_version": 1,
+  "role_ordinal_encoding": "uint32",
+  "schema_version": "0.4.0",
+  "shard_policy_id": "csd-shard-contract",
+  "shard_policy_version": 1,
+  "volume_policy_status": "provisional"
+}

@@ -223,9 +223,7 @@ class IdentityLedger:
         if not isinstance(seed, RootSeed):
             raise ChoiceValidationError("identity ledger seed must be a RootSeed")
         if not isinstance(namespace, GenerationNamespace):
-            raise ChoiceValidationError(
-                "identity ledger namespace must be a GenerationNamespace"
-            )
+            raise ChoiceValidationError("identity ledger namespace must be a GenerationNamespace")
         self._seed = seed
         self._namespace = namespace
         self._digest_provider = digest_provider
@@ -239,9 +237,7 @@ class IdentityLedger:
     def allocate(self, request: IdentityRequest) -> EntityIdentity:
         request_key = self._request_key(request)
         if request_key in self._records:
-            raise DuplicateIdentityRoleError(
-                "semantic identity role has already been allocated"
-            )
+            raise DuplicateIdentityRoleError("semantic identity role has already been allocated")
         identity = derive_identity(
             self._seed,
             self._namespace,

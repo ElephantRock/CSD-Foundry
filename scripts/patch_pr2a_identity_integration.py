@@ -47,17 +47,17 @@ def integrate_specs(identity_policy: dict[str, object]) -> None:
 def integrate_cli() -> None:
     path = ROOT / "src/csd_foundry/cli.py"
     parser_anchor = (
-        '    synthesis_determinism = synthesis_sub.add_parser(\n'
+        "    synthesis_determinism = synthesis_sub.add_parser(\n"
         '        "determinism",\n'
         '        help="validate deterministic choice primitives and frozen vectors",\n'
-        '    )\n'
+        "    )\n"
         '    _add_release_argument(synthesis_determinism, default="v0.4")\n'
     )
     parser_addition = (
-        '    synthesis_identities = synthesis_sub.add_parser(\n'
+        "    synthesis_identities = synthesis_sub.add_parser(\n"
         '        "identities",\n'
         '        help="validate canonical values and deterministic entity identities",\n'
-        '    )\n'
+        "    )\n"
         '    _add_release_argument(synthesis_identities, default="v0.4")\n'
     )
     replace_once(path, parser_anchor, parser_anchor + parser_addition)
@@ -67,14 +67,14 @@ def integrate_cli() -> None:
     )
     handler = (
         '    if args.command == "synthesize" and args.synthesis_command == "identities":\n'
-        '        from csd_foundry.synthesis.v0_4.identity_validation import (\n'
-        '            validate_identities,\n'
-        '        )\n\n'
-        '        identity_result = validate_identities(args.release)\n'
-        '        _emit(identity_result.to_dict(), args.output)\n'
-        '        if not identity_result.success:\n'
-        '            raise SystemExit(1)\n'
-        '        return\n\n'
+        "        from csd_foundry.synthesis.v0_4.identity_validation import (\n"
+        "            validate_identities,\n"
+        "        )\n\n"
+        "        identity_result = validate_identities(args.release)\n"
+        "        _emit(identity_result.to_dict(), args.output)\n"
+        "        if not identity_result.success:\n"
+        "            raise SystemExit(1)\n"
+        "        return\n\n"
     )
     replace_once(path, handler_anchor, handler + handler_anchor)
 
@@ -154,8 +154,14 @@ def main() -> None:
     validation = ROOT / "src/csd_foundry/synthesis/v0_4/validation.py"
     replace_once(validation, "        policy_count=5,", "        policy_count=6,")
     tests = ROOT / "tests/synthesis_v0_4/test_contracts.py"
-    replace_once(tests, "    assert report.schema_document_count == 7", "    assert report.schema_document_count == 8")
-    replace_once(tests, "    assert report.policy_count == 5", "    assert report.policy_count == 6")
+    replace_once(
+        tests,
+        "    assert report.schema_document_count == 7",
+        "    assert report.schema_document_count == 8",
+    )
+    replace_once(
+        tests, "    assert report.policy_count == 5", "    assert report.policy_count == 6"
+    )
 
     write_json(ROOT / "specs/v0.4/identity_policy.json", policy)
     write_json(ROOT / "specs/v0.4/identity_policy.schema.json", identity_schema(policy))

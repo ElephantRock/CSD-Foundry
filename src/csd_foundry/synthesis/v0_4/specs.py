@@ -10,6 +10,7 @@ SCHEMA_DOCUMENT_NAMES = (
     "performance_policy.schema.json",
     "deterministic_arithmetic_policy.schema.json",
     "choice_algorithm.schema.json",
+    "identity_policy.schema.json",
 )
 
 COVERAGE_TARGETS_SPEC: dict[str, object] = {
@@ -292,6 +293,39 @@ CHOICE_ALGORITHM_SPEC: dict[str, object] = {
     "semantic_floating_point_permitted": False,
 }
 
+IDENTITY_POLICY_SPEC: dict[str, object] = {
+    "release": "v0.4",
+    "schema_version": "0.4.0",
+    "algorithm_id": "csd-identity-hmac-sha256",
+    "algorithm_version": 1,
+    "identity_schema_version": "csd-identity/0.4",
+    "digest_primitive": "hmac-sha256",
+    "full_digest_bits": 256,
+    "display_digest_bits": 128,
+    "role_ordinal_encoding": "uint32",
+    "volume_policy_status": "provisional",
+    "design_identity_ceiling": 10000000,
+    "collision_risk_ceiling_numerator": 15,
+    "collision_risk_ceiling_denominator": 100000000000000000000000000,
+    "replay_policy_id": "csd-replay-contract",
+    "replay_policy_version": 1,
+    "shard_policy_id": "csd-shard-contract",
+    "shard_policy_version": 1,
+    "per_kind_projected_counts": [
+        {"entity_kind": "audit-event", "projected_count": 3000000},
+        {"entity_kind": "basis", "projected_count": 1500000},
+        {"entity_kind": "control", "projected_count": 100000},
+        {"entity_kind": "event", "projected_count": 800000},
+        {"entity_kind": "evidence", "projected_count": 2500000},
+        {"entity_kind": "mutation", "projected_count": 900000},
+        {"entity_kind": "plan", "projected_count": 100000},
+        {"entity_kind": "profile", "projected_count": 500000},
+        {"entity_kind": "request", "projected_count": 500000},
+        {"entity_kind": "trajectory", "projected_count": 100000},
+    ],
+}
+
+
 SPEC_DOCUMENTS: dict[str, dict[str, object]] = {
     "coverage_targets.json": COVERAGE_TARGETS_SPEC,
     "holdouts.json": HOLDOUTS_SPEC,
@@ -300,4 +334,5 @@ SPEC_DOCUMENTS: dict[str, dict[str, object]] = {
     "performance_policy.json": PERFORMANCE_POLICY_SPEC,
     "deterministic_arithmetic_policy.json": DETERMINISTIC_ARITHMETIC_POLICY_SPEC,
     "choice_algorithm.json": CHOICE_ALGORITHM_SPEC,
+    "identity_policy.json": IDENTITY_POLICY_SPEC,
 }

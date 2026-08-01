@@ -77,13 +77,16 @@ def test_identity_release_report_is_valid_and_provisional() -> None:
 
 
 def test_canonical_values_preserve_types_and_reject_mutability() -> None:
-    assert len(
-        {
-            canonical_value_bytes(1),
-            canonical_value_bytes("1"),
-            canonical_value_bytes(True),
-        }
-    ) == 3
+    assert (
+        len(
+            {
+                canonical_value_bytes(1),
+                canonical_value_bytes("1"),
+                canonical_value_bytes(True),
+            }
+        )
+        == 3
+    )
     for value in (1.5, [], {}, set(), b"bytes", bytearray(b"mutable")):
         with pytest.raises(CanonicalValueError):
             validate_canonical_value(value)
@@ -200,9 +203,7 @@ def test_repository_identity_evidence_matches_runtime_validation() -> None:
     )
     assert report == validate_identities("v0.4").to_dict()
     vectors = load_json_text(
-        (ROOT / "data/canary/v0.4/identity-v1/identity_vectors.json").read_text(
-            encoding="utf-8"
-        )
+        (ROOT / "data/canary/v0.4/identity-v1/identity_vectors.json").read_text(encoding="utf-8")
     )
     assert isinstance(vectors, dict)
     assert canonical_sha256(vectors) == FROZEN_IDENTITY_VECTOR_CATALOG_DIGEST

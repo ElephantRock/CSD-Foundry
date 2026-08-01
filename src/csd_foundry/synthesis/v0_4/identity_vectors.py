@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-KNOWN_ANSWER_IDENTITY_SEED_HEX = (
-    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-)
+KNOWN_ANSWER_IDENTITY_SEED_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 FROZEN_IDENTITY_VECTOR_CATALOG_DIGEST = (
     "6f8aa335efe4210e833612a6be25a61e038f0f76cf48b8d3e4e93da379fac256"
@@ -25,15 +23,11 @@ KNOWN_ANSWER_IDENTITY_VECTORS: tuple[dict[str, object], ...] = (
         "expected": {
             "display_id": "trj-v04-deab5346ac5e0645eec74ca36caf5e5d",
             "entity_kind": "trajectory",
-            "full_digest": (
-                "deab5346ac5e0645eec74ca36caf5e5d0086ca4db7c3f2a777f077ea728ab8ab"
-            ),
+            "full_digest": ("deab5346ac5e0645eec74ca36caf5e5d0086ca4db7c3f2a777f077ea728ab8ab"),
             "generation_namespace_digest": (
                 "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
             ),
-            "material_digest": (
-                "6c98d4d5042c30e593e9f46a82ca60310177f305d8754c5d53e236ccb497799d"
-            ),
+            "material_digest": ("6c98d4d5042c30e593e9f46a82ca60310177f305d8754c5d53e236ccb497799d"),
         },
     },
     {
@@ -50,15 +44,11 @@ KNOWN_ANSWER_IDENTITY_VECTORS: tuple[dict[str, object], ...] = (
         "expected": {
             "display_id": "evd-v04-89c0e7595c14757c1d776b83e590c845",
             "entity_kind": "evidence",
-            "full_digest": (
-                "89c0e7595c14757c1d776b83e590c845be15ad3461fb0957a2231706155356ef"
-            ),
+            "full_digest": ("89c0e7595c14757c1d776b83e590c845be15ad3461fb0957a2231706155356ef"),
             "generation_namespace_digest": (
                 "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
             ),
-            "material_digest": (
-                "61125e40027143cde29d1425f95ec9b3e446844db924963198f96197f5c201b1"
-            ),
+            "material_digest": ("61125e40027143cde29d1425f95ec9b3e446844db924963198f96197f5c201b1"),
         },
     },
     {
@@ -75,15 +65,11 @@ KNOWN_ANSWER_IDENTITY_VECTORS: tuple[dict[str, object], ...] = (
         "expected": {
             "display_id": "bas-v04-11f82b02d498fe611be4d80e5187cd6b",
             "entity_kind": "basis",
-            "full_digest": (
-                "11f82b02d498fe611be4d80e5187cd6bcc87b6380483a5c08a6527e8624acb0f"
-            ),
+            "full_digest": ("11f82b02d498fe611be4d80e5187cd6bcc87b6380483a5c08a6527e8624acb0f"),
             "generation_namespace_digest": (
                 "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
             ),
-            "material_digest": (
-                "520e15634af36bce674b9f9dcc545d236dc9d4de88e1be8b8e5f3a80ef47eaf1"
-            ),
+            "material_digest": ("520e15634af36bce674b9f9dcc545d236dc9d4de88e1be8b8e5f3a80ef47eaf1"),
         },
     },
     {
@@ -100,15 +86,11 @@ KNOWN_ANSWER_IDENTITY_VECTORS: tuple[dict[str, object], ...] = (
         "expected": {
             "display_id": "bas-v04-9849adc294354f6f6b411a57e233be70",
             "entity_kind": "basis",
-            "full_digest": (
-                "9849adc294354f6f6b411a57e233be7020e695e97541a81aa60df9012e503e35"
-            ),
+            "full_digest": ("9849adc294354f6f6b411a57e233be7020e695e97541a81aa60df9012e503e35"),
             "generation_namespace_digest": (
                 "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
             ),
-            "material_digest": (
-                "1537c1807c455cf4ae11944cfc459df7ebe60efbccfc0a013926fe6be796e30f"
-            ),
+            "material_digest": ("1537c1807c455cf4ae11944cfc459df7ebe60efbccfc0a013926fe6be796e30f"),
         },
     },
     {
@@ -125,15 +107,11 @@ KNOWN_ANSWER_IDENTITY_VECTORS: tuple[dict[str, object], ...] = (
         "expected": {
             "display_id": "req-v04-6700528538b3701a3a162e768467d09f",
             "entity_kind": "request",
-            "full_digest": (
-                "6700528538b3701a3a162e768467d09f7bf793d6825c29d4f55cd48d30e01c59"
-            ),
+            "full_digest": ("6700528538b3701a3a162e768467d09f7bf793d6825c29d4f55cd48d30e01c59"),
             "generation_namespace_digest": (
                 "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
             ),
-            "material_digest": (
-                "8ce99fba4c2629592e131f780baede2bd168da0135cc3544f13d45e7acc2c59e"
-            ),
+            "material_digest": ("8ce99fba4c2629592e131f780baede2bd168da0135cc3544f13d45e7acc2c59e"),
         },
     },
     {
@@ -150,15 +128,11 @@ KNOWN_ANSWER_IDENTITY_VECTORS: tuple[dict[str, object], ...] = (
         "expected": {
             "display_id": "evt-v04-096d1b074a08fb32f41fbfe65fdf2f42",
             "entity_kind": "event",
-            "full_digest": (
-                "096d1b074a08fb32f41fbfe65fdf2f42ff5a76370932ab3161133b07bf7973e8"
-            ),
+            "full_digest": ("096d1b074a08fb32f41fbfe65fdf2f42ff5a76370932ab3161133b07bf7973e8"),
             "generation_namespace_digest": (
                 "8ed6eefeda369d60c1da89b77ed82ad09fd630fb3bd9f0736b52e84c060f330c"
             ),
-            "material_digest": (
-                "6b64d277c633be20ae54afa54e5258783eda6ea05ddd03e33630bad26c8d4b02"
-            ),
+            "material_digest": ("6b64d277c633be20ae54afa54e5258783eda6ea05ddd03e33630bad26c8d4b02"),
         },
     },
 )
