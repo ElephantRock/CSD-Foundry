@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 
 
@@ -160,7 +161,7 @@ _EFFECT_SEVERITY: dict[SemanticEffect, EscapeSeverity] = {
 }
 
 
-_DECIMAL_PATTERN = re.compile(r"^(0|1)(?:\.\d+)?$")
+_DECIMAL_PATTERN = re.compile(r"^(?:0(?:\.\d+)?|1(?:\.0+)?)$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -507,6 +508,67 @@ class DeterministicArithmeticPolicy:
 
 
 @dataclass(frozen=True, slots=True)
+class PerformanceThreshold:
+    metric_id: str
+    statistic: str
+    comparator: str
+    threshold_value: int
+    unit: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.metric_id, "metric_id")
+        _require_text(self.statistic, "statistic")
+        _require_text(self.unit, "unit")
+        if self.comparator not in {"eq", "gte", "lte"}:
+            raise ContractValidationError("performance comparator must be eq, gte, or lte")
+        if self.threshold_value < 0:
+            raise ContractValidationError("performance threshold must be nonnegative")
+
+
+@dataclass(frozen=True, slots=True)
+class PerformancePolicy:
+    release: str
+    policy_status: str
+    reference_environment: tuple[tuple[str, str], ...]
+    benchmark_corpus_digest: str | None
+    thresholds: tuple[PerformanceThreshold, ...]
+
+    def __post_init__(self) -> None:
+        _require_text(self.release, "release")
+        if self.policy_status not in {"unfrozen", "frozen"}:
+            raise ContractValidationError("performance policy status must be frozen or unfrozen")
+        environment_names = tuple(name for name, _ in self.reference_environment)
+        _require_unique(environment_names, "reference_environment names")
+        for name, value in self.reference_environment:
+            _require_text(name, "reference_environment name")
+            _require_text(value, "reference_environment value")
+        metric_ids = tuple(item.metric_id for item in self.thresholds)
+        if len(metric_ids) != len(set(metric_ids)):
+            raise ContractValidationError("performance thresholds have duplicate metrics")
+        if (
+            self.benchmark_corpus_digest is not None
+            and _SHA256_PATTERN.fullmatch(self.benchmark_corpus_digest) is None
+        ):
+            raise ContractValidationError(
+                "benchmark_corpus_digest must be a lowercase SHA-256 digest"
+            )
+        if self.policy_status == "frozen" and not self.is_calibrated:
+            raise ContractValidationError(
+                "frozen performance policy requires an environment, benchmark digest, "
+                "and thresholds"
+            )
+
+    @property
+    def is_calibrated(self) -> bool:
+        return bool(
+            self.policy_status == "frozen"
+            and self.reference_environment
+            and self.benchmark_corpus_digest is not None
+            and self.thresholds
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ReleasePolicy:
     release: str
     target_trajectory_count: int
@@ -519,6 +581,7 @@ class ReleasePolicy:
     split_hash_salt: str
     performance_policy_status: str
     stochastic_risk_policy_status: str
+    release_blocked_until_policies_frozen: bool
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -575,8 +638,13 @@ class MutationRiskPolicy:
 
     def __post_init__(self) -> None:
         _require_text(self.release, "release")
-        if _DECIMAL_PATTERN.fullmatch(self.confidence_level_decimal) is None:
-            raise ContractValidationError("confidence level must be an exact decimal string")
+        if (
+            _DECIMAL_PATTERN.fullmatch(self.confidence_level_decimal) is None
+            or Decimal(self.confidence_level_decimal) <= 0
+        ):
+            raise ContractValidationError(
+                "confidence level must be an exact decimal string greater than zero and at most one"
+            )
         if self.policy_status not in {"unfrozen", "frozen"}:
             raise ContractValidationError("mutation risk policy status must be frozen or unfrozen")
         severities = tuple(item.severity for item in self.budgets)
@@ -584,3 +652,18 @@ class MutationRiskPolicy:
             raise ContractValidationError("mutation risk policy has duplicate severity budgets")
         if set(severities) != set(EscapeSeverity):
             raise ContractValidationError("mutation risk policy must cover every severity")
+        if self.policy_status == "frozen" and not self.is_calibrated:
+            raise ContractValidationError(
+                "frozen mutation risk policy requires positive samples and confidence "
+                "bounds for every severity"
+            )
+
+    @property
+    def is_calibrated(self) -> bool:
+        return bool(
+            self.policy_status == "frozen"
+            and all(
+                item.minimum_invalid_mutants > 0 and item.upper_confidence_bound_decimal is not None
+                for item in self.budgets
+            )
+        )

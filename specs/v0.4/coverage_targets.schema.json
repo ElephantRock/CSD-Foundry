@@ -1,4 +1,63 @@
 {
+  "$defs": {
+    "infeasibilityWitness": {
+      "additionalProperties": false,
+      "properties": {
+        "constraint_ids": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "grammar_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "proof_method": {
+          "enum": [
+            "exhaustive_enumeration",
+            "typed_contradiction",
+            "checked_unsat_core",
+            "verified_pattern_reduction"
+          ]
+        },
+        "target_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "unsat_core": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "verifier_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "witness_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_id",
+        "grammar_version",
+        "constraint_ids",
+        "proof_method",
+        "unsat_core",
+        "verifier_version",
+        "witness_digest"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/coverage_targets.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,6 +71,72 @@
     "targets": {
       "items": {
         "additionalProperties": false,
+        "allOf": [
+          {
+            "else": {
+              "properties": {
+                "infeasibility_witness": {
+                  "type": "null"
+                }
+              }
+            },
+            "if": {
+              "properties": {
+                "disposition": {
+                  "const": "machine_proven_infeasible"
+                }
+              },
+              "required": [
+                "disposition"
+              ]
+            },
+            "then": {
+              "properties": {
+                "infeasibility_witness": {
+                  "$ref": "#/$defs/infeasibilityWitness"
+                },
+                "minimum_count": {
+                  "const": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "disposition": {
+                  "const": "required"
+                }
+              },
+              "required": [
+                "disposition"
+              ]
+            },
+            "then": {
+              "properties": {
+                "minimum_count": {
+                  "minimum": 1
+                },
+                "search_budget": {
+                  "properties": {
+                    "maximum_construction_attempts_per_plan": {
+                      "minimum": 1
+                    },
+                    "maximum_elapsed_milliseconds": {
+                      "minimum": 1
+                    },
+                    "maximum_oracle_attempts": {
+                      "minimum": 1
+                    },
+                    "maximum_plan_attempts": {
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
         "properties": {
           "completeness": {
             "additionalProperties": false,
@@ -82,9 +207,13 @@
             "uniqueItems": true
           },
           "infeasibility_witness": {
-            "type": [
-              "object",
-              "null"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/infeasibilityWitness"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "minimum_count": {

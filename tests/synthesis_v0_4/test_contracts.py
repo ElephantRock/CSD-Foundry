@@ -12,6 +12,9 @@ from csd_foundry.synthesis.v0_4.contracts import (
     EscapeClassification,
     EscapeSeverity,
     GenerationAttempt,
+    MutationRiskBudget,
+    MutationRiskPolicy,
+    PerformancePolicy,
     RejectionCause,
     SearchBudget,
     SemanticEffect,
@@ -54,7 +57,7 @@ def test_v04_contract_release_is_valid_but_release_scale_is_blocked() -> None:
     assert report.machine_proven_infeasible_targets == 0
     assert report.unresolved_targets == 0
     assert report.release_scale_blocked
-    assert report.schema_document_count == 5
+    assert report.schema_document_count == 6
     assert len(report.canonical_digest) == 64
 
 
@@ -195,3 +198,71 @@ def test_all_shipped_targets_have_completeness_evidence_and_budgets() -> None:
         assert target.completeness.target_id == target.target_id
         if target.disposition is TargetDisposition.REQUIRED:
             assert target.minimum_count > 0
+
+
+def test_frozen_performance_policy_requires_calibration_evidence() -> None:
+    with pytest.raises(ContractValidationError):
+        PerformancePolicy(
+            release="v0.4",
+            policy_status="frozen",
+            reference_environment=(),
+            benchmark_corpus_digest=None,
+            thresholds=(),
+        )
+
+
+def test_frozen_mutation_policy_requires_samples_and_confidence_bounds() -> None:
+    budgets = tuple(
+        MutationRiskBudget(
+            severity=severity,
+            maximum_unresolved_deterministic=0,
+            maximum_unresolved_stochastic=0,
+            upper_confidence_bound_decimal=None,
+            minimum_invalid_mutants=0,
+        )
+        for severity in EscapeSeverity
+    )
+    with pytest.raises(ContractValidationError):
+        MutationRiskPolicy(
+            release="v0.4",
+            confidence_level_decimal="0.95",
+            policy_status="frozen",
+            budgets=budgets,
+        )
+
+
+@pytest.mark.parametrize("value", ["1.5", "1.01", "2", "-0.1"])
+def test_probability_contracts_reject_values_outside_zero_to_one(value: str) -> None:
+    with pytest.raises(ContractValidationError):
+        MutationRiskBudget(
+            severity=EscapeSeverity.HIGH,
+            maximum_unresolved_deterministic=0,
+            maximum_unresolved_stochastic=0,
+            upper_confidence_bound_decimal=value,
+            minimum_invalid_mutants=1,
+        )
+
+
+def test_coverage_schema_requires_machine_infeasibility_witness() -> None:
+    schema = load_json_text(
+        (SPEC_ROOT / "coverage_targets.schema.json").read_text(encoding="utf-8")
+    )
+    assert isinstance(schema, dict)
+    witness = schema["$defs"]
+    assert isinstance(witness, dict)
+    witness_schema = witness["infeasibilityWitness"]
+    assert isinstance(witness_schema, dict)
+    assert set(witness_schema["required"]) == {
+        "target_id",
+        "grammar_version",
+        "constraint_ids",
+        "proof_method",
+        "unsat_core",
+        "verifier_version",
+        "witness_digest",
+    }
+    target_schema = schema["properties"]
+    assert isinstance(target_schema, dict)
+    target_items = target_schema["targets"]
+    assert isinstance(target_items, dict)
+    assert "allOf" in target_items["items"]

@@ -17,6 +17,8 @@ from csd_foundry.synthesis.v0_4.contracts import (
     InfeasibilityWitness,
     MutationRiskBudget,
     MutationRiskPolicy,
+    PerformancePolicy,
+    PerformanceThreshold,
     RejectionCause,
     ReleasePolicy,
     SearchBudget,
@@ -30,6 +32,7 @@ from csd_foundry.synthesis.v0_4.specs import (
     DETERMINISTIC_ARITHMETIC_POLICY_SPEC,
     HOLDOUTS_SPEC,
     MUTATION_RISK_POLICY_SPEC,
+    PERFORMANCE_POLICY_SPEC,
     RELEASE_POLICY_SPEC,
     SCHEMA_DOCUMENT_NAMES,
     SPEC_DOCUMENTS,
@@ -234,6 +237,36 @@ def load_release_policy() -> ReleasePolicy:
         split_hash_salt=_string(data, "split_hash_salt"),
         performance_policy_status=_string(data, "performance_policy_status"),
         stochastic_risk_policy_status=_string(data, "stochastic_risk_policy_status"),
+        release_blocked_until_policies_frozen=_boolean(
+            data, "release_blocked_until_policies_frozen"
+        ),
+    )
+
+
+def load_performance_policy() -> PerformancePolicy:
+    data = _mapping(PERFORMANCE_POLICY_SPEC, "performance policy")
+    environment: list[tuple[str, str]] = []
+    for value in _sequence(data.get("reference_environment"), "reference_environment"):
+        item = _mapping(value, "reference environment item")
+        environment.append((_string(item, "name"), _string(item, "value")))
+    thresholds: list[PerformanceThreshold] = []
+    for value in _sequence(data.get("thresholds"), "performance thresholds"):
+        item = _mapping(value, "performance threshold")
+        thresholds.append(
+            PerformanceThreshold(
+                metric_id=_string(item, "metric_id"),
+                statistic=_string(item, "statistic"),
+                comparator=_string(item, "comparator"),
+                threshold_value=_integer(item, "threshold_value"),
+                unit=_string(item, "unit"),
+            )
+        )
+    return PerformancePolicy(
+        release=_string(data, "release"),
+        policy_status=_string(data, "policy_status"),
+        reference_environment=tuple(environment),
+        benchmark_corpus_digest=_optional_string(data, "benchmark_corpus_digest"),
+        thresholds=tuple(thresholds),
     )
 
 
@@ -289,6 +322,7 @@ def validate_release(release: str = "v0.4") -> SynthesisContractReport:
     holdouts: tuple[HoldoutRule, ...] = ()
     release_policy: ReleasePolicy | None = None
     risk_policy: MutationRiskPolicy | None = None
+    performance_policy: PerformancePolicy | None = None
 
     if release != "v0.4":
         errors.append(f"unsupported synthesis contract release: {release}")
@@ -326,8 +360,22 @@ def validate_release(release: str = "v0.4") -> SynthesisContractReport:
 
     if release_policy is not None and release_policy.release != release:
         errors.append("release policy identifier does not match the requested release")
+    if performance_policy is not None and performance_policy.release != release:
+        errors.append("performance policy identifier does not match the requested release")
     if risk_policy is not None and risk_policy.release != release:
         errors.append("mutation risk policy identifier does not match the requested release")
+    if (
+        release_policy is not None
+        and performance_policy is not None
+        and release_policy.performance_policy_status != performance_policy.policy_status
+    ):
+        errors.append("release and performance policy statuses do not agree")
+    if (
+        release_policy is not None
+        and risk_policy is not None
+        and release_policy.stochastic_risk_policy_status != risk_policy.policy_status
+    ):
+        errors.append("release and mutation risk policy statuses do not agree")
 
     required = sum(item.disposition is TargetDisposition.REQUIRED for item in targets)
     exploratory = sum(item.disposition is TargetDisposition.EXPLORATORY for item in targets)
@@ -337,10 +385,12 @@ def validate_release(release: str = "v0.4") -> SynthesisContractReport:
     unresolved = sum(item.disposition is TargetDisposition.UNRESOLVED for item in targets)
     release_scale_blocked = bool(
         release_policy is None
+        or performance_policy is None
         or risk_policy is None
+        or not performance_policy.is_calibrated
+        or not risk_policy.is_calibrated
         or release_policy.performance_policy_status != "frozen"
         or release_policy.stochastic_risk_policy_status != "frozen"
-        or risk_policy.policy_status != "frozen"
     )
 
     return SynthesisContractReport(
@@ -351,7 +401,7 @@ def validate_release(release: str = "v0.4") -> SynthesisContractReport:
         machine_proven_infeasible_targets=infeasible,
         unresolved_targets=unresolved,
         holdout_rule_count=len(holdouts),
-        policy_count=3,
+        policy_count=4,
         schema_document_count=len(SCHEMA_DOCUMENT_NAMES),
         rejection_cause_count=len(RejectionCause),
         rejection_owner_count=len({cause.owner for cause in RejectionCause}),

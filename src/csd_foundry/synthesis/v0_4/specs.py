@@ -7,6 +7,7 @@ SCHEMA_DOCUMENT_NAMES = (
     "holdouts.schema.json",
     "release_policy.schema.json",
     "mutation_risk_policy.schema.json",
+    "performance_policy.schema.json",
     "deterministic_arithmetic_policy.schema.json",
 )
 
@@ -208,6 +209,15 @@ RELEASE_POLICY_SPEC: dict[str, object] = {
     "release_blocked_until_policies_frozen": True,
 }
 
+PERFORMANCE_POLICY_SPEC: dict[str, object] = {
+    "release": "v0.4",
+    "schema_version": "0.4.0",
+    "policy_status": "unfrozen",
+    "reference_environment": [],
+    "benchmark_corpus_digest": None,
+    "thresholds": [],
+}
+
 MUTATION_RISK_POLICY_SPEC: dict[str, object] = {
     "release": "v0.4",
     "schema_version": "0.4.0",
@@ -261,5 +271,6 @@ SPEC_DOCUMENTS: dict[str, dict[str, object]] = {
     "holdouts.json": HOLDOUTS_SPEC,
     "release_policy.json": RELEASE_POLICY_SPEC,
     "mutation_risk_policy.json": MUTATION_RISK_POLICY_SPEC,
+    "performance_policy.json": PERFORMANCE_POLICY_SPEC,
     "deterministic_arithmetic_policy.json": DETERMINISTIC_ARITHMETIC_POLICY_SPEC,
 }

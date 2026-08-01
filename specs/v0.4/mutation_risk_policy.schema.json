@@ -28,7 +28,7 @@
             ]
           },
           "upper_confidence_bound_decimal": {
-            "pattern": "^(0|1)(\\.\\d+)?$",
+            "pattern": "^(?:0(?:\\.\\d+)?|1(?:\\.0+)?)$",
             "type": [
               "string",
               "null"
@@ -48,7 +48,7 @@
       "type": "array"
     },
     "confidence_level_decimal": {
-      "pattern": "^(0|1)(\\.\\d+)?$",
+      "pattern": "^(?:0(?:\\.\\d+)?|1(?:\\.0+)?)$",
       "type": "string"
     },
     "policy_status": {
