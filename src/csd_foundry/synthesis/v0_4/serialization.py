@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import fields, is_dataclass
 from enum import StrEnum
-from typing import TypeAlias, cast
+from typing import TypeAlias
 
 
 class CanonicalSerializationError(ValueError):
@@ -91,4 +91,4 @@ def load_json_text(text: str) -> JSONValue:
         parse_float=_reject_float,
         parse_constant=_reject_constant,
     )
-    return cast(JSONValue, to_json_value(parsed))
+    return to_json_value(parsed)
