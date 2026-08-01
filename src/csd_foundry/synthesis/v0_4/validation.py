@@ -136,6 +136,13 @@ def _strings(data: dict[str, object], key: str) -> tuple[str, ...]:
     return tuple(cast(list[str], values))
 
 
+def _require_document_header(data: dict[str, object], document_name: str) -> None:
+    if _string(data, "release") != "v0.4":
+        raise ContractValidationError(f"{document_name} release must be v0.4")
+    if _string(data, "schema_version") != "0.4.0":
+        raise ContractValidationError(f"{document_name} schema_version must be 0.4.0")
+
+
 def _search_budget(data: dict[str, object]) -> SearchBudget:
     return SearchBudget(
         maximum_plan_attempts=_integer(data, "maximum_plan_attempts"),
@@ -176,8 +183,7 @@ def _completeness(target_id: str, value: object) -> CompletenessWitnessMap:
 
 def load_targets() -> tuple[CoverageTarget, ...]:
     document = _mapping(COVERAGE_TARGETS_SPEC, "coverage target document")
-    if _string(document, "release") != "v0.4":
-        raise ContractValidationError("coverage target release must be v0.4")
+    _require_document_header(document, "coverage target document")
     targets: list[CoverageTarget] = []
     for value in _sequence(document.get("targets"), "targets"):
         data = _mapping(value, "target")
@@ -206,6 +212,7 @@ def load_targets() -> tuple[CoverageTarget, ...]:
 
 def load_holdouts() -> tuple[HoldoutRule, ...]:
     document = _mapping(HOLDOUTS_SPEC, "holdout document")
+    _require_document_header(document, "holdout document")
     rules: list[HoldoutRule] = []
     for value in _sequence(document.get("rules"), "rules"):
         data = _mapping(value, "holdout rule")
@@ -225,6 +232,7 @@ def load_holdouts() -> tuple[HoldoutRule, ...]:
 
 def load_release_policy() -> ReleasePolicy:
     data = _mapping(RELEASE_POLICY_SPEC, "release policy")
+    _require_document_header(data, "release policy")
     return ReleasePolicy(
         release=_string(data, "release"),
         target_trajectory_count=_integer(data, "target_trajectory_count"),
@@ -245,6 +253,7 @@ def load_release_policy() -> ReleasePolicy:
 
 def load_performance_policy() -> PerformancePolicy:
     data = _mapping(PERFORMANCE_POLICY_SPEC, "performance policy")
+    _require_document_header(data, "performance policy")
     environment: list[tuple[str, str]] = []
     for value in _sequence(data.get("reference_environment"), "reference_environment"):
         item = _mapping(value, "reference environment item")
@@ -272,6 +281,7 @@ def load_performance_policy() -> PerformancePolicy:
 
 def load_mutation_risk_policy() -> MutationRiskPolicy:
     data = _mapping(MUTATION_RISK_POLICY_SPEC, "mutation risk policy")
+    _require_document_header(data, "mutation risk policy")
     budgets: list[MutationRiskBudget] = []
     for value in _sequence(data.get("budgets"), "budgets"):
         budget = _mapping(value, "mutation risk budget")
@@ -298,6 +308,7 @@ def load_mutation_risk_policy() -> MutationRiskPolicy:
 
 def load_deterministic_arithmetic_policy() -> DeterministicArithmeticPolicy:
     data = _mapping(DETERMINISTIC_ARITHMETIC_POLICY_SPEC, "deterministic arithmetic policy")
+    _require_document_header(data, "deterministic arithmetic policy")
     return DeterministicArithmeticPolicy(
         semantic_floating_point_permitted=_boolean(data, "semantic_floating_point_permitted"),
         statistical_decimal_precision=_integer(data, "statistical_decimal_precision"),

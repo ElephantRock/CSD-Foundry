@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
+from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS
+
 
 class ContractValidationError(ValueError):
     """Raised when a v0.4 contract violates its declared schema."""
@@ -253,6 +255,10 @@ class CompletenessWitnessMap:
         _require_text(self.target_id, "target_id")
         _require_unique(self.omitted_dimensions, "omitted_dimensions")
         _require_text(self.justification, "justification")
+        if self.bounded_projection_id is not None:
+            _require_text(self.bounded_projection_id, "bounded_projection_id")
+        if self.alternative_witness_id is not None:
+            _require_text(self.alternative_witness_id, "alternative_witness_id")
         if self.evidence_kind is CompletenessEvidenceKind.FULLY_BOUNDED:
             if self.bounded_projection_id is None or self.omitted_dimensions:
                 raise ContractValidationError(
@@ -306,6 +312,11 @@ class CoverageTarget:
             raise ContractValidationError("event_pattern must be nonempty")
         if not self.required_invariants:
             raise ContractValidationError("required_invariants must be nonempty")
+        unknown_invariants = self.required_invariants - EXECUTABLE_INVARIANT_IDS
+        if unknown_invariants:
+            raise ContractValidationError(
+                f"required_invariants are not executable: {sorted(unknown_invariants)}"
+            )
         if not self.required_consequences:
             raise ContractValidationError("required_consequences must be nonempty")
         if self.minimum_count < 0:

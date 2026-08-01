@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS
+from csd_foundry.kernel.invariants import Violation
+from csd_foundry.synthesis.v0_4 import validation as synthesis_validation
 from csd_foundry.synthesis.v0_4.contracts import (
     CompletenessEvidenceKind,
     CompletenessWitnessMap,
@@ -266,3 +269,65 @@ def test_coverage_schema_requires_machine_infeasibility_witness() -> None:
     target_items = target_schema["targets"]
     assert isinstance(target_items, dict)
     assert "allOf" in target_items["items"]
+
+
+def test_required_invariants_must_be_executable() -> None:
+    with pytest.raises(ContractValidationError):
+        CoverageTarget(
+            target_id="unknown-invariant",
+            disposition=TargetDisposition.REQUIRED,
+            topology_pattern="single",
+            event_pattern=("AdvanceClock",),
+            temporal_pattern="boundary",
+            request_pattern="none",
+            profile_pattern="stable",
+            required_invariants=frozenset({"T-INV-99"}),
+            required_consequences=frozenset({"time-advances"}),
+            minimum_count=1,
+            rarity_weight=1,
+            holdout_tags=frozenset(),
+            search_budget=_budget(),
+            completeness=_completeness("unknown-invariant"),
+        )
+    with pytest.raises(ValueError):
+        Violation("T-INV-99", "not executable")
+    assert all(target.required_invariants <= EXECUTABLE_INVARIANT_IDS for target in load_targets())
+
+
+@pytest.mark.parametrize(
+    ("kind", "bounded_id", "alternative_id"),
+    [
+        (CompletenessEvidenceKind.FULLY_BOUNDED, "", None),
+        (CompletenessEvidenceKind.PROJECTED_BOUNDED, "", "alternative"),
+        (CompletenessEvidenceKind.ALTERNATIVE_ASSURANCE, None, ""),
+    ],
+)
+def test_completeness_witness_identifiers_must_be_nonempty(
+    kind: CompletenessEvidenceKind,
+    bounded_id: str | None,
+    alternative_id: str | None,
+) -> None:
+    omitted = () if kind is CompletenessEvidenceKind.FULLY_BOUNDED else ("scale",)
+    with pytest.raises(ContractValidationError):
+        CompletenessWitnessMap(
+            target_id="target",
+            evidence_kind=kind,
+            bounded_projection_id=bounded_id,
+            omitted_dimensions=omitted,
+            justification="test witness",
+            alternative_witness_id=alternative_id,
+        )
+
+
+def test_packaged_loader_rejects_schema_version_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mismatched = dict(synthesis_validation.COVERAGE_TARGETS_SPEC)
+    mismatched["schema_version"] = "0.4.1"
+    monkeypatch.setattr(
+        synthesis_validation,
+        "COVERAGE_TARGETS_SPEC",
+        mismatched,
+    )
+    with pytest.raises(ContractValidationError):
+        synthesis_validation.load_targets()

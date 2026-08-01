@@ -140,17 +140,98 @@
         "properties": {
           "completeness": {
             "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "evidence_kind": {
+                      "const": "fully_bounded"
+                    }
+                  },
+                  "required": [
+                    "evidence_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "alternative_witness_id": {
+                      "type": "null"
+                    },
+                    "bounded_projection_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "omitted_dimensions": {
+                      "maxItems": 0
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "evidence_kind": {
+                      "const": "projected_bounded"
+                    }
+                  },
+                  "required": [
+                    "evidence_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "bounded_projection_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "omitted_dimensions": {
+                      "minItems": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "evidence_kind": {
+                      "const": "alternative_assurance"
+                    }
+                  },
+                  "required": [
+                    "evidence_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "alternative_witness_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            ],
             "properties": {
               "alternative_witness_id": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "bounded_projection_id": {
-                "type": [
-                  "string",
-                  "null"
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ]
               },
               "evidence_kind": {
@@ -243,6 +324,38 @@
           },
           "required_invariants": {
             "items": {
+              "enum": [
+                "G-INV-06",
+                "G-INV-10",
+                "G-INV-11",
+                "G-INV-13",
+                "H-INV-01",
+                "H-INV-02",
+                "H-INV-03",
+                "INV-04",
+                "INV-05",
+                "INV-07",
+                "INV-11",
+                "INV-13",
+                "INV-14",
+                "INV-15",
+                "INV-16",
+                "INV-18",
+                "INV-19",
+                "P-INV-01",
+                "P-INV-02",
+                "P-INV-03",
+                "P-INV-04",
+                "R-INV-01",
+                "R-INV-02",
+                "R-INV-03",
+                "R-INV-04",
+                "T-INV-01",
+                "T-INV-02",
+                "T-INV-03",
+                "T-INV-04",
+                "T-INV-06"
+              ],
               "minLength": 1,
               "type": "string"
             },
