@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -21,7 +23,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
-          import textwrap
 
           source = Path('.github/workflows/patch-v04-choice-primitives.yml').read_text(
               encoding='utf-8'
@@ -34,7 +35,10 @@ jobs:
           if len(scripts) != 2:
               raise SystemExit(f'expected two embedded Python scripts, found {len(scripts)}')
           for index, script in enumerate(scripts, 1):
-              code = textwrap.dedent(script)
+              code = "\n".join(
+                  line[10:] if line.startswith("          ") else line
+                  for line in script.splitlines()
+              )
               exec(compile(code, f'integration-script-{index}', 'exec'), {})
           PY
       - run: ruff format .
