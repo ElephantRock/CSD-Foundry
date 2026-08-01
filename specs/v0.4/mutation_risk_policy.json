@@ -1,0 +1,36 @@
+{
+  "budgets": [
+    {
+      "maximum_unresolved_deterministic": 0,
+      "maximum_unresolved_stochastic": 0,
+      "minimum_invalid_mutants": 0,
+      "severity": "critical",
+      "upper_confidence_bound_decimal": null
+    },
+    {
+      "maximum_unresolved_deterministic": 0,
+      "maximum_unresolved_stochastic": 0,
+      "minimum_invalid_mutants": 0,
+      "severity": "high",
+      "upper_confidence_bound_decimal": null
+    },
+    {
+      "maximum_unresolved_deterministic": 0,
+      "maximum_unresolved_stochastic": 0,
+      "minimum_invalid_mutants": 0,
+      "severity": "moderate",
+      "upper_confidence_bound_decimal": null
+    },
+    {
+      "maximum_unresolved_deterministic": 0,
+      "maximum_unresolved_stochastic": 0,
+      "minimum_invalid_mutants": 0,
+      "severity": "low",
+      "upper_confidence_bound_decimal": null
+    }
+  ],
+  "confidence_level_decimal": "0.95",
+  "policy_status": "unfrozen",
+  "release": "v0.4",
+  "schema_version": "0.4.0"
+}
