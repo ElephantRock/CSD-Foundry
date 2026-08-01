@@ -241,7 +241,7 @@ KNOWN_ANSWER_VECTORS: tuple[dict[str, object], ...] = (
             "width": 1,
             "block_count": 1,
             "domain_digest": (
-                "f61c35fe4162b5c8295801a314a0521fc"
+                "f61c35fe4162b5c8295801a314a0521fcc"
                 "cb0593ce310ce3a864feed58967d52"
             ),
             "material_digest": (
