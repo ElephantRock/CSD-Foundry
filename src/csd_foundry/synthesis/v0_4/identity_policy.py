@@ -94,9 +94,7 @@ class IdentityVolumeEnvelope:
                 "margined identity volume requires an exact IdentityKindVolume"
             )
         numerator = item.projected_count * self.safety_margin_numerator
-        return (
-            numerator + self.safety_margin_denominator - 1
-        ) // self.safety_margin_denominator
+        return (numerator + self.safety_margin_denominator - 1) // self.safety_margin_denominator
 
     @property
     def raw_projected_count(self) -> int:
