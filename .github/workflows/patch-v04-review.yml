@@ -1,0 +1,537 @@
+name: Patch v0.4 review corrections
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: web/10-synthesis-contracts-v0.4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - name: Apply review corrections
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          path = Path("src/csd_foundry/synthesis/v0_4/contracts.py")
+          text = path.read_text()
+          text = text.replace("import re\n", "import re\nfrom decimal import Decimal\n", 1)
+          text = text.replace(
+              '_DECIMAL_PATTERN = re.compile(r"^(0|1)(?:\\.\\d+)?$")',
+              '_DECIMAL_PATTERN = re.compile(r"^(?:0(?:\\.\\d+)?|1(?:\\.0+)?)$")',
+              1,
+          )
+          marker = "@dataclass(frozen=True, slots=True)\nclass ReleasePolicy:\n"
+          insertion = '''@dataclass(frozen=True, slots=True)
+          class PerformanceThreshold:
+              metric_id: str
+              statistic: str
+              comparator: str
+              threshold_value: int
+              unit: str
+
+              def __post_init__(self) -> None:
+                  _require_text(self.metric_id, "metric_id")
+                  _require_text(self.statistic, "statistic")
+                  _require_text(self.unit, "unit")
+                  if self.comparator not in {"eq", "gte", "lte"}:
+                      raise ContractValidationError("performance comparator must be eq, gte, or lte")
+                  if self.threshold_value < 0:
+                      raise ContractValidationError("performance threshold must be nonnegative")
+
+
+          @dataclass(frozen=True, slots=True)
+          class PerformancePolicy:
+              release: str
+              policy_status: str
+              reference_environment: tuple[tuple[str, str], ...]
+              benchmark_corpus_digest: str | None
+              thresholds: tuple[PerformanceThreshold, ...]
+
+              def __post_init__(self) -> None:
+                  _require_text(self.release, "release")
+                  if self.policy_status not in {"unfrozen", "frozen"}:
+                      raise ContractValidationError(
+                          "performance policy status must be frozen or unfrozen"
+                      )
+                  environment_names = tuple(name for name, _ in self.reference_environment)
+                  _require_unique(environment_names, "reference_environment names")
+                  for name, value in self.reference_environment:
+                      _require_text(name, "reference_environment name")
+                      _require_text(value, "reference_environment value")
+                  metric_ids = tuple(item.metric_id for item in self.thresholds)
+                  if len(metric_ids) != len(set(metric_ids)):
+                      raise ContractValidationError("performance thresholds have duplicate metrics")
+                  if self.benchmark_corpus_digest is not None and _SHA256_PATTERN.fullmatch(
+                      self.benchmark_corpus_digest
+                  ) is None:
+                      raise ContractValidationError(
+                          "benchmark_corpus_digest must be a lowercase SHA-256 digest"
+                      )
+                  if self.policy_status == "frozen" and not self.is_calibrated:
+                      raise ContractValidationError(
+                          "frozen performance policy requires an environment, benchmark digest, "
+                          "and thresholds"
+                      )
+
+              @property
+              def is_calibrated(self) -> bool:
+                  return bool(
+                      self.policy_status == "frozen"
+                      and self.reference_environment
+                      and self.benchmark_corpus_digest is not None
+                      and self.thresholds
+                  )
+
+
+          @dataclass(frozen=True, slots=True)
+          class ReleasePolicy:
+          '''
+          if marker not in text:
+              raise SystemExit("ReleasePolicy marker not found")
+          text = text.replace(marker, insertion, 1)
+          text = text.replace(
+              "    stochastic_risk_policy_status: str\n\n    def __post_init__(self) -> None:\n",
+              "    stochastic_risk_policy_status: str\n"
+              "    release_blocked_until_policies_frozen: bool\n\n"
+              "    def __post_init__(self) -> None:\n",
+              1,
+          )
+          text = text.replace(
+              '''        if self.stochastic_risk_policy_status not in {"unfrozen", "frozen"}:
+                  raise ContractValidationError("risk policy status must be frozen or unfrozen")
+          ''',
+              '''        if self.stochastic_risk_policy_status not in {"unfrozen", "frozen"}:
+                  raise ContractValidationError("risk policy status must be frozen or unfrozen")
+              if (
+                  not self.release_blocked_until_policies_frozen
+                  and (
+                      self.performance_policy_status != "frozen"
+                      or self.stochastic_risk_policy_status != "frozen"
+                  )
+              ):
+                  raise ContractValidationError(
+                      "release must remain blocked while calibration policies are unfrozen"
+                  )
+          ''',
+              1,
+          )
+          text = text.replace(
+              '''        if _DECIMAL_PATTERN.fullmatch(self.confidence_level_decimal) is None:
+                  raise ContractValidationError("confidence level must be an exact decimal string")
+          ''',
+              '''        if (
+                  _DECIMAL_PATTERN.fullmatch(self.confidence_level_decimal) is None
+                  or Decimal(self.confidence_level_decimal) <= 0
+              ):
+                  raise ContractValidationError(
+                      "confidence level must be an exact decimal string greater than zero "
+                      "and at most one"
+                  )
+          ''',
+              1,
+          )
+          text = text.replace(
+              '''        if set(severities) != set(EscapeSeverity):
+                  raise ContractValidationError("mutation risk policy must cover every severity")
+          ''',
+              '''        if set(severities) != set(EscapeSeverity):
+                  raise ContractValidationError("mutation risk policy must cover every severity")
+              if self.policy_status == "frozen" and not self.is_calibrated:
+                  raise ContractValidationError(
+                      "frozen mutation risk policy requires positive samples and confidence "
+                      "bounds for every severity"
+                  )
+
+              @property
+              def is_calibrated(self) -> bool:
+                  return bool(
+                      self.policy_status == "frozen"
+                      and all(
+                          item.minimum_invalid_mutants > 0
+                          and item.upper_confidence_bound_decimal is not None
+                          for item in self.budgets
+                      )
+                  )
+          ''',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path("src/csd_foundry/synthesis/v0_4/specs.py")
+          text = path.read_text()
+          text = text.replace(
+              '    "mutation_risk_policy.schema.json",\n',
+              '    "mutation_risk_policy.schema.json",\n    "performance_policy.schema.json",\n',
+              1,
+          )
+          marker = "MUTATION_RISK_POLICY_SPEC: dict[str, object] = {\n"
+          performance = '''PERFORMANCE_POLICY_SPEC: dict[str, object] = {
+              "release": "v0.4",
+              "schema_version": "0.4.0",
+              "policy_status": "unfrozen",
+              "reference_environment": [],
+              "benchmark_corpus_digest": None,
+              "thresholds": [],
+          }
+
+          MUTATION_RISK_POLICY_SPEC: dict[str, object] = {
+          '''
+          if marker not in text:
+              raise SystemExit("mutation policy marker not found")
+          text = text.replace(marker, performance, 1)
+          text = text.replace(
+              '    "mutation_risk_policy.json": MUTATION_RISK_POLICY_SPEC,\n',
+              '    "mutation_risk_policy.json": MUTATION_RISK_POLICY_SPEC,\n'
+              '    "performance_policy.json": PERFORMANCE_POLICY_SPEC,\n',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path("src/csd_foundry/synthesis/v0_4/validation.py")
+          text = path.read_text()
+          text = text.replace(
+              "    MutationRiskPolicy,\n    RejectionCause,\n",
+              "    MutationRiskPolicy,\n    PerformancePolicy,\n"
+              "    PerformanceThreshold,\n    RejectionCause,\n",
+              1,
+          )
+          text = text.replace(
+              "    MUTATION_RISK_POLICY_SPEC,\n    RELEASE_POLICY_SPEC,\n",
+              "    MUTATION_RISK_POLICY_SPEC,\n    PERFORMANCE_POLICY_SPEC,\n"
+              "    RELEASE_POLICY_SPEC,\n",
+              1,
+          )
+          text = text.replace(
+              '''        stochastic_risk_policy_status=_string(data, "stochastic_risk_policy_status"),
+              )
+          ''',
+              '''        stochastic_risk_policy_status=_string(data, "stochastic_risk_policy_status"),
+                  release_blocked_until_policies_frozen=_boolean(
+                      data, "release_blocked_until_policies_frozen"
+                  ),
+              )
+          ''',
+              1,
+          )
+          marker = "def load_mutation_risk_policy() -> MutationRiskPolicy:\n"
+          loader = '''def load_performance_policy() -> PerformancePolicy:
+              data = _mapping(PERFORMANCE_POLICY_SPEC, "performance policy")
+              environment: list[tuple[str, str]] = []
+              for value in _sequence(data.get("reference_environment"), "reference_environment"):
+                  item = _mapping(value, "reference environment item")
+                  environment.append((_string(item, "name"), _string(item, "value")))
+              thresholds: list[PerformanceThreshold] = []
+              for value in _sequence(data.get("thresholds"), "performance thresholds"):
+                  item = _mapping(value, "performance threshold")
+                  thresholds.append(
+                      PerformanceThreshold(
+                          metric_id=_string(item, "metric_id"),
+                          statistic=_string(item, "statistic"),
+                          comparator=_string(item, "comparator"),
+                          threshold_value=_integer(item, "threshold_value"),
+                          unit=_string(item, "unit"),
+                      )
+                  )
+              return PerformancePolicy(
+                  release=_string(data, "release"),
+                  policy_status=_string(data, "policy_status"),
+                  reference_environment=tuple(environment),
+                  benchmark_corpus_digest=_optional_string(data, "benchmark_corpus_digest"),
+                  thresholds=tuple(thresholds),
+              )
+
+
+          def load_mutation_risk_policy() -> MutationRiskPolicy:
+          '''
+          if marker not in text:
+              raise SystemExit("mutation loader marker not found")
+          text = text.replace(marker, loader, 1)
+          text = text.replace(
+              "    risk_policy: MutationRiskPolicy | None = None\n",
+              "    risk_policy: MutationRiskPolicy | None = None\n"
+              "    performance_policy: PerformancePolicy | None = None\n",
+              1,
+          )
+          text = text.replace(
+              "            release_policy = load_release_policy()\n"
+              "            risk_policy = load_mutation_risk_policy()\n",
+              "            release_policy = load_release_policy()\n"
+              "            performance_policy = load_performance_policy()\n"
+              "            risk_policy = load_mutation_risk_policy()\n",
+              1,
+          )
+          text = text.replace(
+              '''    if risk_policy is not None and risk_policy.release != release:
+                  errors.append("mutation risk policy identifier does not match the requested release")
+          ''',
+              '''    if performance_policy is not None and performance_policy.release != release:
+                  errors.append("performance policy identifier does not match the requested release")
+              if risk_policy is not None and risk_policy.release != release:
+                  errors.append("mutation risk policy identifier does not match the requested release")
+              if (
+                  release_policy is not None
+                  and performance_policy is not None
+                  and release_policy.performance_policy_status
+                  != performance_policy.policy_status
+              ):
+                  errors.append("release and performance policy statuses do not agree")
+              if (
+                  release_policy is not None
+                  and risk_policy is not None
+                  and release_policy.stochastic_risk_policy_status != risk_policy.policy_status
+              ):
+                  errors.append("release and mutation risk policy statuses do not agree")
+          ''',
+              1,
+          )
+          text = text.replace(
+              '''        release_policy is None
+                  or risk_policy is None
+                  or release_policy.performance_policy_status != "frozen"
+                  or release_policy.stochastic_risk_policy_status != "frozen"
+                  or risk_policy.policy_status != "frozen"
+          ''',
+              '''        release_policy is None
+                  or performance_policy is None
+                  or risk_policy is None
+                  or not performance_policy.is_calibrated
+                  or not risk_policy.is_calibrated
+                  or release_policy.performance_policy_status != "frozen"
+                  or release_policy.stochastic_risk_policy_status != "frozen"
+          ''',
+              1,
+          )
+          text = text.replace("        policy_count=3,", "        policy_count=4,", 1)
+          path.write_text(text)
+
+          path = Path("src/csd_foundry/synthesis/v0_4/__init__.py")
+          text = path.read_text()
+          text = text.replace(
+              "    MutationRiskPolicy,\n    RejectionCause,\n",
+              "    MutationRiskPolicy,\n    PerformancePolicy,\n"
+              "    PerformanceThreshold,\n    RejectionCause,\n",
+              1,
+          )
+          text = text.replace(
+              '    "MutationRiskPolicy",\n    "RejectionCause",\n',
+              '    "MutationRiskPolicy",\n    "PerformancePolicy",\n'
+              '    "PerformanceThreshold",\n    "RejectionCause",\n',
+              1,
+          )
+          path.write_text(text)
+
+          path = Path("tests/synthesis_v0_4/test_contracts.py")
+          text = path.read_text()
+          text = text.replace(
+              "    GenerationAttempt,\n    RejectionCause,\n",
+              "    GenerationAttempt,\n    MutationRiskBudget,\n"
+              "    MutationRiskPolicy,\n    PerformancePolicy,\n    RejectionCause,\n",
+              1,
+          )
+          text = text.replace(
+              "    assert report.schema_document_count == 5\n",
+              "    assert report.schema_document_count == 6\n",
+              1,
+          )
+          text += '''
+
+          def test_frozen_performance_policy_requires_calibration_evidence() -> None:
+              with pytest.raises(ContractValidationError):
+                  PerformancePolicy(
+                      release="v0.4",
+                      policy_status="frozen",
+                      reference_environment=(),
+                      benchmark_corpus_digest=None,
+                      thresholds=(),
+                  )
+
+
+          def test_frozen_mutation_policy_requires_samples_and_confidence_bounds() -> None:
+              budgets = tuple(
+                  MutationRiskBudget(
+                      severity=severity,
+                      maximum_unresolved_deterministic=0,
+                      maximum_unresolved_stochastic=0,
+                      upper_confidence_bound_decimal=None,
+                      minimum_invalid_mutants=0,
+                  )
+                  for severity in EscapeSeverity
+              )
+              with pytest.raises(ContractValidationError):
+                  MutationRiskPolicy(
+                      release="v0.4",
+                      confidence_level_decimal="0.95",
+                      policy_status="frozen",
+                      budgets=budgets,
+                  )
+
+
+          @pytest.mark.parametrize("value", ["1.5", "1.01", "2", "-0.1"])
+          def test_probability_contracts_reject_values_outside_zero_to_one(value: str) -> None:
+              with pytest.raises(ContractValidationError):
+                  MutationRiskBudget(
+                      severity=EscapeSeverity.HIGH,
+                      maximum_unresolved_deterministic=0,
+                      maximum_unresolved_stochastic=0,
+                      upper_confidence_bound_decimal=value,
+                      minimum_invalid_mutants=1,
+                  )
+
+
+          def test_coverage_schema_requires_machine_infeasibility_witness() -> None:
+              schema = load_json_text(
+                  (SPEC_ROOT / "coverage_targets.schema.json").read_text(encoding="utf-8")
+              )
+              assert isinstance(schema, dict)
+              witness = schema["$defs"]
+              assert isinstance(witness, dict)
+              witness_schema = witness["infeasibilityWitness"]
+              assert isinstance(witness_schema, dict)
+              assert set(witness_schema["required"]) == {
+                  "target_id",
+                  "grammar_version",
+                  "constraint_ids",
+                  "proof_method",
+                  "unsat_core",
+                  "verifier_version",
+                  "witness_digest",
+              }
+              target_schema = schema["properties"]
+              assert isinstance(target_schema, dict)
+              target_items = target_schema["targets"]
+              assert isinstance(target_items, dict)
+              assert "allOf" in target_items["items"]
+          '''
+          path.write_text(text)
+
+          path = Path("specs/v0.4/coverage_targets.schema.json")
+          schema = json.loads(path.read_text())
+          schema["$defs"] = {
+              "infeasibilityWitness": {
+                  "additionalProperties": False,
+                  "properties": {
+                      "target_id": {"minLength": 1, "type": "string"},
+                      "grammar_version": {"minLength": 1, "type": "string"},
+                      "constraint_ids": {
+                          "items": {"minLength": 1, "type": "string"},
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": True,
+                      },
+                      "proof_method": {
+                          "enum": [
+                              "exhaustive_enumeration",
+                              "typed_contradiction",
+                              "checked_unsat_core",
+                              "verified_pattern_reduction",
+                          ]
+                      },
+                      "unsat_core": {
+                          "items": {"minLength": 1, "type": "string"},
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": True,
+                      },
+                      "verifier_version": {"minLength": 1, "type": "string"},
+                      "witness_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string",
+                      },
+                  },
+                  "required": [
+                      "target_id",
+                      "grammar_version",
+                      "constraint_ids",
+                      "proof_method",
+                      "unsat_core",
+                      "verifier_version",
+                      "witness_digest",
+                  ],
+                  "type": "object",
+              }
+          }
+          item = schema["properties"]["targets"]["items"]
+          item["properties"]["infeasibility_witness"] = {
+              "anyOf": [
+                  {"$ref": "#/$defs/infeasibilityWitness"},
+                  {"type": "null"},
+              ]
+          }
+          item["allOf"] = [
+              {
+                  "if": {
+                      "properties": {
+                          "disposition": {"const": "machine_proven_infeasible"}
+                      },
+                      "required": ["disposition"],
+                  },
+                  "then": {
+                      "properties": {
+                          "infeasibility_witness": {
+                              "$ref": "#/$defs/infeasibilityWitness"
+                          },
+                          "minimum_count": {"const": 0},
+                      }
+                  },
+                  "else": {
+                      "properties": {"infeasibility_witness": {"type": "null"}}
+                  },
+              },
+              {
+                  "if": {
+                      "properties": {"disposition": {"const": "required"}},
+                      "required": ["disposition"],
+                  },
+                  "then": {
+                      "properties": {
+                          "minimum_count": {"minimum": 1},
+                          "search_budget": {
+                              "properties": {
+                                  "maximum_plan_attempts": {"minimum": 1},
+                                  "maximum_construction_attempts_per_plan": {
+                                      "minimum": 1
+                                  },
+                                  "maximum_oracle_attempts": {"minimum": 1},
+                                  "maximum_elapsed_milliseconds": {"minimum": 1},
+                              }
+                          },
+                      }
+                  },
+              },
+          ]
+          path.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n")
+
+          path = Path("specs/v0.4/mutation_risk_policy.schema.json")
+          schema = json.loads(path.read_text())
+          probability_pattern = r"^(?:0(?:\.\d+)?|1(?:\.0+)?)$"
+          schema["properties"]["confidence_level_decimal"]["pattern"] = probability_pattern
+          schema["properties"]["budgets"]["items"]["properties"][
+              "upper_confidence_bound_decimal"
+          ]["pattern"] = probability_pattern
+          path.write_text(json.dumps(schema, indent=2, sort_keys=True) + "\n")
+          PY
+      - run: ruff format .
+      - run: ruff check --fix .
+      - run: ruff format --check .
+      - run: ruff check .
+      - run: mypy src
+      - run: pytest
+      - name: Commit review corrections
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Harden frozen synthesis policy evidence"
+          git push origin HEAD:web/10-synthesis-contracts-v0.4
