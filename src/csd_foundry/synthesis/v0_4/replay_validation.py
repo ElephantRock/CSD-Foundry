@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import cast
 
 from csd_foundry.synthesis.v0_4.attempts import (
     AcceptedSampleReplay,
@@ -17,6 +18,7 @@ from csd_foundry.synthesis.v0_4.attempts import (
 )
 from csd_foundry.synthesis.v0_4.canonical_values import CanonicalArray, CanonicalObject
 from csd_foundry.synthesis.v0_4.choice_ledger import (
+    ChoiceLedger,
     ChoiceSession,
     ChoiceSessionError,
     ChoiceSessionState,
@@ -31,6 +33,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
 )
 from csd_foundry.synthesis.v0_4.choice_records import (
     BoundedIntegerChoiceRecord,
+    ChoiceRecord,
     WeightedChoiceRecord,
 )
 from csd_foundry.synthesis.v0_4.contracts import RejectionCause
@@ -42,6 +45,7 @@ from csd_foundry.synthesis.v0_4.generation_namespace import (
 from csd_foundry.synthesis.v0_4.identities import (
     EntityKind,
     IdentityLedger,
+    IdentityRecord,
     IdentityRequest,
 )
 from csd_foundry.synthesis.v0_4.replay import ReplayMismatchError, replay_choice_ledger
@@ -58,6 +62,7 @@ from csd_foundry.synthesis.v0_4.replay_vectors import (
     EXPECTED_REPLAY_DIGESTS,
     FROZEN_REPLAY_VECTOR_CATALOG_DIGEST,
     REPLAY_VECTOR_CATALOG,
+    REPLAY_VECTOR_IDS,
 )
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
@@ -154,7 +159,10 @@ def _session(attempt: AttemptKey, *, maximum_choices: int = 32) -> ChoiceSession
     )
 
 
-def _ledger(attempt: AttemptKey, order: tuple[str, ...] = ("bounded", "weighted", "ratio")):
+def _ledger(
+    attempt: AttemptKey,
+    order: tuple[str, ...] = ("bounded", "weighted", "ratio"),
+) -> ChoiceLedger:
     session = _session(attempt)
     typed_values = CanonicalArray((1, "1", True))
     for operation in order:
@@ -173,7 +181,9 @@ def _ledger(attempt: AttemptKey, order: tuple[str, ...] = ("bounded", "weighted"
     return session.freeze()
 
 
-def _identity_evidence(attempt: AttemptKey):
+def _identity_evidence(
+    attempt: AttemptKey,
+) -> tuple[tuple[IdentityRecord, ...], str]:
     ledger = IdentityLedger(_seed(), _namespace())
     ledger.allocate(
         IdentityRequest(
@@ -213,6 +223,7 @@ def _bundle(index: int, *, accepted: bool, sample_index: int) -> AttemptReplayBu
         choice_ledger_digest=ledger.canonical_digest,
         branch_facts=CanonicalObject.from_pairs((("accepted", accepted), ("attempt_index", index))),
     )
+    completion: AttemptAccepted | AttemptRejected
     if accepted:
         completion = AttemptAccepted(
             attempt_key=attempt,
@@ -358,6 +369,7 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
 
     cases += 1
     first_record = accepted.choice_ledger.records[0]
+    tampered_record: ChoiceRecord
     if type(first_record) is BoundedIntegerChoiceRecord:
         tampered_record = replace(first_record, upper_exclusive=first_record.upper_exclusive + 1)
     else:
@@ -420,7 +432,7 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
             sample_key=rejected_zero.attempt_key.sample_key,
             generation_namespace_digest=rejected_zero.generation_namespace_digest,
             attempt_range=AttemptRange(2),
-            rejected_attempts=(rejected_zero,),
+            rejected_attempts=(cast(AttemptRejected, rejected_zero),),
         )
     except AttemptReplayError:
         rejected += 1
@@ -429,7 +441,7 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
     session = _session(_attempt(0, sample_index=22))
     try:  # noqa: SIM105
         session.weighted_choice(
-            _path(session._attempt_key, "invalid"),  # type: ignore[attr-defined]
+            _path(session.attempt_key, "invalid"),
             CanonicalArray(("a", "b")),
             (1, 0),
         )
@@ -453,11 +465,18 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
 
     cases += 1
     try:
-        replace(
+        bad_identity_completion = replace(
             accepted.completion,
             identity_ledger_digest=canonical_sha256({"tampered": "identity"}),
         )
-        accepted.validate(_seed(), _namespace())
+        bad_identity_bundle = AttemptReplayBundle(
+            accepted.input_commitment,
+            bad_identity_completion,
+            accepted.search_branch,
+            accepted.choice_ledger,
+            accepted.identity_records,
+        )
+        bad_identity_bundle.validate(_seed(), _namespace())
     except (AttemptReplayError, ReplayMismatchError):
         rejected += 1
 
@@ -498,7 +517,7 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
     if not EXPECTED_REPLAY_DIGESTS:
         errors.append("replay version-1 expected digests are not frozen")
     else:
-        for vector_id in REPLAY_VECTOR_CATALOG["vector_ids"]:
+        for vector_id in REPLAY_VECTOR_IDS:
             if type(vector_id) is not str:
                 errors.append("replay vector IDs must be exact strings")
                 continue
@@ -530,10 +549,10 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
             allowed_namespace_prefix="fixture",
             budget=ChoiceBudget(1, 250_000),
         )
-        limited.bounded_integer(_path(limited._attempt_key, "one"), 2)  # type: ignore[attr-defined]
+        limited.bounded_integer(_path(limited.attempt_key, "one"), 2)
         try:
             limited.bounded_integer(
-                _path(limited._attempt_key, "two"),  # type: ignore[attr-defined]
+                _path(limited.attempt_key, "two"),
                 2,
             )
         except Exception:

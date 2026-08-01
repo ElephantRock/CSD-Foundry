@@ -214,6 +214,10 @@ class ChoiceSession:
         return self._state
 
     @property
+    def attempt_key(self) -> AttemptKey:
+        return self._attempt_key
+
+    @property
     def choice_count(self) -> int:
         return len(self._records)
 

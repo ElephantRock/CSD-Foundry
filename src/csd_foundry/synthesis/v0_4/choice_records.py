@@ -19,7 +19,11 @@ from csd_foundry.synthesis.v0_4.deterministic_choices import (
     BoundedIntegerResult,
     WeightedChoiceResult,
 )
-from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canonical_sha256
+from csd_foundry.synthesis.v0_4.serialization import (
+    JSONValue,
+    canonical_json_bytes,
+    canonical_sha256,
+)
 
 CHOICE_RECORD_SCHEMA_VERSION = "csd-choice-record/0.4"
 _HEX_256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -375,7 +379,7 @@ def record_from_weighted_result(
     seed_commitment: str,
     values: CanonicalArray,
     weights: tuple[int, ...],
-    result: WeightedChoiceResult[object],
+    result: WeightedChoiceResult[JSONValue],
 ) -> WeightedChoiceRecord:
     if type(result) is not WeightedChoiceResult:
         raise ChoiceRecordError("weighted results must use the exact primitive result class")

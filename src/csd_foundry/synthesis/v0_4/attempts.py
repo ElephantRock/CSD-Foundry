@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 from csd_foundry.synthesis.v0_4.canonical_values import CanonicalObject
 from csd_foundry.synthesis.v0_4.choice_paths import AttemptKey, AttemptRange, SampleKey
 from csd_foundry.synthesis.v0_4.contracts import RejectionCause, RejectionOwner
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
+
+if TYPE_CHECKING:
+    from csd_foundry.synthesis.v0_4.exhaustion import ExhaustionEvidence
 
 ATTEMPT_REPLAY_SCHEMA_VERSION = "csd-attempt-replay/0.4"
 ATTEMPT_REJECTION_SCHEMA_VERSION = "csd-attempt-rejection/0.4"
@@ -304,7 +307,7 @@ class IncompleteAttemptPrefix:
 def resolve_attempt_prefix(
     attempt_range: AttemptRange,
     completions: tuple[AttemptCompletion, ...],
-) -> AcceptedSampleReplay | IncompleteAttemptPrefix | object:
+) -> AcceptedSampleReplay | IncompleteAttemptPrefix | ExhaustionEvidence:
     """Resolve an exact lowest-valid prefix without ignoring malformed evidence."""
 
     if type(attempt_range) is not AttemptRange:
@@ -358,7 +361,7 @@ def resolve_attempt_prefix(
         return AcceptedSampleReplay(
             sample_key=sample_key,
             attempt_range=attempt_range,
-            rejected_prefix=tuple(rejected),
+            rejected_prefix=cast(tuple[AttemptRejected, ...], rejected),
             accepted_attempt=accepted,
         )
 
@@ -372,9 +375,9 @@ def resolve_attempt_prefix(
 
     from csd_foundry.synthesis.v0_4.exhaustion import ExhaustionEvidence
 
-    rejected_attempts = tuple(ordered)
-    if not all(type(item) is AttemptRejected for item in rejected_attempts):
+    if not all(type(item) is AttemptRejected for item in ordered):
         raise AttemptReplayError("complete exhaustion may contain only rejections")
+    rejected_attempts = cast(tuple[AttemptRejected, ...], ordered)
     return ExhaustionEvidence(
         sample_key=sample_key,
         generation_namespace_digest=namespace_digest,

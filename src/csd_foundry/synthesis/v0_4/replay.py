@@ -64,16 +64,16 @@ def _replayed_record(
         raise ReplayMismatchError("choice record generation namespace does not match")
 
     if type(record) is BoundedIntegerChoiceRecord:
-        result = bounded_integer(seed, record.path, record.upper_exclusive)
+        bounded_result = bounded_integer(seed, record.path, record.upper_exclusive)
         return record_from_bounded_result(
             path=record.path,
             generation_namespace_digest=namespace.digest,
             seed_commitment=seed.commitment,
             upper_exclusive=record.upper_exclusive,
-            result=result,
+            result=bounded_result,
         )
     if type(record) is WeightedChoiceRecord:
-        result = weighted_choice(
+        weighted_result = weighted_choice(
             seed,
             record.path,
             record.values.to_json_value(),
@@ -85,10 +85,10 @@ def _replayed_record(
             seed_commitment=seed.commitment,
             values=record.values,
             weights=record.weights,
-            result=result,
+            result=weighted_result,
         )
     if type(record) is BooleanRatioChoiceRecord:
-        result = choose_ratio(
+        boolean_result = choose_ratio(
             seed,
             record.path,
             record.numerator,
@@ -100,7 +100,7 @@ def _replayed_record(
             seed_commitment=seed.commitment,
             numerator=record.numerator,
             denominator=record.denominator,
-            result=result,
+            result=boolean_result,
         )
     raise ReplayMismatchError("unsupported or non-exact choice record type")
 
