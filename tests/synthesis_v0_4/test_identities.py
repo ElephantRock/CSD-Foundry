@@ -70,7 +70,7 @@ def test_identity_release_report_is_valid_and_provisional() -> None:
     assert report.vectors_passed == 6
     assert report.vector_catalog_digest == FROZEN_IDENTITY_VECTOR_CATALOG_DIGEST
     assert report.canonical_type_separation
-    assert report.invalid_canonical_values_rejected == 8
+    assert report.invalid_canonical_values_rejected == 10
     assert report.volume_policy_status == "provisional"
     assert not report.to_dict()["release_scale_claimed"]
 

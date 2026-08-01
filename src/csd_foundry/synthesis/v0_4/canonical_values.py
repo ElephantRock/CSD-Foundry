@@ -79,7 +79,9 @@ class CanonicalObject:
         if type(self.fields) is not tuple:
             raise CanonicalValueError("canonical object fields must be an immutable tuple")
         if not all(type(field) is CanonicalField for field in self.fields):
-            raise CanonicalValueError("canonical object fields must contain exact CanonicalField values")
+            raise CanonicalValueError(
+                "canonical object fields must contain exact CanonicalField values"
+            )
         names = tuple(field.name for field in self.fields)
         if len(names) != len(set(names)):
             raise CanonicalValueError("canonical object field names must be unique")

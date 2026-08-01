@@ -236,10 +236,7 @@ def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
         "target_definition_digest",
     )
     namespace = build_generation_namespace(target_digest)
-    requests = tuple(
-        _request_from_vector(vector)
-        for vector in KNOWN_ANSWER_IDENTITY_VECTORS[:3]
-    )
+    requests = tuple(_request_from_vector(vector) for vector in KNOWN_ANSWER_IDENTITY_VECTORS[:3])
     forward = IdentityLedger(seed, namespace)
     reverse = IdentityLedger(seed, namespace)
     for request in requests:
@@ -352,9 +349,7 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
         try:
             validate_identity_policy_document()
             if catalog_digest != FROZEN_IDENTITY_VECTOR_CATALOG_DIGEST:
-                raise ValueError(
-                    "identity vector catalog differs from frozen version-1 digest"
-                )
+                raise ValueError("identity vector catalog differs from frozen version-1 digest")
             seed = RootSeed.from_hex(
                 KNOWN_ANSWER_IDENTITY_SEED_HEX,
                 SeedProvenance.KNOWN_ANSWER_FIXTURE,
@@ -370,9 +365,7 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
                 )
                 expected = vector["expected"]
                 if not isinstance(expected, dict) or actual.to_json_value() != expected:
-                    raise ValueError(
-                        f"identity vector failed: {_exact_str(vector, 'vector_id')}"
-                    )
+                    raise ValueError(f"identity vector failed: {_exact_str(vector, 'vector_id')}")
                 vectors_passed += 1
             canonical_type_separation, invalid_rejected = _canonical_assurance()
             (
@@ -388,9 +381,7 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
     if not canonical_type_separation:
         errors.append("canonical integer, string, and Boolean values are not separated")
     if invalid_rejected != 10:
-        errors.append(
-            "canonical-value rejection campaign did not kill every invalid input"
-        )
+        errors.append("canonical-value rejection campaign did not kill every invalid input")
     if not allocation_order_stable:
         errors.append("identity ledger digest depends on allocation order")
     if not duplicate_role_rejected:
@@ -402,16 +393,9 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
     if not display_collision_rejected:
         errors.append("injected display identity collision was accepted")
     if not policy_satisfied:
-        errors.append(
-            "128-bit display identity exceeds the exact collision-risk ceiling"
-        )
-    if (
-        PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count
-        != PROVISIONAL_DESIGN_IDENTITY_CEILING
-    ):
-        errors.append(
-            "provisional per-kind identity counts do not match the design envelope"
-        )
+        errors.append("128-bit display identity exceeds the exact collision-risk ceiling")
+    if PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count != PROVISIONAL_DESIGN_IDENTITY_CEILING:
+        errors.append("provisional per-kind identity counts do not match the design envelope")
 
     return IdentityValidationReport(
         release=release,
