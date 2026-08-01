@@ -37,15 +37,20 @@ validation_path.write_text(validation, encoding="utf-8")
 vectors_path = ROOT / "src/csd_foundry/synthesis/v0_4/publication_vectors.py"
 lines = vectors_path.read_text(encoding="utf-8").splitlines()
 normalized: list[str] = []
+in_expected_mapping = False
 for line in lines:
-    if (
-        line.startswith('    "')
-        and '": "' in line
-        and line.endswith('",')
-        and len(line) > 100
-    ):
-        key, value = line.strip().removesuffix(",").split(": ", 1)
-        normalized.extend((f"    {key}: (", f"        {value}", "    ),"))
-    else:
+    if line == "EXPECTED_PUBLICATION_DIGESTS: dict[str, str] = {":
+        in_expected_mapping = True
         normalized.append(line)
+        continue
+    if in_expected_mapping and line == "}":
+        in_expected_mapping = False
+        normalized.append(line)
+        continue
+    if in_expected_mapping:
+        stripped = line.strip()
+        key, value = stripped.removesuffix(",").split(": ", 1)
+        normalized.extend((f"    {key}: (", f"        {value}", "    ),"))
+        continue
+    normalized.append(line)
 vectors_path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
