@@ -6,7 +6,8 @@ training records, and evaluation evidence.
 
 ## Status
 
-**Temporal and Governance Kernel v0.3**. The repository contains:
+**Temporal and Governance Kernel v0.3 with the v0.4 synthesis contract foundation**. The
+repository contains:
 
 - a typed CSD kernel for dependency invalidation, basis survival, restoration, retirement,
   logical time, expiry, profile changes, reassessment requests, and heartbeat obligations;
@@ -15,11 +16,15 @@ training records, and evaluation evidence.
 - transition, sequence, multi-control, observation, and rejected-transition case types;
 - ten deterministic temporal/governance scenarios with complete replay evidence;
 - legacy and temporal mutation kill-matrix evaluators;
+- typed v0.4 synthesis targets, rejection causes, search budgets, completeness witnesses,
+  structural holdout rules, mutation severity, and deterministic serialization policies;
 - the immutable CSD Reasoning Seed v0.1 and its original generator and validator.
 
 The included seed remains an unbenchmarked synthetic seed. Passing validation establishes
 coverage relative to the encoded CSD semantics; it does not prove real-world dependency
-completeness, model generalization, scheduler fairness, or production safety.
+completeness, model generalization, scheduler fairness, or production safety. The v0.4 contract
+validator intentionally reports that release-scale generation is blocked until performance and
+stochastic mutation-risk policies are empirically frozen.
 
 ## Architecture
 
@@ -36,7 +41,11 @@ independent state, transition, and event verification
         ↓
 invariant-targeted mutations and kill matrices
         ↓
-constraint-valid state/event sampling
+versioned joint coverage and synthesis contracts
+        ↓
+constraint-valid state/event planning and construction
+        ↓
+structural canonicalization and holdout assignment
         ↓
 natural-language rendering
         ↓
@@ -59,13 +68,16 @@ csd-foundry scenarios validate --release v0.1
 csd-foundry mutations evaluate --release v0.1
 csd-foundry temporal validate --release v0.3
 csd-foundry temporal mutations --release v0.3
+csd-foundry synthesize contracts --release v0.4
 python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
 ```
 
 The scenario validator enforces exact agreement between the immutable manifest and executable
 registry. The temporal validator executes canonical logical-time and governance trajectories,
 retains complete ordered oracle results, checks full replay identity, and verifies exact event
-consequences.
+consequences. The synthesis contract validator checks the v0.4 target catalog, rejection
+ownership, machine-checkable infeasibility boundary, search budgets, completeness evidence,
+structural holdout grammar, severity policy, and integer-only canonical serialization.
 
 ## Current coverage
 
@@ -82,13 +94,19 @@ Retained oracle transition steps:      16
 Temporal targeted mutations killed:  23 / 23
 Temporal mutation escapes:              0
 Valid canonical trajectories rejected:  0
+
+v0.4 synthesis targets:                 5
+Required synthesis targets:             4
+Exploratory synthesis targets:           1
+Unresolved synthesis targets:            0
 ```
 
-Machine-readable evidence is committed at:
+Machine-readable evidence and specifications are committed at:
 
 - `reports/scenario_coverage_v0.2.json`
 - `reports/temporal_kernel_coverage_v0.3.json`
 - `reports/mutation_policy_v0.3.json`
+- `specs/v0.4/`
 
 ## Temporal and governance semantics
 
@@ -113,25 +131,42 @@ require I3 authority in both transition execution and independent verification. 
 must target known requests that are pending in the pre-state. Every temporal/governance event
 must preserve unrelated historical state and append its exact canonical audit record.
 
+## v0.4 synthesis contract boundary
+
+The v0.4 contract layer distinguishes target contradiction, planner budget exhaustion, state
+construction failure, sampler precondition failure, kernel failure, verifier failure, replay
+divergence, canonicalization divergence, holdout conflict, mutation outcomes, duplicate
+anomalies, and release serialization failure. Each cause has one stable subsystem owner.
+
+Targets may be required, exploratory, machine-proven infeasible, or unresolved. Search exhaustion
+is never treated as proof of infeasibility. Machine-proven infeasibility requires an explicit
+witness using an approved proof method. Semantic generation decisions prohibit floating-point
+values; statistical thresholds are exact decimal strings until calibrated and frozen.
+
+See `docs/SYNTHESIS_V0_4_CONTRACTS.md` for the contract and claim boundary.
+
 ## Project layout
 
 ```text
-src/csd_foundry/kernel/          State, events, transitions, invariants, oracle
-src/csd_foundry/scenarios/       Typed scenario contracts, registry, release runner
-src/csd_foundry/scenarios/v0_1/  Manifest-complete v0.1 scenario definitions
-src/csd_foundry/temporal/        Canonical temporal/governance release scenarios
-src/csd_foundry/synthesis/       Legacy and temporal mutation evaluation
-src/csd_foundry/fixtures/v0_1/   Compatibility fixtures for the bootstrap API
-scripts/                         Seed generation and validation utilities
-data/seed/v0.1/                  Immutable v0.1 seed release
-reports/                         Machine-readable coverage and release evidence
-tests/                           Kernel, registry, temporal, mutation, and determinism tests
+src/csd_foundry/kernel/             State, events, transitions, invariants, oracle
+src/csd_foundry/scenarios/          Typed scenario contracts, registry, release runner
+src/csd_foundry/scenarios/v0_1/     Manifest-complete v0.1 scenario definitions
+src/csd_foundry/temporal/           Canonical temporal/governance release scenarios
+src/csd_foundry/synthesis/          Mutation evaluation and v0.4 synthesis contracts
+src/csd_foundry/synthesis/v0_4/     Typed targets, policies, serialization, validation
+src/csd_foundry/fixtures/v0_1/      Compatibility fixtures for the bootstrap API
+specs/v0.4/                         Reviewable synthesis policy and schema documents
+scripts/                            Seed generation and validation utilities
+data/seed/v0.1/                     Immutable v0.1 seed release
+reports/                            Machine-readable coverage and release evidence
+tests/                              Kernel, registry, temporal, mutation, and synthesis tests
 ```
 
 ## Explicit boundaries
 
 The current implementation does not establish:
 
+- a complete trajectory planner or state/event constructor;
 - fairness or liveness of a real scheduler;
 - completeness of real-world dependency declarations;
 - correspondence between encoded evidence and external truth;
@@ -142,12 +177,13 @@ These remain release boundaries rather than inferred capabilities.
 
 ## Immediate roadmap
 
-1. Build constraint-valid state and event samplers.
-2. Generate canonical multi-event trajectories from sampled states.
-3. Derive one mutation operator per invariant family with release thresholds.
-4. Render verified trajectories into SFT, preference, critique, and evaluation records.
-5. Create topology, composition, temporal, and surface holdouts.
-6. Benchmark base, SFT, and preference-trained models against the executable oracle.
+1. Implement hash-derived integer choices and deterministic identities.
+2. Add the performance benchmark harness and freeze reference SLOs.
+3. Build the joint coverage planner with retry budgets and infeasibility witnesses.
+4. Build constraint-valid state and event constructors with eligibility proofs.
+5. Generate complete oracle-replayed trajectories.
+6. Add structural canonicalization, holdouts, completeness fuzzing, and mutation-risk campaigns.
+7. Compile the reproducible 100,000-trajectory v0.4 release.
 
 ## Claim boundary
 
