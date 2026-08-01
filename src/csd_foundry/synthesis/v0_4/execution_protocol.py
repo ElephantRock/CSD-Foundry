@@ -469,7 +469,7 @@ def validate_failure_chain(
     return receipts
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class OperationalExhaustionRecord:
     execution_run_id: str
     inventory_digest: str
@@ -521,20 +521,69 @@ class OperationalExhaustionRecord:
         )
 
     @classmethod
+    def _from_validated_evidence(
+        cls,
+        *,
+        execution_run_id: str,
+        inventory_digest: str,
+        attempt_key: AttemptKey,
+        retry_policy_digest: str,
+        maximum_operational_retries: int,
+        failure_receipt_digests: tuple[str, ...],
+        total_execution_count: int,
+        final_reason_code: str,
+    ) -> OperationalExhaustionRecord:
+        if cls is not OperationalExhaustionRecord:
+            raise ExecutionProtocolError("operational exhaustion construction requires exact class")
+        record = object.__new__(OperationalExhaustionRecord)
+        object.__setattr__(record, "execution_run_id", execution_run_id)
+        object.__setattr__(record, "inventory_digest", inventory_digest)
+        object.__setattr__(record, "attempt_key", attempt_key)
+        object.__setattr__(record, "retry_policy_digest", retry_policy_digest)
+        object.__setattr__(record, "maximum_operational_retries", maximum_operational_retries)
+        object.__setattr__(record, "failure_receipt_digests", failure_receipt_digests)
+        object.__setattr__(record, "total_execution_count", total_execution_count)
+        object.__setattr__(record, "final_reason_code", final_reason_code)
+        object.__setattr__(record, "schema_version", OPERATIONAL_EXHAUSTION_SCHEMA_VERSION)
+        record.__post_init__()
+        return record
+
+    @classmethod
     def from_failure_chain(
         cls,
+        inventory: ExecutionInventory,
         policy: OperationalRetryPolicy,
         receipts: tuple[OperationalFailureReceipt, ...],
     ) -> OperationalExhaustionRecord:
         if cls is not OperationalExhaustionRecord:
             raise ExecutionProtocolError("operational exhaustion construction requires exact class")
+        if type(inventory) is not ExecutionInventory:
+            raise ExecutionProtocolError("operational exhaustion requires an exact inventory")
+        if type(policy) is not OperationalRetryPolicy:
+            raise ExecutionProtocolError("operational exhaustion requires an exact retry policy")
+        if inventory.operational_retry_policy_digest != policy.digest:
+            raise ExecutionProtocolError("retry policy does not match the inventory commitment")
         validated = validate_failure_chain(policy, receipts)
         if len(validated) != policy.maximum_total_executions:
             raise ExecutionProtocolError(
                 "operational exhaustion requires every permitted execution"
             )
         final = validated[-1]
-        return cls(
+        if final.inventory_digest != inventory.digest:
+            raise ExecutionProtocolError("failure chain does not belong to the committed inventory")
+        matching_specs = tuple(
+            spec for spec in inventory.samples if spec.sample_key == final.attempt_key.sample_key
+        )
+        if len(matching_specs) != 1:
+            raise ExecutionProtocolError(
+                "operational exhaustion attempt is absent from the inventory"
+            )
+        sample_spec = matching_specs[0]
+        if not sample_spec.attempt_range.contains(final.attempt_key.attempt_index):
+            raise ExecutionProtocolError(
+                "operational exhaustion attempt is outside the inventory attempt range"
+            )
+        return cls._from_validated_evidence(
             execution_run_id=final.execution_run_id,
             inventory_digest=final.inventory_digest,
             attempt_key=final.attempt_key,
@@ -547,10 +596,11 @@ class OperationalExhaustionRecord:
 
     def validate_against(
         self,
+        inventory: ExecutionInventory,
         policy: OperationalRetryPolicy,
         receipts: tuple[OperationalFailureReceipt, ...],
     ) -> None:
-        expected = type(self).from_failure_chain(policy, receipts)
+        expected = type(self).from_failure_chain(inventory, policy, receipts)
         if self != expected:
             raise ExecutionProtocolError(
                 "operational exhaustion record does not match its evidence"

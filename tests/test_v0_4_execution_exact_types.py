@@ -78,24 +78,12 @@ def test_constant_versions_reject_subclasses_and_booleans() -> None:
         replace(_inventory(), validation_policy_version=True)
 
 
-def test_direct_operational_exhaustion_binds_retry_policy_digest() -> None:
+def test_direct_operational_exhaustion_requires_validated_evidence() -> None:
     policy = OperationalRetryPolicy(0)
     attempt_key = AttemptKey(SampleKey("v0.4", "exact-types", 0), 0)
     receipt_digest = canonical_sha256({"receipt": 0})
 
-    with pytest.raises(ExecutionProtocolError):
-        OperationalExhaustionRecord(
-            execution_run_id="run-v1",
-            inventory_digest=canonical_sha256({"inventory": 1}),
-            attempt_key=attempt_key,
-            retry_policy_digest=canonical_sha256({"wrong-policy": True}),
-            maximum_operational_retries=0,
-            failure_receipt_digests=(receipt_digest,),
-            total_execution_count=1,
-            final_reason_code="timeout",
-        )
-
-    with pytest.raises(ExecutionProtocolError):
+    with pytest.raises(TypeError):
         OperationalExhaustionRecord(
             execution_run_id="run-v1",
             inventory_digest=canonical_sha256({"inventory": 1}),
@@ -103,6 +91,6 @@ def test_direct_operational_exhaustion_binds_retry_policy_digest() -> None:
             retry_policy_digest=policy.digest,
             maximum_operational_retries=0,
             failure_receipt_digests=(receipt_digest,),
-            total_execution_count=True,
+            total_execution_count=1,
             final_reason_code="timeout",
         )

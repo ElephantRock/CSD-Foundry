@@ -191,8 +191,8 @@ def test_failure_receipts_form_one_contiguous_hash_chain() -> None:
 
 def test_operational_exhaustion_requires_every_permitted_execution() -> None:
     receipts = _receipts()
-    exhaustion = OperationalExhaustionRecord.from_failure_chain(_policy(), receipts)
-    exhaustion.validate_against(_policy(), receipts)
+    exhaustion = OperationalExhaustionRecord.from_failure_chain(_inventory(), _policy(), receipts)
+    exhaustion.validate_against(_inventory(), _policy(), receipts)
     assert exhaustion.total_execution_count == 3
     assert exhaustion.final_reason_code == "process-exit"
     assert not hasattr(exhaustion, "rejection")

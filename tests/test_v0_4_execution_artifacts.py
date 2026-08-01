@@ -64,3 +64,28 @@ def test_execution_schema_contains_every_current_contract() -> None:
         "requiredSchemaVersions",
         "sampleExecutionSpec",
     } <= set(definitions)
+
+
+def test_execution_schema_matches_runtime_bounds_and_canonical_values() -> None:
+    document = _load("specs/v0.4/execution_protocol.schema.json")
+    assert type(document) is dict
+    definitions = document["$defs"]
+    assert type(definitions) is dict
+    attempt_index = definitions["attemptKey"]["properties"]["attempt_index"]
+    assert attempt_index == {"maximum": 4294967295, "minimum": 0, "type": "integer"}
+    assert definitions["operationalFailure"]["properties"]["reason_facts"] == {
+        "$ref": "#/$defs/canonicalValue"
+    }
+    assert definitions["inventorySupersession"]["properties"]["reason_facts"] == {
+        "$ref": "#/$defs/canonicalValue"
+    }
+    canonical_variants = definitions["canonicalValue"]["oneOf"]
+    assert {variant.get("type") for variant in canonical_variants} == {
+        "array",
+        "boolean",
+        "integer",
+        "null",
+        "object",
+        "string",
+    }
+    assert all(variant.get("type") != "number" for variant in canonical_variants)

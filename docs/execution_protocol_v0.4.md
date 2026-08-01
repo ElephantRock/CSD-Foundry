@@ -63,8 +63,10 @@ Every failed execution emits an immutable `OperationalFailureReceipt`. Receipts 
 one run, inventory, and attempt, use contiguous execution ordinals, and form a previous-digest
 hash chain.
 
-After every permitted execution fails, the system emits an `OperationalExhaustionRecord`
-committing the complete failure-receipt chain. Operational exhaustion terminates rescheduling
+After every permitted execution fails, the system constructs an
+`OperationalExhaustionRecord` only through the inventory-bound failure-chain factory. The
+factory verifies the inventory digest, committed retry policy, sample membership, attempt
+range, and complete previous-digest chain before evidence can be serialized or committed. Operational exhaustion terminates rescheduling
 for that attempt but remains nonsemantic: it is not `AttemptRejected`, `ExhaustionEvidence`,
 or an infeasibility witness. A later reconciler must classify the attempt as semantically
 missing and release sealing must remain blocked.

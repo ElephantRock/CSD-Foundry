@@ -176,7 +176,7 @@ def _supersession() -> InventorySupersessionRecord:
 def generate_execution_protocol_digests() -> dict[str, str]:
     inventory = _inventory()
     policy = _retry_policy()
-    exhaustion = OperationalExhaustionRecord.from_failure_chain(policy, _failure_chain())
+    exhaustion = OperationalExhaustionRecord.from_failure_chain(inventory, policy, _failure_chain())
     return {
         "execution-inventory": inventory.digest,
         "inventory-supersession": _supersession().digest,
@@ -261,7 +261,9 @@ def validate_execution_protocol(release: str) -> ExecutionProtocolValidationRepo
     except ExecutionProtocolError:
         failure_chain_enforced = True
 
-    exhaustion = OperationalExhaustionRecord.from_failure_chain(_retry_policy(), receipts)
+    exhaustion = OperationalExhaustionRecord.from_failure_chain(
+        inventory, _retry_policy(), receipts
+    )
     operational_exhaustion_nonsemantic = not any(
         hasattr(exhaustion, field_name)
         for field_name in ("rejection", "planner_handoff", "to_infeasibility_witness")
