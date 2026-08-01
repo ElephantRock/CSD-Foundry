@@ -36,21 +36,26 @@ validation_path.write_text(validation, encoding="utf-8")
 
 vectors_path = ROOT / "src/csd_foundry/synthesis/v0_4/publication_vectors.py"
 lines = vectors_path.read_text(encoding="utf-8").splitlines()
-normalized: list[str] = []
-in_expected_mapping = False
-for line in lines:
-    if line == "EXPECTED_PUBLICATION_DIGESTS: dict[str, str] = {":
-        in_expected_mapping = True
-        normalized.append(line)
-        continue
-    if in_expected_mapping and line == "}":
-        in_expected_mapping = False
-        normalized.append(line)
-        continue
-    if in_expected_mapping:
-        stripped = line.strip()
-        key, value = stripped.removesuffix(",").split(": ", 1)
-        normalized.extend((f"    {key}: (", f"        {value}", "    ),"))
-        continue
-    normalized.append(line)
+start = lines.index("EXPECTED_PUBLICATION_DIGESTS: dict[str, str] = {")
+end = lines.index("}", start)
+entries: list[tuple[str, str]] = []
+for line in lines[start + 1 : end]:
+    key, value = line.strip().removesuffix(",").split(": ", 1)
+    entries.append((key, value))
+
+constant_lines: list[str] = []
+mapping_lines = ["EXPECTED_PUBLICATION_DIGESTS: dict[str, str] = {"]
+for index, (key, value) in enumerate(entries):
+    name = f"_EXPECTED_PUBLICATION_DIGEST_{index}"
+    constant_lines.extend((f"{name} = (", f"    {value}", ")"))
+    mapping_lines.append(f"    {key}: {name},")
+mapping_lines.append("}")
+
+normalized = (
+    lines[:start]
+    + constant_lines
+    + [""]
+    + mapping_lines
+    + lines[end + 1 :]
+)
 vectors_path.write_text("\n".join(normalized) + "\n", encoding="utf-8")
