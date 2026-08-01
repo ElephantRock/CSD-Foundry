@@ -8,6 +8,11 @@ from decimal import Decimal
 from enum import StrEnum
 
 from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS
+from csd_foundry.synthesis.v0_4.choice_paths import (
+    ChoiceValidationError,
+    RootSeed,
+    SeedProvenance,
+)
 
 
 class ContractValidationError(ValueError):
@@ -586,6 +591,7 @@ class ReleasePolicy:
     pilot_trajectory_count: int
     maximum_trajectory_steps: int
     root_seed: str
+    root_seed_provenance: str
     rng_algorithm: str
     rng_version: str
     choice_path_schema_version: str
@@ -598,12 +604,32 @@ class ReleasePolicy:
         for field_name, value in (
             ("release", self.release),
             ("root_seed", self.root_seed),
+            ("root_seed_provenance", self.root_seed_provenance),
             ("rng_algorithm", self.rng_algorithm),
             ("rng_version", self.rng_version),
             ("choice_path_schema_version", self.choice_path_schema_version),
             ("split_hash_salt", self.split_hash_salt),
         ):
             _require_text(value, field_name)
+        try:
+            release_seed = RootSeed.from_hex(
+                self.root_seed,
+                SeedProvenance(self.root_seed_provenance),
+            )
+        except (ChoiceValidationError, ValueError) as exc:
+            raise ContractValidationError(f"invalid release root seed: {exc}") from exc
+        if not release_seed.release_eligible:
+            raise ContractValidationError(
+                "release root seed requires uniform-random-256 provenance"
+            )
+        if self.rng_algorithm != "csd-choice-hmac-sha256-rejection":
+            raise ContractValidationError(
+                "release policy must use the normative HMAC choice algorithm"
+            )
+        if self.rng_version != "1":
+            raise ContractValidationError("release policy rng_version must be 1")
+        if self.choice_path_schema_version != "csd-choice-path/0.4":
+            raise ContractValidationError("unsupported choice path schema version")
         if self.target_trajectory_count <= 0 or self.pilot_trajectory_count <= 0:
             raise ContractValidationError("release and pilot trajectory counts must be positive")
         if self.pilot_trajectory_count >= self.target_trajectory_count:

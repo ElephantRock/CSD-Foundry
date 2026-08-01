@@ -29,6 +29,7 @@ jobs:
       - run: csd-foundry temporal validate --release v0.3
       - run: csd-foundry temporal mutations --release v0.3
       - run: csd-foundry synthesize contracts --release v0.4
+      - run: csd-foundry synthesize determinism --release v0.4
       - run: csd-foundry demo > /tmp/csd-foundry-demo.json && test -s /tmp/csd-foundry-demo.json
       - run: pip wheel . --no-deps --wheel-dir /tmp/csd-wheelhouse
       - name: Validate installed wheel outside the repository
@@ -40,7 +41,9 @@ jobs:
           /tmp/csd-installed/bin/csd-foundry temporal validate --release v0.3 > temporal-report.json
           /tmp/csd-installed/bin/csd-foundry temporal mutations --release v0.3 > mutation-report.json
           /tmp/csd-installed/bin/csd-foundry synthesize contracts --release v0.4 > contracts-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize determinism --release v0.4 > determinism-report.json
           test -s scenario-report.json
           test -s temporal-report.json
           test -s mutation-report.json
           test -s contracts-report.json
+          test -s determinism-report.json

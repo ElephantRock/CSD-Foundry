@@ -1,0 +1,22 @@
+{
+  "algorithm_id": "csd-choice-hmac-sha256-rejection",
+  "algorithm_version": 1,
+  "attempt_index_encoding": "uint32",
+  "block_counter_encoding": "uint64-big-endian",
+  "candidate_byte_order": "big-endian",
+  "collision_risk_ceiling_denominator": 100000000000000000000000000,
+  "collision_risk_ceiling_numerator": 15,
+  "design_identity_ceiling": 10000000,
+  "digest_primitive": "hmac-sha256",
+  "display_digest_bits": 128,
+  "draw_counter_encoding": "uint64-big-endian",
+  "identity_schema_version": "csd-identity/0.4",
+  "maximum_attempt_index": 4294967295,
+  "path_schema_version": "csd-choice-path/0.4",
+  "release": "v0.4",
+  "release_seed_encoding": "lowercase-hex",
+  "release_seed_provenance": "uniform-random-256",
+  "root_seed_bytes": 32,
+  "schema_version": "0.4.0",
+  "semantic_floating_point_permitted": false
+}

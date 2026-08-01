@@ -69,6 +69,7 @@ csd-foundry mutations evaluate --release v0.1
 csd-foundry temporal validate --release v0.3
 csd-foundry temporal mutations --release v0.3
 csd-foundry synthesize contracts --release v0.4
+csd-foundry synthesize determinism --release v0.4
 python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
 ```
 
@@ -177,7 +178,7 @@ These remain release boundaries rather than inferred capabilities.
 
 ## Immediate roadmap
 
-1. Implement hash-derived integer choices and deterministic identities.
+1. Complete deterministic identities and shard-independent replay on the frozen HMAC choice substrate.
 2. Add the performance benchmark harness and freeze reference SLOs.
 3. Build the joint coverage planner with retry budgets and infeasibility witnesses.
 4. Build constraint-valid state and event constructors with eligibility proofs.

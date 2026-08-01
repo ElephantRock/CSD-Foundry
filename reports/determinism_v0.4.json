@@ -1,0 +1,18 @@
+{
+  "algorithm_id": "csd-choice-hmac-sha256-rejection",
+  "algorithm_version": 1,
+  "claim_boundary": "This report validates the frozen deterministic choice algorithm and known-answer vectors. It does not establish entity identity allocation, production shard orchestration, planner completeness, state construction, or release-scale output.",
+  "errors": [],
+  "forced_redraw_vectors": 1,
+  "known_answer_vectors": 7,
+  "maximum_attempt_index": 4294967295,
+  "multi_block_vectors": 1,
+  "multiple_redraw_vectors": 1,
+  "release": "v0.4",
+  "release_scale_claimed": false,
+  "release_seed_valid": true,
+  "status": "valid",
+  "typed_segment_separation": true,
+  "vector_catalog_digest": "b82da1b55b3bd5cb45369018b9b3fc227c8a2d8c727af0df2c9f950f7bfb7a60",
+  "vectors_passed": 7
+}

@@ -1,0 +1,91 @@
+{
+  "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/choice_algorithm.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "algorithm_id": {
+      "const": "csd-choice-hmac-sha256-rejection"
+    },
+    "algorithm_version": {
+      "const": 1
+    },
+    "attempt_index_encoding": {
+      "const": "uint32"
+    },
+    "block_counter_encoding": {
+      "const": "uint64-big-endian"
+    },
+    "candidate_byte_order": {
+      "const": "big-endian"
+    },
+    "collision_risk_ceiling_denominator": {
+      "const": 100000000000000000000000000
+    },
+    "collision_risk_ceiling_numerator": {
+      "const": 15
+    },
+    "design_identity_ceiling": {
+      "const": 10000000
+    },
+    "digest_primitive": {
+      "const": "hmac-sha256"
+    },
+    "display_digest_bits": {
+      "const": 128
+    },
+    "draw_counter_encoding": {
+      "const": "uint64-big-endian"
+    },
+    "identity_schema_version": {
+      "const": "csd-identity/0.4"
+    },
+    "maximum_attempt_index": {
+      "const": 4294967295
+    },
+    "path_schema_version": {
+      "const": "csd-choice-path/0.4"
+    },
+    "release": {
+      "const": "v0.4"
+    },
+    "release_seed_encoding": {
+      "const": "lowercase-hex"
+    },
+    "release_seed_provenance": {
+      "const": "uniform-random-256"
+    },
+    "root_seed_bytes": {
+      "const": 32
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    },
+    "semantic_floating_point_permitted": {
+      "const": false
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "algorithm_id",
+    "algorithm_version",
+    "digest_primitive",
+    "root_seed_bytes",
+    "release_seed_encoding",
+    "release_seed_provenance",
+    "path_schema_version",
+    "identity_schema_version",
+    "draw_counter_encoding",
+    "block_counter_encoding",
+    "attempt_index_encoding",
+    "maximum_attempt_index",
+    "candidate_byte_order",
+    "display_digest_bits",
+    "design_identity_ceiling",
+    "collision_risk_ceiling_numerator",
+    "collision_risk_ceiling_denominator",
+    "semantic_floating_point_permitted"
+  ],
+  "title": "CSD Foundry v0.4 Deterministic Choice Algorithm",
+  "type": "object"
+}
