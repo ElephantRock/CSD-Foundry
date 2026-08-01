@@ -24,6 +24,12 @@ from csd_foundry.synthesis.v0_4.identities import (
     canonical_identity_material,
     derive_identity,
 )
+from csd_foundry.synthesis.v0_4.identity_policy import (
+    IdentityKindVolume,
+    IdentityVolumeEnvelope,
+    RationalBound,
+    per_kind_collision_bound,
+)
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
 
@@ -53,6 +59,24 @@ class EntityIdentitySubclass(EntityIdentity):
 
 class IdentityRecordSubclass(IdentityRecord):
     __slots__ = ()
+
+
+class RationalBoundSubclass(RationalBound):
+    __slots__ = ()
+
+
+class IdentityKindVolumeSubclass(IdentityKindVolume):
+    __slots__ = ()
+
+
+class IdentityVolumeEnvelopeSubclass(IdentityVolumeEnvelope):
+    __slots__ = ()
+
+
+class MutableVolumeEntry:
+    def __init__(self) -> None:
+        self.entity_kind = "evidence"
+        self.projected_count = 1
 
 
 def _seed() -> RootSeed:
@@ -138,3 +162,37 @@ def test_identity_and_record_subclasses_are_rejected() -> None:
         )
     with pytest.raises(IdentityError):
         IdentityRecordSubclass(_request(), identity)
+
+
+def test_collision_policy_contract_subclasses_are_rejected() -> None:
+    with pytest.raises(ChoiceValidationError):
+        RationalBoundSubclass(1, 2)
+    with pytest.raises(ChoiceValidationError):
+        IdentityKindVolumeSubclass("evidence", 1)
+    with pytest.raises(ChoiceValidationError):
+        IdentityVolumeEnvelopeSubclass(
+            (IdentityKindVolume("evidence", 1),),
+            1,
+            1,
+        )
+
+
+def test_mutable_duck_typed_volume_entries_are_rejected() -> None:
+    entry = MutableVolumeEntry()
+    with pytest.raises(ChoiceValidationError):
+        IdentityVolumeEnvelope((entry,), 1, 1)  # type: ignore[arg-type]
+
+
+def test_collision_bound_rejects_nonexact_envelopes_and_bounds() -> None:
+    envelope = IdentityVolumeEnvelope((IdentityKindVolume("evidence", 1),), 1, 1)
+    bypassed = object.__new__(IdentityVolumeEnvelopeSubclass)
+    object.__setattr__(bypassed, "per_kind", envelope.per_kind)
+    object.__setattr__(bypassed, "safety_margin_numerator", 1)
+    object.__setattr__(bypassed, "safety_margin_denominator", 1)
+    object.__setattr__(bypassed, "status", "provisional")
+    with pytest.raises(ChoiceValidationError):
+        per_kind_collision_bound(bypassed, 128)
+    with pytest.raises(ChoiceValidationError):
+        RationalBound(1, 2).no_greater_than(
+            object.__new__(RationalBoundSubclass)
+        )
