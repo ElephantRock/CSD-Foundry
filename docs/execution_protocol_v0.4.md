@@ -89,7 +89,7 @@ partial evidence remain addressable under their original digests.
 
 ## Frozen evidence
 
-Execution-protocol canary version 1 contains seven independently pinned vectors covering:
+Execution-protocol evidence version 2 contains seven independently pinned vectors covering:
 
 - canonical sample-key encoding;
 - global-ordinal shard assignment;
@@ -100,3 +100,19 @@ Execution-protocol canary version 1 contains seven independently pinned vectors 
 - append-only inventory supersession.
 
 Any change to the vector catalog or expected digests requires a new evidence version.
+
+### Corrective supersession boundary
+
+The original `execution-v1` canary and `execution_protocol.schema.json` remain
+byte-identical historical artifacts. They are not rewritten. Evidence version 2 is the
+current catalog authority: its catalog digest commits the ordered vector IDs and the
+complete expected-digest mapping. Schema document version 2 is the current ingestion
+authority: it exhaustively binds each uint8 retry count to exactly one derived total
+execution count. Current validators and external ingestion consumers must select the
+version-2 authority explicitly; version-1 artifacts remain available only for historical
+verification.
+
+This supersession changes neither execution-protocol semantics nor any vector value,
+generation namespace, choice identity, replay commitment, inventory digest, or runtime
+retry-policy serialization. It only strengthens the independent evidence commitment and
+external schema/API equivalence.

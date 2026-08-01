@@ -1,4 +1,4 @@
-"""Validation and immutable evidence for v0.4 execution protocol version 1."""
+"""Validation and immutable evidence for v0.4 execution protocol and evidence v2."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ from csd_foundry.synthesis.v0_4.execution_protocol import (
     validate_failure_chain,
 )
 from csd_foundry.synthesis.v0_4.execution_vectors import (
+    EXECUTION_VECTOR_EVIDENCE_VERSION,
     EXECUTION_VECTOR_IDS,
     EXPECTED_EXECUTION_DIGESTS,
     FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST,
@@ -43,6 +44,7 @@ from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 _TARGET_ALPHA_DEFINITION_DIGEST = "0c249247fe8fe1bc74c067a535846dedf0df922e69688ac20f726289f78901c5"
 _TARGET_ALPHA_NAMESPACE_DIGEST = "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
 _RELEASE_ROOT_SEED_COMMITMENT = "6e5306d9779ade6c6e8bdf5d3d88431e8a4a9fb5ea2e4526949923319400661e"
+EXECUTION_SCHEMA_DOCUMENT_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +53,8 @@ class ExecutionProtocolValidationReport:
     vector_count: int
     vectors_passed: int
     vector_catalog_digest: str
+    vector_evidence_version: int
+    execution_schema_document_version: int
     sample_key_encoding_stable: bool
     shard_policy_compatible: bool
     shard_assignment_stable: bool
@@ -69,6 +73,7 @@ class ExecutionProtocolValidationReport:
     def to_dict(self) -> dict[str, object]:
         return {
             "errors": list(self.errors),
+            "execution_schema_document_version": (self.execution_schema_document_version),
             "failure_chain_enforced": self.failure_chain_enforced,
             "inventory_immutable": self.inventory_immutable,
             "mixed_versions_rejected": self.mixed_versions_rejected,
@@ -87,6 +92,7 @@ class ExecutionProtocolValidationReport:
             "supersession_append_only": self.supersession_append_only,
             "vector_catalog_digest": self.vector_catalog_digest,
             "vector_count": self.vector_count,
+            "vector_evidence_version": self.vector_evidence_version,
             "vectors_passed": self.vectors_passed,
             "claim_boundary": (
                 "This report validates immutable execution inventories, canonical sample-key "
@@ -311,6 +317,8 @@ def validate_execution_protocol(release: str) -> ExecutionProtocolValidationRepo
         vector_count=len(EXECUTION_VECTOR_IDS),
         vectors_passed=vectors_passed,
         vector_catalog_digest=FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST,
+        vector_evidence_version=EXECUTION_VECTOR_EVIDENCE_VERSION,
+        execution_schema_document_version=EXECUTION_SCHEMA_DOCUMENT_VERSION,
         sample_key_encoding_stable=sample_key_encoding_stable,
         shard_policy_compatible=shard_policy_compatible,
         shard_assignment_stable=shard_assignment_stable,
