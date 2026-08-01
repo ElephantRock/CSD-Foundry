@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/23-append-only-publication
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
