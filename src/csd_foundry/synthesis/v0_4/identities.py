@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TypeAlias, cast
+from typing import TypeAlias
 
 from csd_foundry.synthesis.v0_4.choice_paths import (
     AttemptKey,
@@ -79,9 +79,9 @@ def _require_role_segment(value: object) -> RoleSegment:
     if type(value) is int:
         if value < 0:
             raise ChoiceValidationError("integer identity-role segments must be nonnegative")
-        return cast(int, value)
+        return value
     if type(value) is str and _TOKEN_PATTERN.fullmatch(value) is not None:
-        return cast(str, value)
+        return value
     raise ChoiceValidationError(
         "identity-role segments must be exact nonnegative integers or lowercase ASCII tokens"
     )
