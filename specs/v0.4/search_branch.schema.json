@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "attempt_input_commitment_digest": {"$ref": "#/$defs/digest"},
+    "attempt_key": {"type": "object"},
+    "branch_facts": {"type": "object"},
+    "choice_ledger_digest": {"$ref": "#/$defs/digest"},
+    "generation_namespace_digest": {"$ref": "#/$defs/digest"},
+    "schema_version": {"const": "csd-search-branch/0.4"}
+  },
+  "required": [
+    "attempt_input_commitment_digest",
+    "attempt_key",
+    "branch_facts",
+    "choice_ledger_digest",
+    "generation_namespace_digest",
+    "schema_version"
+  ],
+  "type": "object"
+}
