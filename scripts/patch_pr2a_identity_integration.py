@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import pprint
 from pathlib import Path
@@ -171,6 +172,11 @@ def main() -> None:
         ROOT / "data/canary/v0.4/identity-v1/identity_vectors.json",
         vector_catalog,
     )
+
+    import csd_foundry.synthesis.v0_4.specs as packaged_specs
+
+    importlib.invalidate_caches()
+    importlib.reload(packaged_specs)
 
     from csd_foundry.synthesis.v0_4.identity_validation import validate_identities
 
