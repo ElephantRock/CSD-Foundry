@@ -35,6 +35,8 @@ from csd_foundry.synthesis.v0_4.execution_validation import (
 )
 from csd_foundry.synthesis.v0_4.execution_vectors import (
     EXPECTED_EXECUTION_DIGESTS,
+    FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST,
+    execution_vector_catalog_commitment,
     validate_execution_vector_catalog,
 )
 from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
@@ -232,3 +234,14 @@ def test_execution_vectors_and_report_are_frozen() -> None:
     assert report.vectors_passed == report.vector_count == 7
     assert report.shard_policy_compatible
     assert report.operational_exhaustion_nonsemantic
+
+
+def test_execution_catalog_commitment_covers_expected_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_digest = FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST
+    changed = "0" * 64
+    monkeypatch.setitem(EXPECTED_EXECUTION_DIGESTS, "retry-policy", changed)
+    assert canonical_sha256(execution_vector_catalog_commitment()) != original_digest
+    with pytest.raises(ValueError, match="catalog digest changed"):
+        validate_execution_vector_catalog()

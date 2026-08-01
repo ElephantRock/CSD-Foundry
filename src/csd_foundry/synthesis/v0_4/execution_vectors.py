@@ -1,9 +1,10 @@
-"""Frozen known-answer vectors for v0.4 execution-protocol version 1."""
+"""Frozen known-answer vectors for v0.4 execution-protocol evidence version 2."""
 
 from __future__ import annotations
 
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
+EXECUTION_VECTOR_EVIDENCE_VERSION = 2
 EXECUTION_VECTOR_IDS = (
     "sample-key-encoding",
     "shard-assignment",
@@ -24,9 +25,20 @@ EXPECTED_EXECUTION_DIGESTS: dict[str, str] = {
     "shard-assignment": "ba5111604090596f7ac8591f5b10954dfd10650877711f80d5c7990bff2c3367",
 }
 
-FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST = (
+LEGACY_EXECUTION_VECTOR_V1_CATALOG_DIGEST = (
     "ae40bcce9e169c5bc11c9a3e83ab582124e973c1c7afafefdb99a74e2833a341"
 )
+FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST = (
+    "5a9bbee3603ed72bf5eb1b6b2ac324469262b5f1aee31cdd8b638d318966418f"
+)
+
+
+def execution_vector_catalog_commitment() -> dict[str, object]:
+    return {
+        "evidence_version": EXECUTION_VECTOR_EVIDENCE_VERSION,
+        "expected_digests": EXPECTED_EXECUTION_DIGESTS,
+        "vector_ids": list(EXECUTION_VECTOR_IDS),
+    }
 
 
 def validate_execution_vector_catalog() -> None:
@@ -34,5 +46,8 @@ def validate_execution_vector_catalog() -> None:
         raise ValueError("execution vector digests must use sorted vector IDs")
     if set(EXECUTION_VECTOR_IDS) != set(EXPECTED_EXECUTION_DIGESTS):
         raise ValueError("execution vector IDs and expected digests differ")
-    if canonical_sha256(list(EXECUTION_VECTOR_IDS)) != FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST:
+    if (
+        canonical_sha256(execution_vector_catalog_commitment())
+        != FROZEN_EXECUTION_VECTOR_CATALOG_DIGEST
+    ):
         raise ValueError("execution vector catalog digest changed")

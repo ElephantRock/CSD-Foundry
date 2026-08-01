@@ -1,6 +1,7 @@
 {
   "claim_boundary": "This report validates immutable execution inventories, canonical sample-key encoding, frozen shard-policy-v1 assignment, bounded operational retries, terminal operational exhaustion evidence, and append-only supersession. It does not establish durable publication, streaming merge, planner completeness, oracle validity, infeasibility, or release-scale output.",
   "errors": [],
+  "execution_schema_document_version": 2,
   "failure_chain_enforced": true,
   "inventory_immutable": true,
   "mixed_versions_rejected": true,
@@ -17,7 +18,8 @@
   "shard_policy_version": 1,
   "status": "valid",
   "supersession_append_only": true,
-  "vector_catalog_digest": "ae40bcce9e169c5bc11c9a3e83ab582124e973c1c7afafefdb99a74e2833a341",
+  "vector_catalog_digest": "5a9bbee3603ed72bf5eb1b6b2ac324469262b5f1aee31cdd8b638d318966418f",
   "vector_count": 7,
+  "vector_evidence_version": 2,
   "vectors_passed": 7
 }
