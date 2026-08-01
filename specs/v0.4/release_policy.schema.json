@@ -1,0 +1,77 @@
+{
+  "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/release_policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "choice_path_schema_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "maximum_trajectory_steps": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "performance_policy_status": {
+      "enum": [
+        "unfrozen",
+        "frozen"
+      ]
+    },
+    "pilot_trajectory_count": {
+      "minimum": 1,
+      "type": "integer"
+    },
+    "release": {
+      "const": "v0.4"
+    },
+    "release_blocked_until_policies_frozen": {
+      "type": "boolean"
+    },
+    "rng_algorithm": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "rng_version": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "root_seed": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    },
+    "split_hash_salt": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "stochastic_risk_policy_status": {
+      "enum": [
+        "unfrozen",
+        "frozen"
+      ]
+    },
+    "target_trajectory_count": {
+      "minimum": 1,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "target_trajectory_count",
+    "pilot_trajectory_count",
+    "maximum_trajectory_steps",
+    "root_seed",
+    "rng_algorithm",
+    "rng_version",
+    "choice_path_schema_version",
+    "split_hash_salt",
+    "performance_policy_status",
+    "stochastic_risk_policy_status",
+    "release_blocked_until_policies_frozen"
+  ],
+  "title": "CSD Foundry v0.4 Release Policy",
+  "type": "object"
+}
