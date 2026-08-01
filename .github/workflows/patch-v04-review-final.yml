@@ -83,9 +83,43 @@ jobs:
                   )
           '''
           path.write_text(text[:start] + replacement)
+
+          validation_path = Path("src/csd_foundry/synthesis/v0_4/validation.py")
+          validation_text = validation_path.read_text()
+          validation_text = validation_text.replace(
+              '''    if release_policy is not None and performance_policy is not None:
+                  if release_policy.performance_policy_status != performance_policy.policy_status:
+                      errors.append("release and performance policy statuses do not agree")
+          ''',
+              '''    if (
+                  release_policy is not None
+                  and performance_policy is not None
+                  and release_policy.performance_policy_status
+                  != performance_policy.policy_status
+              ):
+                  errors.append("release and performance policy statuses do not agree")
+          ''',
+              1,
+          )
+          validation_text = validation_text.replace(
+              '''    if release_policy is not None and risk_policy is not None:
+                  if release_policy.stochastic_risk_policy_status != risk_policy.policy_status:
+                      errors.append("release and mutation risk policy statuses do not agree")
+          ''',
+              '''    if (
+                  release_policy is not None
+                  and risk_policy is not None
+                  and release_policy.stochastic_risk_policy_status
+                  != risk_policy.policy_status
+              ):
+                  errors.append("release and mutation risk policy statuses do not agree")
+          ''',
+              1,
+          )
+          validation_path.write_text(validation_text)
           PY
       - run: ruff format .
-      - run: ruff check --fix --unsafe-fixes .
+      - run: ruff check --fix .
       - run: ruff format --check .
       - run: ruff check .
       - run: mypy src
