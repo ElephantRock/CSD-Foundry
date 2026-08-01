@@ -1,0 +1,76 @@
+{
+  "$id": "https://github.com/ElephantRock/CSD-Foundry/specs/v0.4/mutation_risk_policy.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "budgets": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "maximum_unresolved_deterministic": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maximum_unresolved_stochastic": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minimum_invalid_mutants": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "moderate",
+              "high",
+              "critical"
+            ]
+          },
+          "upper_confidence_bound_decimal": {
+            "pattern": "^(0|1)(\\.\\d+)?$",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "severity",
+          "maximum_unresolved_deterministic",
+          "maximum_unresolved_stochastic",
+          "upper_confidence_bound_decimal",
+          "minimum_invalid_mutants"
+        ],
+        "type": "object"
+      },
+      "minItems": 4,
+      "type": "array"
+    },
+    "confidence_level_decimal": {
+      "pattern": "^(0|1)(\\.\\d+)?$",
+      "type": "string"
+    },
+    "policy_status": {
+      "enum": [
+        "unfrozen",
+        "frozen"
+      ]
+    },
+    "release": {
+      "const": "v0.4"
+    },
+    "schema_version": {
+      "const": "0.4.0"
+    }
+  },
+  "required": [
+    "release",
+    "schema_version",
+    "confidence_level_decimal",
+    "policy_status",
+    "budgets"
+  ],
+  "title": "CSD Foundry v0.4 Mutation Risk Policy",
+  "type": "object"
+}
