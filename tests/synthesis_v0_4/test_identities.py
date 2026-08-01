@@ -17,10 +17,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
     SampleKey,
     SeedProvenance,
 )
-from csd_foundry.synthesis.v0_4.generation_namespace import (
-    GenerationNamespace,
-    build_generation_namespace,
-)
+from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
 from csd_foundry.synthesis.v0_4.identities import (
     DuplicateIdentityRoleError,
     EntityKind,
@@ -28,6 +25,8 @@ from csd_foundry.synthesis.v0_4.identities import (
     IdentityLedger,
     IdentityRequest,
     UnknownIdentityRoleError,
+    _identity_from_digest,
+    canonical_identity_material,
     derive_identity,
 )
 from csd_foundry.synthesis.v0_4.identity_policy import (
@@ -99,6 +98,8 @@ def test_canonical_values_preserve_types_and_reject_mutability() -> None:
         )
     with pytest.raises(CanonicalValueError):
         CanonicalObject((CanonicalField("z", 1), CanonicalField("a", 2)))
+    with pytest.raises(CanonicalValueError):
+        CanonicalObject.from_pairs((["mutable", 1],))  # type: ignore[arg-type]
 
 
 def test_identity_derivation_is_namespace_and_role_sensitive() -> None:
@@ -134,33 +135,50 @@ def test_identity_ledger_is_order_independent_and_fail_closed() -> None:
 def test_identity_collision_injection_fails_closed() -> None:
     seed = _seed()
     namespace = build_generation_namespace(canonical_sha256({"target": "collisions"}))
+    request_a = _request(("a",))
+    request_b = _request(("b",))
 
-    def full_collision(
-        seed_value: RootSeed,
-        namespace_value: GenerationNamespace,
-        request_value: IdentityRequest,
-    ) -> bytes:
-        del seed_value, namespace_value, request_value
-        return b"\x11" * 32
-
-    ledger = IdentityLedger(seed, namespace, digest_provider=full_collision)
-    ledger.allocate(_request(("a",)))
+    ledger = IdentityLedger(seed, namespace)
+    ledger._record_identity(
+        request_a,
+        _identity_from_digest(
+            namespace,
+            request_a,
+            canonical_identity_material(namespace, request_a),
+            b"\x11" * 32,
+        ),
+    )
     with pytest.raises(IdentityCollisionError):
-        ledger.allocate(_request(("b",)))
+        ledger._record_identity(
+            request_b,
+            _identity_from_digest(
+                namespace,
+                request_b,
+                canonical_identity_material(namespace, request_b),
+                b"\x11" * 32,
+            ),
+        )
 
-    def display_collision(
-        seed_value: RootSeed,
-        namespace_value: GenerationNamespace,
-        request_value: IdentityRequest,
-    ) -> bytes:
-        del seed_value, namespace_value
-        suffix = b"\x22" * 16 if request_value.role_segments == ("a",) else b"\x33" * 16
-        return b"\xaa" * 16 + suffix
-
-    display_ledger = IdentityLedger(seed, namespace, digest_provider=display_collision)
-    display_ledger.allocate(_request(("a",)))
+    display_ledger = IdentityLedger(seed, namespace)
+    display_ledger._record_identity(
+        request_a,
+        _identity_from_digest(
+            namespace,
+            request_a,
+            canonical_identity_material(namespace, request_a),
+            b"\xaa" * 16 + b"\x22" * 16,
+        ),
+    )
     with pytest.raises(IdentityCollisionError):
-        display_ledger.allocate(_request(("b",)))
+        display_ledger._record_identity(
+            request_b,
+            _identity_from_digest(
+                namespace,
+                request_b,
+                canonical_identity_material(namespace, request_b),
+                b"\xaa" * 16 + b"\x33" * 16,
+            ),
+        )
 
 
 def test_collision_policy_uses_exact_integer_bounds() -> None:
