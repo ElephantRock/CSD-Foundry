@@ -17,7 +17,6 @@ from csd_foundry.synthesis.v0_4.attempts import (
 )
 from csd_foundry.synthesis.v0_4.canonical_values import CanonicalArray, CanonicalObject
 from csd_foundry.synthesis.v0_4.choice_ledger import (
-    ChoiceLedger,
     ChoiceSession,
     ChoiceSessionError,
     ChoiceSessionState,
@@ -109,9 +108,7 @@ class ReplayValidationReport:
             "incomplete_prefixes_nonsemantic": self.incomplete_prefixes_nonsemantic,
             "post_acceptance_rejected": self.post_acceptance_rejected,
             "complete_exhaustion_verified": self.complete_exhaustion_verified,
-            "exhaustion_converted_to_infeasibility": (
-                self.exhaustion_converted_to_infeasibility
-            ),
+            "exhaustion_converted_to_infeasibility": (self.exhaustion_converted_to_infeasibility),
             "operational_abort_has_semantic_completion": (
                 self.operational_abort_has_semantic_completion
             ),
@@ -214,9 +211,7 @@ def _bundle(index: int, *, accepted: bool, sample_index: int) -> AttemptReplayBu
         generation_namespace_digest=_namespace().digest,
         attempt_input_commitment_digest=input_commitment.digest,
         choice_ledger_digest=ledger.canonical_digest,
-        branch_facts=CanonicalObject.from_pairs(
-            (("accepted", accepted), ("attempt_index", index))
-        ),
+        branch_facts=CanonicalObject.from_pairs((("accepted", accepted), ("attempt_index", index))),
     )
     if accepted:
         completion = AttemptAccepted(
@@ -226,9 +221,7 @@ def _bundle(index: int, *, accepted: bool, sample_index: int) -> AttemptReplayBu
             search_branch_digest=branch.digest,
             choice_ledger_digest=ledger.canonical_digest,
             identity_ledger_digest=identity_digest,
-            result=CanonicalObject.from_pairs(
-                (("accepted", True), ("attempt_index", index))
-            ),
+            result=CanonicalObject.from_pairs((("accepted", True), ("attempt_index", index))),
         )
     else:
         rejection = AttemptRejection(
@@ -277,16 +270,14 @@ def generate_replay_digests() -> dict[str, str]:
 
     accepted_zero = _bundle(0, accepted=True, sample_index=10)
     rejected_prefix = tuple(
-        _bundle(index, accepted=index == 2, sample_index=11).completion
-        for index in range(3)
+        _bundle(index, accepted=index == 2, sample_index=11).completion for index in range(3)
     )
     accepted_replay = resolve_attempt_prefix(AttemptRange(4), rejected_prefix)
     if type(accepted_replay) is not AcceptedSampleReplay:
         raise RuntimeError("accepted-prefix fixture did not resolve")
 
     exhausted_completions = tuple(
-        _bundle(index, accepted=False, sample_index=12).completion
-        for index in range(3)
+        _bundle(index, accepted=False, sample_index=12).completion for index in range(3)
     )
     exhausted = resolve_attempt_prefix(AttemptRange(3), exhausted_completions)
     if type(exhausted) is not ExhaustionEvidence:
@@ -297,9 +288,7 @@ def generate_replay_digests() -> dict[str, str]:
     reverse = _ledger(attempt, ("ratio", "weighted", "bounded"))
     if forward.canonical_digest != reverse.canonical_digest:
         raise RuntimeError("call-order canary diverged")
-    weighted = next(
-        record for record in forward.records if type(record) is WeightedChoiceRecord
-    )
+    weighted = next(record for record in forward.records if type(record) is WeightedChoiceRecord)
     forced = _forced_redraw_record()
 
     return {
@@ -438,7 +427,7 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
 
     cases += 1
     session = _session(_attempt(0, sample_index=22))
-    try:
+    try:  # noqa: SIM105
         session.weighted_choice(
             _path(session._attempt_key, "invalid"),  # type: ignore[attr-defined]
             CanonicalArray(("a", "b")),
@@ -565,8 +554,7 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
     exhaustion_verified = False
     try:
         prefix = tuple(
-            _bundle(index, accepted=index == 2, sample_index=40).completion
-            for index in range(3)
+            _bundle(index, accepted=index == 2, sample_index=40).completion for index in range(3)
         )
         accepted = resolve_attempt_prefix(AttemptRange(4), prefix)
         lowest_valid = (
@@ -575,10 +563,7 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
         )
         exhausted = resolve_attempt_prefix(
             AttemptRange(3),
-            tuple(
-                _bundle(index, accepted=False, sample_index=41).completion
-                for index in range(3)
-            ),
+            tuple(_bundle(index, accepted=False, sample_index=41).completion for index in range(3)),
         )
         exhaustion_verified = (
             type(exhausted) is ExhaustionEvidence
@@ -597,9 +582,7 @@ def validate_replay(release: str = "v0.4") -> ReplayValidationReport:
         "incomplete prefix became semantic": incomplete_nonsemantic,
         "post-acceptance completion was accepted": post_acceptance_rejected,
         "complete exhaustion was not verified": exhaustion_verified,
-        "operational abort entered semantic completion": (
-            not operational_has_semantic_completion
-        ),
+        "operational abort entered semantic completion": (not operational_has_semantic_completion),
         "tamper campaign had escapes": tamper_rejected == tamper_cases,
     }
     for message, passed in checks.items():

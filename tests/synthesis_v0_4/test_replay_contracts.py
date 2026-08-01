@@ -158,7 +158,7 @@ def test_post_reservation_failure_poisons_the_session() -> None:
     attempt = _attempt()
     session = _session(attempt)
     path = _path(attempt, "invalid-weight")
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         session.weighted_choice(path, CanonicalArray(("a", "b")), (1, 0))
     assert session.state is ChoiceSessionState.POISONED
     with pytest.raises(ChoiceSessionError):

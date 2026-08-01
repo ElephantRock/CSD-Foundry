@@ -230,9 +230,7 @@ class OperationalAttemptBlock:
         _attempt_key_value(self.attempt_key)
         _require_token(self.reason_code, "reason_code")
         if type(self.operational_retry_count) is not int or self.operational_retry_count < 0:
-            raise AttemptReplayError(
-                "operational_retry_count must be a nonnegative exact integer"
-            )
+            raise AttemptReplayError("operational_retry_count must be a nonnegative exact integer")
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,9 +291,8 @@ class IncompleteAttemptPrefix:
             raise AttemptReplayError("incomplete prefixes must use the exact contract class")
         if type(self.sample_key) is not SampleKey or type(self.attempt_range) is not AttemptRange:
             raise AttemptReplayError("incomplete prefix context must use exact classes")
-        if (
-            type(self.first_missing_attempt_index) is not int
-            or not self.attempt_range.contains(self.first_missing_attempt_index)
+        if type(self.first_missing_attempt_index) is not int or not self.attempt_range.contains(
+            self.first_missing_attempt_index
         ):
             raise AttemptReplayError("first missing attempt must be inside the attempt range")
         if type(self.supplied_attempt_indices) is not tuple or any(
@@ -336,16 +333,10 @@ def resolve_attempt_prefix(
     if len(accepted_positions) > 1:
         raise AttemptReplayError("attempt prefix contains multiple accepted completions")
     if accepted_positions and accepted_positions[0] != len(ordered) - 1:
-        raise PostAcceptanceCompletionError(
-            "semantic completions after acceptance are prohibited"
-        )
+        raise PostAcceptanceCompletionError("semantic completions after acceptance are prohibited")
 
     first_missing = next(
-        (
-            expected
-            for expected, actual in enumerate(indices)
-            if expected != actual
-        ),
+        (expected for expected, actual in enumerate(indices) if expected != actual),
         len(indices),
     )
     if first_missing < len(indices) or indices[0] != 0:

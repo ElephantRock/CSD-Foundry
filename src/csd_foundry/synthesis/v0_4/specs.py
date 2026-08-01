@@ -11,6 +11,8 @@ SCHEMA_DOCUMENT_NAMES = (
     "deterministic_arithmetic_policy.schema.json",
     "choice_algorithm.schema.json",
     "identity_policy.schema.json",
+    "replay_policy.schema.json",
+    "attempt_input.schema.json",
 )
 
 COVERAGE_TARGETS_SPEC: dict[str, object] = {
@@ -325,6 +327,12 @@ IDENTITY_POLICY_SPEC: dict[str, object] = {
     ],
 }
 
+REPLAY_POLICY_SPEC: dict[str, object] = {
+    "policy_id": "csd-replay-contract",
+    "policy_version": 1,
+    "semantic_execution_mode": "lowest-valid-attempt",
+}
+
 
 SPEC_DOCUMENTS: dict[str, dict[str, object]] = {
     "coverage_targets.json": COVERAGE_TARGETS_SPEC,
@@ -335,4 +343,5 @@ SPEC_DOCUMENTS: dict[str, dict[str, object]] = {
     "deterministic_arithmetic_policy.json": DETERMINISTIC_ARITHMETIC_POLICY_SPEC,
     "choice_algorithm.json": CHOICE_ALGORITHM_SPEC,
     "identity_policy.json": IDENTITY_POLICY_SPEC,
+    "replay_policy.json": REPLAY_POLICY_SPEC,
 }

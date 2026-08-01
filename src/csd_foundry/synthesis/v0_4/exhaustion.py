@@ -49,9 +49,7 @@ class PlannerExhaustionHandoff:
         if self.candidate_constraint_ids != expected or len(expected) != len(set(expected)):
             raise AttemptReplayError("candidate constraint IDs must be unique and ordered")
         if type(self.normalized_rejection_facts) is not CanonicalArray:
-            raise AttemptReplayError(
-                "normalized rejection facts must use an exact CanonicalArray"
-            )
+            raise AttemptReplayError("normalized rejection facts must use an exact CanonicalArray")
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -77,9 +75,10 @@ class ExhaustionEvidence:
             raise AttemptReplayError("exhaustion evidence must use the exact contract class")
         if type(self.sample_key) is not SampleKey:
             raise AttemptReplayError("sample_key must use the exact SampleKey class")
-        if type(self.generation_namespace_digest) is not str or len(
-            self.generation_namespace_digest
-        ) != 64:
+        if (
+            type(self.generation_namespace_digest) is not str
+            or len(self.generation_namespace_digest) != 64
+        ):
             raise AttemptReplayError(
                 "generation_namespace_digest must be a lowercase SHA-256 digest"
             )
@@ -92,9 +91,7 @@ class ExhaustionEvidence:
         if len(self.rejected_attempts) != self.attempt_range.maximum_attempts:
             raise AttemptReplayError("exhaustion must cover the complete attempt range")
         expected_indices = tuple(range(self.attempt_range.maximum_attempts))
-        actual_indices = tuple(
-            item.attempt_key.attempt_index for item in self.rejected_attempts
-        )
+        actual_indices = tuple(item.attempt_key.attempt_index for item in self.rejected_attempts)
         if actual_indices != expected_indices:
             raise AttemptReplayError("exhaustion attempts must be contiguous from zero")
         for item in self.rejected_attempts:
@@ -103,9 +100,7 @@ class ExhaustionEvidence:
             if item.generation_namespace_digest != self.generation_namespace_digest:
                 raise AttemptReplayError("exhaustion evidence spans multiple namespaces")
         if self.schema_version != EXHAUSTION_SCHEMA_VERSION:
-            raise AttemptReplayError(
-                f"exhaustion schema must be {EXHAUSTION_SCHEMA_VERSION}"
-            )
+            raise AttemptReplayError(f"exhaustion schema must be {EXHAUSTION_SCHEMA_VERSION}")
 
     @property
     def cause_histogram(self) -> CanonicalObject:
@@ -162,9 +157,7 @@ class ExhaustionEvidence:
                 [item.identity_ledger_digest for item in self.rejected_attempts]
             ),
             "owner_histogram": self.owner_histogram.to_json_value(),
-            "rejected_attempt_digests": [
-                item.completion_digest for item in self.rejected_attempts
-            ],
+            "rejected_attempt_digests": [item.completion_digest for item in self.rejected_attempts],
             "sample_key": {
                 "release": self.sample_key.release,
                 "sample_index": self.sample_key.sample_index,

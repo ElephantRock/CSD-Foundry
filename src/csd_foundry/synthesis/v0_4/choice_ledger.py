@@ -112,9 +112,10 @@ class ChoiceLedger:
             raise ChoiceRecordError("choice ledgers must use the exact contract class")
         if type(self.seed_commitment) is not str or len(self.seed_commitment) != 64:
             raise ChoiceRecordError("seed_commitment must be a lowercase SHA-256 digest")
-        if type(self.generation_namespace_digest) is not str or len(
-            self.generation_namespace_digest
-        ) != 64:
+        if (
+            type(self.generation_namespace_digest) is not str
+            or len(self.generation_namespace_digest) != 64
+        ):
             raise ChoiceRecordError(
                 "generation_namespace_digest must be a lowercase SHA-256 digest"
             )
@@ -147,9 +148,7 @@ class ChoiceLedger:
             ):
                 raise ChoiceRecordError("choice record uses an undeclared namespace prefix")
         if self.schema_version != CHOICE_LEDGER_SCHEMA_VERSION:
-            raise ChoiceRecordError(
-                f"choice ledger schema must be {CHOICE_LEDGER_SCHEMA_VERSION}"
-            )
+            raise ChoiceRecordError(f"choice ledger schema must be {CHOICE_LEDGER_SCHEMA_VERSION}")
 
     def to_json_value(self) -> dict[str, object]:
         return _ledger_value(

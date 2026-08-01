@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 
 from csd_foundry.synthesis.v0_4.canonical_values import CanonicalObject
-from csd_foundry.synthesis.v0_4.choice_paths import AttemptKey, ChoiceValidationError
+from csd_foundry.synthesis.v0_4.choice_paths import AttemptKey
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
 REPLAY_POLICY_ID = "csd-replay-contract"
@@ -53,9 +53,7 @@ def _require_digest(value: object, field_name: str) -> str:
 
 def _require_token(value: object, field_name: str) -> str:
     if type(value) is not str or _TOKEN_PATTERN.fullmatch(value) is None:
-        raise ReplayContractError(
-            f"{field_name} must match [a-z0-9][a-z0-9._-]*"
-        )
+        raise ReplayContractError(f"{field_name} must match [a-z0-9][a-z0-9._-]*")
     return value
 
 
@@ -107,9 +105,7 @@ class AttemptInputCommitment:
 
     def __post_init__(self) -> None:
         if type(self) is not AttemptInputCommitment:
-            raise ReplayContractError(
-                "attempt input commitments must use the exact contract class"
-            )
+            raise ReplayContractError("attempt input commitments must use the exact contract class")
         _attempt_key_value(self.attempt_key)
         _require_digest(
             self.generation_namespace_digest,
@@ -166,9 +162,7 @@ class SearchBranchCommitment:
 
     def __post_init__(self) -> None:
         if type(self) is not SearchBranchCommitment:
-            raise ReplayContractError(
-                "search branch commitments must use the exact contract class"
-            )
+            raise ReplayContractError("search branch commitments must use the exact contract class")
         _attempt_key_value(self.attempt_key)
         _require_digest(
             self.generation_namespace_digest,

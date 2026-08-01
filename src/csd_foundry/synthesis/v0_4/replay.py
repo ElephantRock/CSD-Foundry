@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from csd_foundry.synthesis.v0_4.choice_ledger import ChoiceLedger
+from csd_foundry.synthesis.v0_4.choice_paths import RootSeed
 from csd_foundry.synthesis.v0_4.choice_records import (
     BooleanRatioChoiceRecord,
     BoundedIntegerChoiceRecord,
@@ -22,7 +23,6 @@ from csd_foundry.synthesis.v0_4.deterministic_choices import (
 )
 from csd_foundry.synthesis.v0_4.generation_namespace import GenerationNamespace
 from csd_foundry.synthesis.v0_4.identities import IdentityRecord, derive_identity
-from csd_foundry.synthesis.v0_4.choice_paths import RootSeed
 from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canonical_sha256
 
 
@@ -57,9 +57,7 @@ def _replayed_record(
     if type(seed) is not RootSeed:
         raise ReplayMismatchError("replay seed must use the exact RootSeed class")
     if type(namespace) is not GenerationNamespace:
-        raise ReplayMismatchError(
-            "replay namespace must use the exact GenerationNamespace class"
-        )
+        raise ReplayMismatchError("replay namespace must use the exact GenerationNamespace class")
     if record.seed_commitment != seed.commitment:
         raise ReplayMismatchError("choice record seed commitment does not match")
     if record.generation_namespace_digest != namespace.digest:
