@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "attemptKey": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_index": {"minimum": 0, "type": "integer"},
+        "release": {"const": "v0.4"},
+        "sample_index": {"minimum": 0, "type": "integer"},
+        "target_id": {"$ref": "#/$defs/token"}
+      },
+      "required": ["attempt_index", "release", "sample_index", "target_id"],
+      "type": "object"
+    },
+    "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "executionInventory": {
+      "additionalProperties": false,
+      "properties": {
+        "generation_namespace_digest": {"$ref": "#/$defs/digest"},
+        "operational_retry_policy_digest": {"$ref": "#/$defs/digest"},
+        "release": {"const": "v0.4"},
+        "required_schema_versions": {"$ref": "#/$defs/requiredSchemaVersions"},
+        "root_seed_commitment": {"$ref": "#/$defs/digest"},
+        "sample_key_encoding_id": {"const": "csd-sample-key-canonical-json"},
+        "sample_key_encoding_policy_digest": {"$ref": "#/$defs/digest"},
+        "sample_key_encoding_version": {"const": 1},
+        "samples": {
+          "items": {"$ref": "#/$defs/sampleExecutionSpec"},
+          "minItems": 1,
+          "type": "array"
+        },
+        "schema_version": {"const": "csd-execution-inventory/0.4"},
+        "shard_count": {"maximum": 4294967295, "minimum": 1, "type": "integer"},
+        "shard_policy_digest": {"$ref": "#/$defs/digest"},
+        "shard_policy_id": {"const": "csd-shard-contract"},
+        "shard_policy_version": {"const": 1},
+        "validation_policy_digest": {"$ref": "#/$defs/digest"},
+        "validation_policy_id": {"const": "csd-execution-validation"},
+        "validation_policy_version": {"const": 1}
+      },
+      "required": [
+        "generation_namespace_digest",
+        "operational_retry_policy_digest",
+        "release",
+        "required_schema_versions",
+        "root_seed_commitment",
+        "sample_key_encoding_id",
+        "sample_key_encoding_policy_digest",
+        "sample_key_encoding_version",
+        "samples",
+        "schema_version",
+        "shard_count",
+        "shard_policy_digest",
+        "shard_policy_id",
+        "shard_policy_version",
+        "validation_policy_digest",
+        "validation_policy_id",
+        "validation_policy_version"
+      ],
+      "type": "object"
+    },
+    "inventorySupersession": {
+      "additionalProperties": false,
+      "properties": {
+        "reason_code": {"$ref": "#/$defs/token"},
+        "reason_facts": {"type": "object"},
+        "replacement_inventory_digest": {"$ref": "#/$defs/digest"},
+        "schema_version": {"const": "csd-inventory-supersession/0.4"},
+        "superseded_inventory_digest": {"$ref": "#/$defs/digest"},
+        "superseding_run_id": {"$ref": "#/$defs/token"}
+      },
+      "required": [
+        "reason_code",
+        "reason_facts",
+        "replacement_inventory_digest",
+        "schema_version",
+        "superseded_inventory_digest",
+        "superseding_run_id"
+      ],
+      "type": "object"
+    },
+    "operationalExhaustion": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_key": {"$ref": "#/$defs/attemptKey"},
+        "execution_run_id": {"$ref": "#/$defs/token"},
+        "failure_receipt_digests": {
+          "items": {"$ref": "#/$defs/digest"},
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "final_reason_code": {"$ref": "#/$defs/token"},
+        "inventory_digest": {"$ref": "#/$defs/digest"},
+        "maximum_operational_retries": {"maximum": 255, "minimum": 0, "type": "integer"},
+        "retry_policy_digest": {"$ref": "#/$defs/digest"},
+        "schema_version": {"const": "csd-operational-exhaustion/0.4"},
+        "total_execution_count": {"maximum": 256, "minimum": 1, "type": "integer"}
+      },
+      "required": [
+        "attempt_key",
+        "execution_run_id",
+        "failure_receipt_digests",
+        "final_reason_code",
+        "inventory_digest",
+        "maximum_operational_retries",
+        "retry_policy_digest",
+        "schema_version",
+        "total_execution_count"
+      ],
+      "type": "object"
+    },
+    "operationalFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_key": {"$ref": "#/$defs/attemptKey"},
+        "execution_ordinal": {"maximum": 255, "minimum": 0, "type": "integer"},
+        "execution_run_id": {"$ref": "#/$defs/token"},
+        "inventory_digest": {"$ref": "#/$defs/digest"},
+        "previous_failure_receipt_digest": {
+          "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "reason_code": {"$ref": "#/$defs/token"},
+        "reason_facts": {"type": "object"},
+        "schema_version": {"const": "csd-operational-failure/0.4"},
+        "worker_id": {"$ref": "#/$defs/token"}
+      },
+      "required": [
+        "attempt_key",
+        "execution_ordinal",
+        "execution_run_id",
+        "inventory_digest",
+        "previous_failure_receipt_digest",
+        "reason_code",
+        "reason_facts",
+        "schema_version",
+        "worker_id"
+      ],
+      "type": "object"
+    },
+    "operationalRetryPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum_operational_retries": {"maximum": 255, "minimum": 0, "type": "integer"},
+        "maximum_total_executions": {"maximum": 256, "minimum": 1, "type": "integer"},
+        "schema_version": {"const": "csd-operational-retry-policy/0.4"}
+      },
+      "required": [
+        "maximum_operational_retries",
+        "maximum_total_executions",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "requiredSchemaVersions": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_completion_envelope": {"const": "csd-attempt-completion-envelope/0.4"},
+        "corpus_semantic_manifest": {"const": "csd-corpus-semantic-manifest/0.4"},
+        "execution_inventory": {"const": "csd-execution-inventory/0.4"},
+        "inventory_completion_reference": {"const": "csd-inventory-completion-reference/0.4"},
+        "inventory_supersession": {"const": "csd-inventory-supersession/0.4"},
+        "operational_exhaustion": {"const": "csd-operational-exhaustion/0.4"},
+        "operational_failure_receipt": {"const": "csd-operational-failure/0.4"},
+        "operational_publication_receipt": {"const": "csd-operational-publication/0.4"},
+        "operational_retry_policy": {"const": "csd-operational-retry-policy/0.4"},
+        "replay_validation_receipt": {"const": "csd-replay-validation-receipt/0.4"},
+        "run_evidence_manifest": {"const": "csd-run-evidence-manifest/0.4"},
+        "sample_execution_spec": {"const": "csd-sample-execution-spec/0.4"},
+        "schema_version": {"const": "csd-required-schema-versions/0.4"},
+        "shard_manifest": {"const": "csd-shard-manifest/0.4"}
+      },
+      "required": [
+        "attempt_completion_envelope",
+        "corpus_semantic_manifest",
+        "execution_inventory",
+        "inventory_completion_reference",
+        "inventory_supersession",
+        "operational_exhaustion",
+        "operational_failure_receipt",
+        "operational_publication_receipt",
+        "operational_retry_policy",
+        "replay_validation_receipt",
+        "run_evidence_manifest",
+        "sample_execution_spec",
+        "schema_version",
+        "shard_manifest"
+      ],
+      "type": "object"
+    },
+    "sampleExecutionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_range": {"maximum": 4294967296, "minimum": 1, "type": "integer"},
+        "global_ordinal": {"minimum": 0, "type": "integer"},
+        "producer_contract_digest": {"$ref": "#/$defs/digest"},
+        "producer_contract_id": {"$ref": "#/$defs/token"},
+        "producer_contract_version": {"minimum": 1, "type": "integer"},
+        "sample_key": {"$ref": "#/$defs/sampleKey"},
+        "schema_version": {"const": "csd-sample-execution-spec/0.4"}
+      },
+      "required": [
+        "attempt_range",
+        "global_ordinal",
+        "producer_contract_digest",
+        "producer_contract_id",
+        "producer_contract_version",
+        "sample_key",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "sampleKey": {
+      "additionalProperties": false,
+      "properties": {
+        "release": {"const": "v0.4"},
+        "sample_index": {"minimum": 0, "type": "integer"},
+        "target_id": {"$ref": "#/$defs/token"}
+      },
+      "required": ["release", "sample_index", "target_id"],
+      "type": "object"
+    },
+    "token": {"pattern": "^[a-z0-9][a-z0-9._-]*$", "type": "string"}
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/executionInventory"},
+    {"$ref": "#/$defs/inventorySupersession"},
+    {"$ref": "#/$defs/operationalExhaustion"},
+    {"$ref": "#/$defs/operationalFailure"},
+    {"$ref": "#/$defs/operationalRetryPolicy"},
+    {"$ref": "#/$defs/requiredSchemaVersions"},
+    {"$ref": "#/$defs/sampleExecutionSpec"}
+  ]
+}
