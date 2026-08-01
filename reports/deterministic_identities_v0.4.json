@@ -12,7 +12,7 @@
   "duplicate_role_rejected": true,
   "errors": [],
   "full_collision_rejected": true,
-  "invalid_canonical_values_rejected": 8,
+  "invalid_canonical_values_rejected": 10,
   "known_answer_vectors": 6,
   "per_kind_collision_bound_denominator": 680564733841876926926749214863536422912,
   "per_kind_collision_bound_numerator": 19479990000000,
