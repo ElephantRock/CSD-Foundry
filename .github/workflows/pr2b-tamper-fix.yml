@@ -2,6 +2,7 @@ name: PR 2B Tamper Harness Fix
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
