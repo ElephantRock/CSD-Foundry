@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 REPLAY_VECTOR_VERSION = 1
+REPLAY_VECTOR_IDS: tuple[str, ...] = (
+    "accepted-attempt-zero",
+    "rejected-prefix-then-accepted",
+    "complete-exhaustion",
+    "call-order-independence",
+    "typed-weighted-domain",
+    "forced-redraw",
+    "identity-commitment",
+)
 
 REPLAY_VECTOR_CATALOG: dict[str, object] = {
     "release": "v0.4",
     "schema_version": "0.4.0",
-    "vector_ids": [
-        "accepted-attempt-zero",
-        "rejected-prefix-then-accepted",
-        "complete-exhaustion",
-        "call-order-independence",
-        "typed-weighted-domain",
-        "forced-redraw",
-        "identity-commitment",
-    ],
+    "vector_ids": list(REPLAY_VECTOR_IDS),
 }
 
 FROZEN_REPLAY_VECTOR_CATALOG_DIGEST = (
