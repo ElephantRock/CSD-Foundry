@@ -224,6 +224,7 @@ def _bundle(index: int, *, accepted: bool, sample_index: int) -> AttemptReplayBu
         branch_facts=CanonicalObject.from_pairs((("accepted", accepted), ("attempt_index", index))),
     )
     completion: AttemptAccepted | AttemptRejected
+    completion: AttemptAccepted | AttemptRejected
     if accepted:
         completion = AttemptAccepted(
             attempt_key=attempt,
@@ -369,6 +370,7 @@ def _tamper_campaign() -> tuple[int, int, bool, bool, bool, bool]:
 
     cases += 1
     first_record = accepted.choice_ledger.records[0]
+    tampered_record: ChoiceRecord
     tampered_record: ChoiceRecord
     if type(first_record) is BoundedIntegerChoiceRecord:
         tampered_record = replace(first_record, upper_exclusive=first_record.upper_exclusive + 1)
