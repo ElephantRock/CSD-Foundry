@@ -48,9 +48,7 @@ class IdentityKindVolume:
 
     def __post_init__(self) -> None:
         if type(self) is not IdentityKindVolume:
-            raise ChoiceValidationError(
-                "identity kind volumes must use the exact contract class"
-            )
+            raise ChoiceValidationError("identity kind volumes must use the exact contract class")
         if type(self.entity_kind) is not str or not self.entity_kind:
             raise ChoiceValidationError("identity volume kind must be a nonempty string")
         if type(self.projected_count) is not int or self.projected_count < 0:
@@ -70,9 +68,7 @@ class IdentityVolumeEnvelope:
                 "identity volume envelopes must use the exact contract class"
             )
         if type(self.per_kind) is not tuple or not self.per_kind:
-            raise ChoiceValidationError(
-                "identity volume envelope requires immutable per-kind data"
-            )
+            raise ChoiceValidationError("identity volume envelope requires immutable per-kind data")
         if not all(type(item) is IdentityKindVolume for item in self.per_kind):
             raise ChoiceValidationError(
                 "identity volume entries must be exact IdentityKindVolume values"
@@ -126,8 +122,7 @@ def per_kind_collision_bound(
     if type(digest_bits) is not int or digest_bits <= 0:
         raise ChoiceValidationError("digest bits must be a positive integer")
     numerator = sum(
-        item.projected_count * max(0, item.projected_count - 1)
-        for item in envelope.per_kind
+        item.projected_count * max(0, item.projected_count - 1) for item in envelope.per_kind
     )
     return RationalBound(numerator=numerator, denominator=1 << (digest_bits + 1))
 

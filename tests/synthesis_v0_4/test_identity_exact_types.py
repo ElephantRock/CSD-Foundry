@@ -193,6 +193,4 @@ def test_collision_bound_rejects_nonexact_envelopes_and_bounds() -> None:
     with pytest.raises(ChoiceValidationError):
         per_kind_collision_bound(bypassed, 128)
     with pytest.raises(ChoiceValidationError):
-        RationalBound(1, 2).no_greater_than(
-            object.__new__(RationalBoundSubclass)
-        )
+        RationalBound(1, 2).no_greater_than(object.__new__(RationalBoundSubclass))
