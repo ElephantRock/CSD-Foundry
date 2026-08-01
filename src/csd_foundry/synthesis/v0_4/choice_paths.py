@@ -46,6 +46,12 @@ def _require_token(value: str, field_name: str) -> None:
         )
 
 
+def _require_nonnegative_integer(value: object, field_name: str) -> int:
+    if type(value) is not int or value < 0:
+        raise ChoiceValidationError(f"{field_name} must be a nonnegative integer")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class RootSeed:
     material: bytes
@@ -54,11 +60,13 @@ class RootSeed:
     def __post_init__(self) -> None:
         if len(self.material) != ROOT_SEED_BYTES:
             raise ChoiceValidationError("root seed must contain exactly 32 bytes")
-        if self.provenance is SeedProvenance.UNIFORM_RANDOM_256:
-            if self.material == bytes(ROOT_SEED_BYTES) or len(set(self.material)) == 1:
-                raise ChoiceValidationError(
-                    "release seed cannot use all-zero or repeated-byte fixture material"
-                )
+        if (
+            self.provenance is SeedProvenance.UNIFORM_RANDOM_256
+            and (self.material == bytes(ROOT_SEED_BYTES) or len(set(self.material)) == 1)
+        ):
+            raise ChoiceValidationError(
+                "release seed cannot use all-zero or repeated-byte fixture material"
+            )
 
     @classmethod
     def from_hex(cls, value: str, provenance: SeedProvenance) -> RootSeed:
@@ -100,8 +108,7 @@ class SampleKey:
         if self.release != "v0.4":
             raise ChoiceValidationError("sample release must be v0.4")
         _require_token(self.target_id, "target_id")
-        if isinstance(self.sample_index, bool) or self.sample_index < 0:
-            raise ChoiceValidationError("sample_index must be a nonnegative integer")
+        _require_nonnegative_integer(self.sample_index, "sample_index")
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,9 +117,8 @@ class AttemptKey:
     attempt_index: int
 
     def __post_init__(self) -> None:
-        if isinstance(self.attempt_index, bool):
-            raise ChoiceValidationError("attempt_index must be an integer")
-        if not 0 <= self.attempt_index <= MAX_ATTEMPT_INDEX:
+        attempt_index = _require_nonnegative_integer(self.attempt_index, "attempt_index")
+        if attempt_index > MAX_ATTEMPT_INDEX:
             raise ChoiceValidationError(
                 f"attempt_index must be between 0 and {MAX_ATTEMPT_INDEX}"
             )
@@ -123,18 +129,16 @@ class AttemptRange:
     maximum_attempts: int
 
     def __post_init__(self) -> None:
-        if isinstance(self.maximum_attempts, bool):
-            raise ChoiceValidationError("maximum_attempts must be an integer")
-        if not 1 <= self.maximum_attempts <= MAX_ATTEMPT_INDEX + 1:
+        maximum_attempts = _require_nonnegative_integer(
+            self.maximum_attempts, "maximum_attempts"
+        )
+        if not 1 <= maximum_attempts <= MAX_ATTEMPT_INDEX + 1:
             raise ChoiceValidationError(
                 f"maximum_attempts must be between 1 and {MAX_ATTEMPT_INDEX + 1}"
             )
 
     def contains(self, attempt_index: int) -> bool:
-        return (
-            not isinstance(attempt_index, bool)
-            and 0 <= attempt_index < self.maximum_attempts
-        )
+        return type(attempt_index) is int and 0 <= attempt_index < self.maximum_attempts
 
     def indices(self) -> range:
         return range(self.maximum_attempts)
