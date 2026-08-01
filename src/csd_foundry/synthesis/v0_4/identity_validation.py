@@ -18,10 +18,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
     SampleKey,
     SeedProvenance,
 )
-from csd_foundry.synthesis.v0_4.generation_namespace import (
-    GenerationNamespace,
-    build_generation_namespace,
-)
+from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
 from csd_foundry.synthesis.v0_4.identities import (
     DuplicateIdentityRoleError,
     EntityKind,
@@ -29,6 +26,8 @@ from csd_foundry.synthesis.v0_4.identities import (
     IdentityLedger,
     IdentityRequest,
     UnknownIdentityRoleError,
+    _identity_from_digest,
+    canonical_identity_material,
     derive_identity,
 )
 from csd_foundry.synthesis.v0_4.identity_policy import (
@@ -205,6 +204,23 @@ def _canonical_assurance() -> tuple[bool, int]:
     return separated, rejected
 
 
+def _synthetic_identity(
+    namespace_digest_source: object,
+    request: IdentityRequest,
+    digest: bytes,
+) -> object:
+    del namespace_digest_source
+    namespace = build_generation_namespace(
+        _exact_str(KNOWN_ANSWER_IDENTITY_VECTORS[0], "target_definition_digest")
+    )
+    return _identity_from_digest(
+        namespace,
+        request,
+        canonical_identity_material(namespace, request),
+        digest,
+    )
+
+
 def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
     target_digest = _exact_str(KNOWN_ANSWER_IDENTITY_VECTORS[0], "target_definition_digest")
     namespace = build_generation_namespace(target_digest)
@@ -235,38 +251,54 @@ def _ledger_assurance(seed: RootSeed) -> tuple[bool, bool, bool, bool, bool]:
     except UnknownIdentityRoleError:
         unknown_role_rejected = True
 
-    def full_collision_provider(
-        seed_value: RootSeed,
-        namespace_value: GenerationNamespace,
-        request_value: IdentityRequest,
-    ) -> bytes:
-        del seed_value, namespace_value, request_value
-        return b"\x11" * 32
-
     collision_a = IdentityRequest(requests[0].attempt_key, EntityKind.EVIDENCE, ("a",), 0)
     collision_b = IdentityRequest(requests[0].attempt_key, EntityKind.EVIDENCE, ("b",), 0)
-    full_ledger = IdentityLedger(seed, namespace, digest_provider=full_collision_provider)
-    full_ledger.allocate(collision_a)
+
+    full_ledger = IdentityLedger(seed, namespace)
+    full_ledger._record_identity(
+        collision_a,
+        _identity_from_digest(
+            namespace,
+            collision_a,
+            canonical_identity_material(namespace, collision_a),
+            b"\x11" * 32,
+        ),
+    )
     full_collision_rejected = False
     try:
-        full_ledger.allocate(collision_b)
+        full_ledger._record_identity(
+            collision_b,
+            _identity_from_digest(
+                namespace,
+                collision_b,
+                canonical_identity_material(namespace, collision_b),
+                b"\x11" * 32,
+            ),
+        )
     except IdentityCollisionError:
         full_collision_rejected = True
 
-    def display_collision_provider(
-        seed_value: RootSeed,
-        namespace_value: GenerationNamespace,
-        request_value: IdentityRequest,
-    ) -> bytes:
-        del seed_value, namespace_value
-        suffix = b"\x22" * 16 if request_value.role_segments == ("a",) else b"\x33" * 16
-        return b"\xaa" * 16 + suffix
-
-    display_ledger = IdentityLedger(seed, namespace, digest_provider=display_collision_provider)
-    display_ledger.allocate(collision_a)
+    display_ledger = IdentityLedger(seed, namespace)
+    display_ledger._record_identity(
+        collision_a,
+        _identity_from_digest(
+            namespace,
+            collision_a,
+            canonical_identity_material(namespace, collision_a),
+            b"\xaa" * 16 + b"\x22" * 16,
+        ),
+    )
     display_collision_rejected = False
     try:
-        display_ledger.allocate(collision_b)
+        display_ledger._record_identity(
+            collision_b,
+            _identity_from_digest(
+                namespace,
+                collision_b,
+                canonical_identity_material(namespace, collision_b),
+                b"\xaa" * 16 + b"\x33" * 16,
+            ),
+        )
     except IdentityCollisionError:
         display_collision_rejected = True
 
