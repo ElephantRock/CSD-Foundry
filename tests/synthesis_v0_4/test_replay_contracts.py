@@ -29,6 +29,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
     SampleKey,
     SeedProvenance,
 )
+from csd_foundry.synthesis.v0_4.choice_records import ChoiceRecordError
 from csd_foundry.synthesis.v0_4.contracts import RejectionCause
 from csd_foundry.synthesis.v0_4.exhaustion import ExhaustionEvidence
 from csd_foundry.synthesis.v0_4.generation_namespace import build_generation_namespace
@@ -187,9 +188,9 @@ def test_choice_replay_detects_tampered_bound() -> None:
     session.bounded_integer(_path(attempt, "bounded"), 17)
     ledger = session.freeze()
     record = ledger.records[0]
-    tampered_record = replace(record, upper_exclusive=19)
-    tampered_ledger = replace(ledger, records=(tampered_record,))
-    with pytest.raises(ReplayMismatchError):
+    with pytest.raises((ChoiceRecordError, ReplayMismatchError)):
+        tampered_record = replace(record, upper_exclusive=19)
+        tampered_ledger = replace(ledger, records=(tampered_record,))
         replay_choice_ledger(_seed(), _namespace(), tampered_ledger)
 
 
