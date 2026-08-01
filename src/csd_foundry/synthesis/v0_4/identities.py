@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TypeAlias
@@ -28,6 +27,7 @@ from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canon
 
 _PREFIX = b"csd-identity-hmac-sha256/v1\x00"
 _TOKEN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 class IdentityError(ValueError):
@@ -73,6 +73,12 @@ _DISPLAY_PREFIXES: dict[EntityKind, str] = {
 }
 
 RoleSegment: TypeAlias = ChoiceSegment
+
+
+def _require_digest(value: object, field_name: str) -> str:
+    if type(value) is not str or _DIGEST_PATTERN.fullmatch(value) is None:
+        raise IdentityError(f"{field_name} must be a lowercase SHA-256 digest")
+    return value
 
 
 def _require_role_segment(value: object) -> RoleSegment:
@@ -129,6 +135,22 @@ class EntityIdentity:
     material_digest: str
     generation_namespace_digest: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.entity_kind, EntityKind):
+            raise IdentityError("entity identity kind must be an EntityKind")
+        full_digest = _require_digest(self.full_digest, "identity full_digest")
+        _require_digest(self.material_digest, "identity material_digest")
+        _require_digest(
+            self.generation_namespace_digest,
+            "identity generation_namespace_digest",
+        )
+        display_hex_length = DISPLAY_DIGEST_BITS // 4
+        expected_display = (
+            f"{_DISPLAY_PREFIXES[self.entity_kind]}-{full_digest[:display_hex_length]}"
+        )
+        if type(self.display_id) is not str or self.display_id != expected_display:
+            raise IdentityError("display identity must match its kind and full-digest prefix")
+
     def to_json_value(self) -> dict[str, object]:
         return {
             "display_id": self.display_id,
@@ -144,14 +166,19 @@ class IdentityRecord:
     request: IdentityRequest
     identity: EntityIdentity
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.request, IdentityRequest):
+            raise IdentityError("identity record request must be an IdentityRequest")
+        if not isinstance(self.identity, EntityIdentity):
+            raise IdentityError("identity record identity must be an EntityIdentity")
+        if self.request.entity_kind is not self.identity.entity_kind:
+            raise IdentityError("identity record request and identity kinds must match")
+
     def to_json_value(self) -> dict[str, object]:
         return {
             "identity": self.identity.to_json_value(),
             "request": self.request.to_json_value(),
         }
-
-
-DigestProvider: TypeAlias = Callable[[RootSeed, GenerationNamespace, IdentityRequest], bytes]
 
 
 def canonical_identity_material(
@@ -172,32 +199,19 @@ def canonical_identity_material(
     )
 
 
-def _identity_digest(
-    seed: RootSeed,
-    namespace: GenerationNamespace,
-    request: IdentityRequest,
-) -> bytes:
-    material = canonical_identity_material(namespace, request)
+def _identity_digest(seed: RootSeed, material: bytes) -> bytes:
     message = _PREFIX + len(material).to_bytes(8, "big") + material
     return hmac.new(seed.material, message, hashlib.sha256).digest()
 
 
-def derive_identity(
-    seed: RootSeed,
+def _identity_from_digest(
     namespace: GenerationNamespace,
     request: IdentityRequest,
-    *,
-    digest_provider: DigestProvider | None = None,
+    material: bytes,
+    digest: bytes,
 ) -> EntityIdentity:
-    """Derive one identity from immutable semantic context."""
-
-    if not isinstance(seed, RootSeed):
-        raise ChoiceValidationError("identity seed must be a RootSeed")
-    material = canonical_identity_material(namespace, request)
-    provider = _identity_digest if digest_provider is None else digest_provider
-    digest = provider(seed, namespace, request)
     if type(digest) is not bytes or len(digest) * 8 != FULL_DIGEST_BITS:
-        raise IdentityError("identity digest provider must return exactly 256 immutable bits")
+        raise IdentityError("identity digest must contain exactly 256 immutable bits")
     full_digest = digest.hex()
     display_hex_length = DISPLAY_DIGEST_BITS // 4
     display_id = f"{_DISPLAY_PREFIXES[request.entity_kind]}-{full_digest[:display_hex_length]}"
@@ -210,40 +224,53 @@ def derive_identity(
     )
 
 
+def derive_identity(
+    seed: RootSeed,
+    namespace: GenerationNamespace,
+    request: IdentityRequest,
+) -> EntityIdentity:
+    """Derive one identity using the sole normative identity algorithm."""
+
+    if not isinstance(seed, RootSeed):
+        raise ChoiceValidationError("identity seed must be a RootSeed")
+    material = canonical_identity_material(namespace, request)
+    return _identity_from_digest(
+        namespace,
+        request,
+        material,
+        _identity_digest(seed, material),
+    )
+
+
 class IdentityLedger:
     """Fail-closed allocation ledger with order-independent commitments."""
 
-    def __init__(
-        self,
-        seed: RootSeed,
-        namespace: GenerationNamespace,
-        *,
-        digest_provider: DigestProvider | None = None,
-    ) -> None:
+    def __init__(self, seed: RootSeed, namespace: GenerationNamespace) -> None:
         if not isinstance(seed, RootSeed):
             raise ChoiceValidationError("identity ledger seed must be a RootSeed")
         if not isinstance(namespace, GenerationNamespace):
             raise ChoiceValidationError("identity ledger namespace must be a GenerationNamespace")
         self._seed = seed
         self._namespace = namespace
-        self._digest_provider = digest_provider
         self._records: dict[str, IdentityRecord] = {}
         self._full_digests: dict[str, str] = {}
         self._display_ids: dict[str, str] = {}
 
     def _request_key(self, request: IdentityRequest) -> str:
+        if not isinstance(request, IdentityRequest):
+            raise ChoiceValidationError("identity ledger request must be an IdentityRequest")
         return canonical_sha256(request.to_json_value())
 
-    def allocate(self, request: IdentityRequest) -> EntityIdentity:
+    def _record_identity(
+        self,
+        request: IdentityRequest,
+        identity: EntityIdentity,
+    ) -> EntityIdentity:
         request_key = self._request_key(request)
         if request_key in self._records:
             raise DuplicateIdentityRoleError("semantic identity role has already been allocated")
-        identity = derive_identity(
-            self._seed,
-            self._namespace,
-            request,
-            digest_provider=self._digest_provider,
-        )
+        if identity.generation_namespace_digest != self._namespace.digest:
+            raise IdentityError("identity belongs to a different generation namespace")
         full_owner = self._full_digests.get(identity.full_digest)
         if full_owner is not None and full_owner != request_key:
             raise IdentityCollisionError("distinct identity roles share a full digest")
@@ -254,6 +281,12 @@ class IdentityLedger:
         self._full_digests[identity.full_digest] = request_key
         self._display_ids[identity.display_id] = request_key
         return identity
+
+    def allocate(self, request: IdentityRequest) -> EntityIdentity:
+        return self._record_identity(
+            request,
+            derive_identity(self._seed, self._namespace, request),
+        )
 
     def resolve(self, request: IdentityRequest) -> EntityIdentity:
         request_key = self._request_key(request)
