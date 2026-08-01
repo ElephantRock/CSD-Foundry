@@ -65,9 +65,7 @@ def _replayed_record(
     if type(seed) is not RootSeed:
         raise ReplayMismatchError("replay seed must use the exact RootSeed class")
     if type(namespace) is not GenerationNamespace:
-        raise ReplayMismatchError(
-            "replay namespace must use the exact GenerationNamespace class"
-        )
+        raise ReplayMismatchError("replay namespace must use the exact GenerationNamespace class")
     if record.seed_commitment != seed.commitment:
         raise ReplayMismatchError("choice record seed commitment does not match")
     if record.generation_namespace_digest != namespace.digest:
