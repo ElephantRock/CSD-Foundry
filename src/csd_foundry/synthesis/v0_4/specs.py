@@ -69,7 +69,9 @@ COVERAGE_TARGETS_SPEC: dict[str, object] = {
                 "evidence_kind": "projected_bounded",
                 "bounded_projection_id": "micro-v0.4-profile-e3-b2-r1",
                 "omitted_dimensions": ["large-support-multiplicity"],
-                "justification": "The profile and request joint is preserved in a bounded projection.",
+                "justification": (
+                    "The profile and request joint is preserved in a bounded projection."
+                ),
                 "alternative_witness_id": "constructive-profile-family-v0.4",
             },
             "infeasibility_witness": None,
@@ -97,7 +99,9 @@ COVERAGE_TARGETS_SPEC: dict[str, object] = {
                 "evidence_kind": "projected_bounded",
                 "bounded_projection_id": "micro-v0.4-heartbeat-expiry-e3-b2",
                 "omitted_dimensions": ["additional-dormant-bases"],
-                "justification": "The rare temporal joint is preserved while incidental bases are omitted.",
+                "justification": (
+                    "The rare temporal joint is preserved while incidental bases are omitted."
+                ),
                 "alternative_witness_id": "constructive-heartbeat-expiry-family-v0.4",
             },
             "infeasibility_witness": None,
@@ -153,7 +157,9 @@ COVERAGE_TARGETS_SPEC: dict[str, object] = {
                 "evidence_kind": "alternative_assurance",
                 "bounded_projection_id": None,
                 "omitted_dimensions": ["full-commutativity-class"],
-                "justification": "A constructive witness family and metamorphic event-order check are required.",
+                "justification": (
+                    "A constructive witness family and metamorphic event-order check are required."
+                ),
                 "alternative_witness_id": "convergence-metamorphic-family-v0.4",
             },
             "infeasibility_witness": None,

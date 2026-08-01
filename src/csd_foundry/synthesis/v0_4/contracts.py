@@ -232,7 +232,9 @@ class InfeasibilityWitness:
         _require_unique(self.unsat_core, "unsat_core")
         _require_text(self.verifier_version, "verifier_version")
         if not self.constraint_ids or not self.unsat_core:
-            raise ContractValidationError("infeasibility witness requires constraints and an unsat core")
+            raise ContractValidationError(
+                "infeasibility witness requires constraints and an unsat core"
+            )
         if _SHA256_PATTERN.fullmatch(self.witness_digest) is None:
             raise ContractValidationError("witness_digest must be a lowercase SHA-256 digest")
 
@@ -256,7 +258,9 @@ class CompletenessWitnessMap:
                     "fully bounded evidence requires a projection and no omitted dimensions"
                 )
             if self.alternative_witness_id is not None:
-                raise ContractValidationError("fully bounded evidence cannot use an alternative witness")
+                raise ContractValidationError(
+                    "fully bounded evidence cannot use an alternative witness"
+                )
         elif self.evidence_kind is CompletenessEvidenceKind.PROJECTED_BOUNDED:
             if self.bounded_projection_id is None or not self.omitted_dimensions:
                 raise ContractValidationError(
@@ -295,7 +299,8 @@ class CoverageTarget:
             ("profile_pattern", self.profile_pattern),
         ):
             _require_text(value, field_name)
-        _require_unique(self.event_pattern, "event_pattern")
+        for event_type in self.event_pattern:
+            _require_text(event_type, "event_pattern")
         if not self.event_pattern:
             raise ContractValidationError("event_pattern must be nonempty")
         if not self.required_invariants:
@@ -315,7 +320,9 @@ class CoverageTarget:
                     "required targets need a positive quota and positive search budget"
                 )
             if self.infeasibility_witness is not None:
-                raise ContractValidationError("required targets cannot carry infeasibility witnesses")
+                raise ContractValidationError(
+                    "required targets cannot carry infeasibility witnesses"
+                )
         elif self.disposition is TargetDisposition.MACHINE_PROVEN_INFEASIBLE:
             if self.minimum_count != 0 or self.infeasibility_witness is None:
                 raise ContractValidationError(
@@ -346,7 +353,8 @@ class TrajectoryPlan:
     def __post_init__(self) -> None:
         _require_text(self.plan_id, "plan_id")
         _require_text(self.target_id, "target_id")
-        _require_unique(self.event_skeleton, "event_skeleton")
+        for event_type in self.event_skeleton:
+            _require_text(event_type, "event_skeleton")
         _require_text(self.support_graph_pattern, "support_graph_pattern")
         if not self.event_skeleton:
             raise ContractValidationError("event_skeleton must be nonempty")
@@ -549,9 +557,10 @@ class MutationRiskBudget:
             raise ContractValidationError("stochastic escape budget must be nonnegative")
         if self.minimum_invalid_mutants < 0:
             raise ContractValidationError("minimum invalid mutants must be nonnegative")
-        if self.upper_confidence_bound_decimal is not None and _DECIMAL_PATTERN.fullmatch(
-            self.upper_confidence_bound_decimal
-        ) is None:
+        if (
+            self.upper_confidence_bound_decimal is not None
+            and _DECIMAL_PATTERN.fullmatch(self.upper_confidence_bound_decimal) is None
+        ):
             raise ContractValidationError(
                 "confidence bound must be an exact decimal string between zero and one"
             )

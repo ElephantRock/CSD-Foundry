@@ -26,13 +26,13 @@ from csd_foundry.synthesis.v0_4.contracts import (
 )
 from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canonical_sha256
 from csd_foundry.synthesis.v0_4.specs import (
+    COVERAGE_TARGETS_SPEC,
     DETERMINISTIC_ARITHMETIC_POLICY_SPEC,
     HOLDOUTS_SPEC,
     MUTATION_RISK_POLICY_SPEC,
     RELEASE_POLICY_SPEC,
     SCHEMA_DOCUMENT_NAMES,
     SPEC_DOCUMENTS,
-    COVERAGE_TARGETS_SPEC,
 )
 
 
@@ -248,9 +248,7 @@ def load_mutation_risk_policy() -> MutationRiskPolicy:
                 maximum_unresolved_deterministic=_integer(
                     budget, "maximum_unresolved_deterministic"
                 ),
-                maximum_unresolved_stochastic=_integer(
-                    budget, "maximum_unresolved_stochastic"
-                ),
+                maximum_unresolved_stochastic=_integer(budget, "maximum_unresolved_stochastic"),
                 upper_confidence_bound_decimal=_optional_string(
                     budget, "upper_confidence_bound_decimal"
                 ),
@@ -268,9 +266,7 @@ def load_mutation_risk_policy() -> MutationRiskPolicy:
 def load_deterministic_arithmetic_policy() -> DeterministicArithmeticPolicy:
     data = _mapping(DETERMINISTIC_ARITHMETIC_POLICY_SPEC, "deterministic arithmetic policy")
     return DeterministicArithmeticPolicy(
-        semantic_floating_point_permitted=_boolean(
-            data, "semantic_floating_point_permitted"
-        ),
+        semantic_floating_point_permitted=_boolean(data, "semantic_floating_point_permitted"),
         statistical_decimal_precision=_integer(data, "statistical_decimal_precision"),
         rounding_mode=_string(data, "rounding_mode"),
         canonical_encoding=_string(data, "canonical_encoding"),
@@ -281,10 +277,7 @@ def load_deterministic_arithmetic_policy() -> DeterministicArithmeticPolicy:
 
 def _reverse_mappings(value: object) -> object:
     if isinstance(value, dict):
-        return {
-            key: _reverse_mappings(item)
-            for key, item in reversed(tuple(value.items()))
-        }
+        return {key: _reverse_mappings(item) for key, item in reversed(tuple(value.items()))}
     if isinstance(value, list):
         return [_reverse_mappings(item) for item in value]
     return value
@@ -318,7 +311,7 @@ def validate_release(release: str = "v0.4") -> SynthesisContractReport:
 
     for cause in RejectionCause:
         try:
-            cause.owner
+            _ = cause.owner
         except KeyError:
             errors.append(f"rejection cause lacks an owner: {cause.value}")
     for effect in SemanticEffect:

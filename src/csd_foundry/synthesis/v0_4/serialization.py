@@ -45,10 +45,7 @@ def to_json_value(value: object) -> JSONValue:
     if isinstance(value, StrEnum):
         return value.value
     if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: to_json_value(getattr(value, field.name))
-            for field in fields(value)
-        }
+        return {field.name: to_json_value(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, dict):
         converted: dict[str, JSONValue] = {}
         for key, item in value.items():

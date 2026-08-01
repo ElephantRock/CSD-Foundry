@@ -25,7 +25,6 @@ from csd_foundry.synthesis.v0_4.serialization import (
 from csd_foundry.synthesis.v0_4.specs import SCHEMA_DOCUMENT_NAMES, SPEC_DOCUMENTS
 from csd_foundry.synthesis.v0_4.validation import load_targets, validate_release
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SPEC_ROOT = ROOT / "specs" / "v0.4"
 
