@@ -120,9 +120,7 @@ class ContentAddressedPublicationStore:
             disposition=PublicationDisposition.EXISTING_IDENTICAL,
         )
 
-    def _durable_existing(
-        self, final_path: Path, payload: bytes, digest: str
-    ) -> PublicationResult:
+    def _durable_existing(self, final_path: Path, payload: bytes, digest: str) -> PublicationResult:
         result = self._classify_existing(final_path, payload, digest)
         self._fsync_directory(final_path.parent)
         return result
