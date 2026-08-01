@@ -15,6 +15,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import RootSeed
 from csd_foundry.synthesis.v0_4.generation_namespace import GenerationNamespace
 from csd_foundry.synthesis.v0_4.identities import IdentityRecord
 from csd_foundry.synthesis.v0_4.replay import (
+    canonical_identity_records,
     replay_bundle_commitment,
     replay_choice_ledger,
     replay_identity_records,
@@ -45,10 +46,7 @@ class AttemptReplayBundle:
             raise AttemptReplayError("search branch must use the exact contract class")
         if type(self.choice_ledger) is not ChoiceLedger:
             raise AttemptReplayError("choice ledger must use the exact contract class")
-        if type(self.identity_records) is not tuple or not all(
-            type(record) is IdentityRecord for record in self.identity_records
-        ):
-            raise AttemptReplayError("identity records must be an exact immutable tuple")
+        ordered_identity_records = canonical_identity_records(self.identity_records)
 
         attempt_key = self.completion.attempt_key
         namespace_digest = self.completion.generation_namespace_digest
@@ -58,12 +56,19 @@ class AttemptReplayBundle:
             raise AttemptReplayError("search branch belongs to a different attempt")
         if self.choice_ledger.attempt_key != attempt_key:
             raise AttemptReplayError("choice ledger belongs to a different attempt")
+        if any(record.request.attempt_key != attempt_key for record in ordered_identity_records):
+            raise AttemptReplayError("identity record belongs to a different attempt")
         if self.input_commitment.generation_namespace_digest != namespace_digest:
             raise AttemptReplayError("input commitment belongs to a different namespace")
         if self.search_branch.generation_namespace_digest != namespace_digest:
             raise AttemptReplayError("search branch belongs to a different namespace")
         if self.choice_ledger.generation_namespace_digest != namespace_digest:
             raise AttemptReplayError("choice ledger belongs to a different namespace")
+        if any(
+            record.identity.generation_namespace_digest != namespace_digest
+            for record in ordered_identity_records
+        ):
+            raise AttemptReplayError("identity record belongs to a different namespace")
         if self.completion.attempt_input_commitment_digest != self.input_commitment.digest:
             raise AttemptReplayError("completion input commitment digest does not match")
         if self.search_branch.attempt_input_commitment_digest != self.input_commitment.digest:
@@ -74,6 +79,11 @@ class AttemptReplayBundle:
             raise AttemptReplayError("branch choice ledger digest does not match")
         if self.completion.search_branch_digest != self.search_branch.digest:
             raise AttemptReplayError("completion search branch digest does not match")
+        identity_digest = canonical_sha256(
+            [record.to_json_value() for record in ordered_identity_records]
+        )
+        if self.completion.identity_ledger_digest != identity_digest:
+            raise AttemptReplayError("completion identity ledger digest does not match")
 
     def validate(self, seed: RootSeed, namespace: GenerationNamespace) -> str:
         if type(seed) is not RootSeed:
@@ -102,10 +112,13 @@ class AttemptReplayBundle:
         )
 
     def to_json_value(self) -> dict[str, object]:
+        ordered_identity_records = canonical_identity_records(self.identity_records)
         return {
             "choice_ledger": self.choice_ledger.to_json_value(),
             "completion": self.completion.to_json_value(),
-            "identity_records": [record.to_json_value() for record in self.identity_records],
+            "identity_records": [
+                record.to_json_value() for record in ordered_identity_records
+            ],
             "input_commitment": self.input_commitment.to_json_value(),
             "replay_evidence_digest": self.replay_evidence_digest,
             "search_branch": self.search_branch.to_json_value(),
