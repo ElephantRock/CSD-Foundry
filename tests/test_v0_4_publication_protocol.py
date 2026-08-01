@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -140,6 +141,74 @@ def test_content_addressed_store_is_no_clobber_and_idempotent(tmp_path: Path) ->
     assert first.disposition is PublicationDisposition.PUBLISHED
     assert second.disposition is PublicationDisposition.EXISTING_IDENTICAL
     assert first.relative_path == f"objects/{envelope.digest[:2]}/{envelope.digest[2:]}"
+    assert store.read_verified(envelope.digest) == envelope.canonical_bytes
+
+
+def test_store_fsyncs_new_directory_ancestors_before_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    synced: list[Path] = []
+    monkeypatch.setattr(
+        ContentAddressedPublicationStore,
+        "_fsync_directory",
+        staticmethod(synced.append),
+    )
+    root = tmp_path / "publication"
+    store = ContentAddressedPublicationStore(root)
+    envelope = AttemptCompletionEnvelope.from_completion(publication_fixture_accepted())
+    store.publish_bytes(envelope.canonical_bytes, expected_digest=envelope.digest)
+
+    final_parent = store.object_path(envelope.digest).parent
+    assert root in synced
+    assert root.parent in synced
+    assert store.objects_root in synced
+    assert final_parent in synced
+
+
+def test_duplicate_existing_success_fsyncs_authoritative_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    envelope = AttemptCompletionEnvelope.from_completion(publication_fixture_accepted())
+    store = ContentAddressedPublicationStore(tmp_path)
+    store.publish_bytes(envelope.canonical_bytes, expected_digest=envelope.digest)
+
+    synced: list[Path] = []
+    monkeypatch.setattr(
+        ContentAddressedPublicationStore,
+        "_fsync_directory",
+        staticmethod(synced.append),
+    )
+    result = store.publish_bytes(envelope.canonical_bytes, expected_digest=envelope.digest)
+
+    assert result.disposition is PublicationDisposition.EXISTING_IDENTICAL
+    assert store.object_path(envelope.digest).parent in synced
+
+
+def test_concurrent_duplicate_race_fsyncs_authoritative_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    envelope = AttemptCompletionEnvelope.from_completion(publication_fixture_accepted())
+    store = ContentAddressedPublicationStore(tmp_path)
+    original_link = os.link
+
+    def racing_link(source: Path, destination: Path) -> None:
+        original_link(source, destination)
+        raise FileExistsError(destination)
+
+    synced: list[Path] = []
+    monkeypatch.setattr(os, "link", racing_link)
+    monkeypatch.setattr(
+        ContentAddressedPublicationStore,
+        "_fsync_directory",
+        staticmethod(synced.append),
+    )
+    result = store.publish_bytes(envelope.canonical_bytes, expected_digest=envelope.digest)
+
+    assert result.disposition is PublicationDisposition.EXISTING_IDENTICAL
+    assert store.object_path(envelope.digest).parent in synced
     assert store.read_verified(envelope.digest) == envelope.canonical_bytes
 
 
