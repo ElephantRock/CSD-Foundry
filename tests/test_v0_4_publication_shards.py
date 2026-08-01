@@ -47,6 +47,30 @@ def _publications(
     return inventory, coordinator, publications
 
 
+def test_cross_run_duplicate_receipts_report_existing_identical(tmp_path: Path) -> None:
+    store = ContentAddressedPublicationStore(tmp_path)
+    inventory = publication_fixture_inventory(shard_count=2, sample_count=1)
+    coordinator = ShardPublicationCoordinator(store)
+    first = coordinator.publish_completion(
+        inventory,
+        publication_fixture_accepted(0),
+        execution_run_id="run-first",
+    )
+    duplicate = coordinator.publish_completion(
+        inventory,
+        publication_fixture_accepted(0),
+        execution_run_id="run-duplicate",
+    )
+
+    assert all(receipt.disposition.value == "published" for receipt in first.receipts)
+    assert all(receipt.disposition.value == "existing-identical" for receipt in duplicate.receipts)
+    assert first.envelope.digest == duplicate.envelope.digest
+    assert first.reference.digest == duplicate.reference.digest
+    assert tuple(receipt.digest for receipt in first.receipts) != tuple(
+        receipt.digest for receipt in duplicate.receipts
+    )
+
+
 def test_shard_index_is_completion_order_independent(tmp_path: Path) -> None:
     store = ContentAddressedPublicationStore(tmp_path)
     inventory, _, publications = _publications(store)

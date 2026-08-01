@@ -554,6 +554,55 @@ class ShardPublicationCoordinator:
         if fault_injector is not None:
             fault_injector(stage)
 
+    def _publish_or_reuse_receipt(
+        self,
+        *,
+        previous: OperationalPublicationReceipt | None,
+        execution_run_id: str,
+        inventory_digest: str,
+        attempt_key: AttemptKey,
+        object_kind: PublicationObjectKind,
+        object_digest: str,
+        actual_disposition: PublicationDisposition,
+    ) -> OperationalPublicationReceipt:
+        published_candidate = OperationalPublicationReceipt.append(
+            previous=previous,
+            execution_run_id=execution_run_id,
+            inventory_digest=inventory_digest,
+            attempt_key=attempt_key,
+            object_kind=object_kind,
+            object_digest=object_digest,
+            disposition=PublicationDisposition.PUBLISHED,
+        )
+        candidate_path = self.store.object_path(published_candidate.digest)
+        if candidate_path.is_file():
+            if (
+                self.store.read_verified(published_candidate.digest)
+                != published_candidate.canonical_bytes
+            ):
+                raise ShardPublicationError(
+                    "persisted publication receipt does not match its canonical bytes"
+                )
+            return published_candidate
+        receipt = (
+            published_candidate
+            if actual_disposition is PublicationDisposition.PUBLISHED
+            else OperationalPublicationReceipt.append(
+                previous=previous,
+                execution_run_id=execution_run_id,
+                inventory_digest=inventory_digest,
+                attempt_key=attempt_key,
+                object_kind=object_kind,
+                object_digest=object_digest,
+                disposition=actual_disposition,
+            )
+        )
+        self.store.publish_bytes(
+            receipt.canonical_bytes,
+            expected_digest=receipt.digest,
+        )
+        return receipt
+
     def publish_completion(
         self,
         inventory: ExecutionInventory,
@@ -563,42 +612,34 @@ class ShardPublicationCoordinator:
         fault_injector: FaultInjector | None = None,
     ) -> PublishedCompletion:
         envelope = AttemptCompletionEnvelope.from_completion(completion)
-        self.store.publish_bytes(
+        envelope_result = self.store.publish_bytes(
             envelope.canonical_bytes,
             expected_digest=envelope.digest,
         )
-        envelope_receipt = OperationalPublicationReceipt.append(
+        envelope_receipt = self._publish_or_reuse_receipt(
             previous=None,
             execution_run_id=execution_run_id,
             inventory_digest=inventory.digest,
             attempt_key=envelope.attempt_key,
             object_kind=PublicationObjectKind.ATTEMPT_COMPLETION_ENVELOPE,
             object_digest=envelope.digest,
-            disposition=PublicationDisposition.PUBLISHED,
-        )
-        self.store.publish_bytes(
-            envelope_receipt.canonical_bytes,
-            expected_digest=envelope_receipt.digest,
+            actual_disposition=envelope_result.disposition,
         )
         self._invoke(fault_injector, "completion-receipt-persisted")
 
         reference = InventoryCompletionReference.from_inventory(inventory, envelope)
-        self.store.publish_bytes(
+        reference_result = self.store.publish_bytes(
             reference.canonical_bytes,
             expected_digest=reference.digest,
         )
-        reference_receipt = OperationalPublicationReceipt.append(
+        reference_receipt = self._publish_or_reuse_receipt(
             previous=envelope_receipt,
             execution_run_id=execution_run_id,
             inventory_digest=inventory.digest,
             attempt_key=envelope.attempt_key,
             object_kind=PublicationObjectKind.INVENTORY_COMPLETION_REFERENCE,
             object_digest=reference.digest,
-            disposition=PublicationDisposition.PUBLISHED,
-        )
-        self.store.publish_bytes(
-            reference_receipt.canonical_bytes,
-            expected_digest=reference_receipt.digest,
+            actual_disposition=reference_result.disposition,
         )
         self._invoke(fault_injector, "reference-receipt-persisted")
         return PublishedCompletion(

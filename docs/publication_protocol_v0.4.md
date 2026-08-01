@@ -43,10 +43,11 @@ The reference does not change the semantic envelope.
 
 `OperationalPublicationReceipt` records append-only operational publication history. Receipts
 form a contiguous previous-digest chain within one execution run, inventory, and attempt.
-Operational receipt bytes never enter completion-envelope identity. Coordinator-issued
-receipts describe the stable authoritative `published` state, while per-call storage results
-separately distinguish newly installed from `existing-identical`. Repeating recovery with the
-same execution-run ID therefore reproduces the exact receipt chain.
+Operational receipt bytes never enter completion-envelope identity. Receipts truthfully
+record whether that execution run installed new authority or encountered `existing-identical`
+bytes. During same-run recovery, an already persisted canonical `published` receipt is reused
+rather than regenerated from the retry's storage disposition. This preserves exact receipt
+chains after receipt-boundary crashes without misclassifying duplicates from another run.
 
 ## No-clobber object publication
 
