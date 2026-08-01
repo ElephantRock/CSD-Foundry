@@ -11,6 +11,7 @@ from csd_foundry.synthesis.v0_4.choice_paths import (
     AttemptKey,
     ChoicePath,
     RootSeed,
+    SampleKey,
 )
 from csd_foundry.synthesis.v0_4.choice_records import (
     BooleanRatioChoiceRecord,
@@ -34,6 +35,7 @@ from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canon
 
 CHOICE_LEDGER_SCHEMA_VERSION = "csd-choice-ledger/0.4"
 _TOKEN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_HEX_256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ChoiceSessionError(RuntimeError):
@@ -56,9 +58,19 @@ def _require_token(value: object, field_name: str) -> str:
     return value
 
 
+def _require_digest(value: object, field_name: str) -> str:
+    if type(value) is not str or _HEX_256_PATTERN.fullmatch(value) is None:
+        raise ChoiceRecordError(f"{field_name} must be a lowercase SHA-256 digest")
+    return value
+
+
 def _path_bytes(path: ChoicePath) -> bytes:
     if type(path) is not ChoicePath:
         raise ChoiceSessionError("choice paths must use the exact ChoicePath class")
+    if type(path.attempt_key) is not AttemptKey:
+        raise ChoiceSessionError("choice path attempt_key must use the exact AttemptKey class")
+    if type(path.attempt_key.sample_key) is not SampleKey:
+        raise ChoiceSessionError("choice path sample_key must use the exact SampleKey class")
     return canonical_json_bytes(path.to_json_value())
 
 
@@ -110,24 +122,24 @@ class ChoiceLedger:
     def __post_init__(self) -> None:
         if type(self) is not ChoiceLedger:
             raise ChoiceRecordError("choice ledgers must use the exact contract class")
-        if type(self.seed_commitment) is not str or len(self.seed_commitment) != 64:
-            raise ChoiceRecordError("seed_commitment must be a lowercase SHA-256 digest")
-        if (
-            type(self.generation_namespace_digest) is not str
-            or len(self.generation_namespace_digest) != 64
-        ):
-            raise ChoiceRecordError(
-                "generation_namespace_digest must be a lowercase SHA-256 digest"
-            )
+        _require_digest(self.seed_commitment, "seed_commitment")
+        _require_digest(
+            self.generation_namespace_digest,
+            "generation_namespace_digest",
+        )
         if type(self.attempt_key) is not AttemptKey:
             raise ChoiceRecordError("attempt_key must use the exact AttemptKey class")
+        if type(self.attempt_key.sample_key) is not SampleKey:
+            raise ChoiceRecordError("sample_key must use the exact SampleKey class")
         _require_token(self.producer_contract_id, "producer_contract_id")
         _require_token(self.allowed_namespace_prefix, "allowed_namespace_prefix")
         if type(self.records) is not tuple:
             raise ChoiceRecordError("choice ledger records must be an immutable tuple")
         if not all(_record_type_valid(record) for record in self.records):
             raise ChoiceRecordError("choice ledger records must use exact record variants")
-        expected_order = tuple(sorted(self.records, key=lambda record: _path_bytes(record.path)))
+        expected_order = tuple(
+            sorted(self.records, key=lambda record: _path_bytes(record.path))
+        )
         if self.records != expected_order:
             raise ChoiceRecordError("choice ledger records must use canonical path order")
         seen: set[bytes] = set()
@@ -148,7 +160,9 @@ class ChoiceLedger:
             ):
                 raise ChoiceRecordError("choice record uses an undeclared namespace prefix")
         if self.schema_version != CHOICE_LEDGER_SCHEMA_VERSION:
-            raise ChoiceRecordError(f"choice ledger schema must be {CHOICE_LEDGER_SCHEMA_VERSION}")
+            raise ChoiceRecordError(
+                f"choice ledger schema must be {CHOICE_LEDGER_SCHEMA_VERSION}"
+            )
 
     def to_json_value(self) -> dict[str, object]:
         return _ledger_value(
@@ -191,6 +205,8 @@ class ChoiceSession:
             )
         if type(attempt_key) is not AttemptKey:
             raise ChoiceSessionError("choice session attempt_key must be exact")
+        if type(attempt_key.sample_key) is not SampleKey:
+            raise ChoiceSessionError("choice session sample_key must be exact")
         if type(budget) is not ChoiceBudget:
             raise ChoiceSessionError("choice session budget must be exact")
         self._seed = seed
@@ -238,8 +254,8 @@ class ChoiceSession:
     def _reserve(self, path: ChoicePath) -> None:
         self._reserved_paths.add(self._require_open_path(path))
 
-    def _prospective_ledger_bytes(self, record: ChoiceRecord) -> int:
-        records = tuple(sorted((*self._records, record), key=lambda item: _path_bytes(item.path)))
+    def _ledger_bytes_for(self, records: tuple[ChoiceRecord, ...]) -> int:
+        ordered = tuple(sorted(records, key=lambda item: _path_bytes(item.path)))
         value = _ledger_value(
             schema_version=CHOICE_LEDGER_SCHEMA_VERSION,
             seed_commitment=self._seed.commitment,
@@ -247,28 +263,40 @@ class ChoiceSession:
             attempt_key=self._attempt_key,
             producer_contract_id=self._producer_contract_id,
             allowed_namespace_prefix=self._allowed_namespace_prefix,
-            records=records,
+            records=ordered,
         )
         return len(canonical_json_bytes(value))
 
-    def _commit(self, record: ChoiceRecord) -> None:
+    def _preflight_choice_count(self) -> None:
         choice_count = len(self._records) + 1
-        canonical_bytes = self._prospective_ledger_bytes(record)
-        if (
-            choice_count > self._budget.maximum_choices_per_attempt
-            or canonical_bytes > self._budget.maximum_canonical_ledger_bytes
-        ):
+        if choice_count > self._budget.maximum_choices_per_attempt:
             raise ChoiceBudgetExceeded(
                 choice_count=choice_count,
+                maximum_choices=self._budget.maximum_choices_per_attempt,
+                canonical_bytes=self._ledger_bytes_for(tuple(self._records)),
+                maximum_canonical_bytes=self._budget.maximum_canonical_ledger_bytes,
+            )
+
+    def _commit(self, record: ChoiceRecord) -> None:
+        records = (*self._records, record)
+        canonical_bytes = self._ledger_bytes_for(records)
+        if canonical_bytes > self._budget.maximum_canonical_ledger_bytes:
+            raise ChoiceBudgetExceeded(
+                choice_count=len(records),
                 maximum_choices=self._budget.maximum_choices_per_attempt,
                 canonical_bytes=canonical_bytes,
                 maximum_canonical_bytes=self._budget.maximum_canonical_ledger_bytes,
             )
         self._records.append(record)
 
+    def _poison_if_open(self) -> None:
+        if self._state is ChoiceSessionState.OPEN:
+            self._state = ChoiceSessionState.POISONED
+
     def bounded_integer(self, path: ChoicePath, upper_exclusive: int) -> int:
-        self._reserve(path)
         try:
+            self._reserve(path)
+            self._preflight_choice_count()
             result = bounded_integer(self._seed, path, upper_exclusive)
             record = record_from_bounded_result(
                 path=path,
@@ -280,7 +308,7 @@ class ChoiceSession:
             self._commit(record)
             return record.evidence.value
         except Exception:
-            self._state = ChoiceSessionState.POISONED
+            self._poison_if_open()
             raise
 
     def weighted_choice(
@@ -289,8 +317,9 @@ class ChoiceSession:
         values: CanonicalArray,
         weights: tuple[int, ...],
     ) -> CanonicalValue:
-        self._reserve(path)
         try:
+            self._reserve(path)
+            self._preflight_choice_count()
             if type(values) is not CanonicalArray:
                 raise ChoiceRecordError("weighted values must be an exact CanonicalArray")
             if type(weights) is not tuple:
@@ -308,7 +337,7 @@ class ChoiceSession:
             self._commit(record)
             return record.selected_value
         except Exception:
-            self._state = ChoiceSessionState.POISONED
+            self._poison_if_open()
             raise
 
     def choose_ratio(
@@ -317,8 +346,9 @@ class ChoiceSession:
         numerator: int,
         denominator: int,
     ) -> bool:
-        self._reserve(path)
         try:
+            self._reserve(path)
+            self._preflight_choice_count()
             result = choose_ratio(self._seed, path, numerator, denominator)
             record = record_from_boolean_result(
                 path=path,
@@ -331,35 +361,43 @@ class ChoiceSession:
             self._commit(record)
             return record.selected
         except Exception:
-            self._state = ChoiceSessionState.POISONED
+            self._poison_if_open()
             raise
 
     def freeze(self) -> ChoiceLedger:
         if self._state is not ChoiceSessionState.OPEN:
             raise ChoiceSessionError(f"cannot freeze a {self._state.value} choice session")
-        records = tuple(sorted(self._records, key=lambda record: _path_bytes(record.path)))
-        ledger = ChoiceLedger(
-            seed_commitment=self._seed.commitment,
-            generation_namespace_digest=self._generation_namespace.digest,
-            attempt_key=self._attempt_key,
-            producer_contract_id=self._producer_contract_id,
-            allowed_namespace_prefix=self._allowed_namespace_prefix,
-            records=records,
-        )
-        if len(ledger.canonical_bytes) > self._budget.maximum_canonical_ledger_bytes:
-            self._state = ChoiceSessionState.POISONED
-            raise ChoiceBudgetExceeded(
-                choice_count=len(records),
-                maximum_choices=self._budget.maximum_choices_per_attempt,
-                canonical_bytes=len(ledger.canonical_bytes),
-                maximum_canonical_bytes=self._budget.maximum_canonical_ledger_bytes,
+        try:
+            records = tuple(
+                sorted(self._records, key=lambda record: _path_bytes(record.path))
             )
-        self._state = ChoiceSessionState.FROZEN
-        return ledger
+            ledger = ChoiceLedger(
+                seed_commitment=self._seed.commitment,
+                generation_namespace_digest=self._generation_namespace.digest,
+                attempt_key=self._attempt_key,
+                producer_contract_id=self._producer_contract_id,
+                allowed_namespace_prefix=self._allowed_namespace_prefix,
+                records=records,
+            )
+            canonical_bytes = len(ledger.canonical_bytes)
+            if canonical_bytes > self._budget.maximum_canonical_ledger_bytes:
+                raise ChoiceBudgetExceeded(
+                    choice_count=len(records),
+                    maximum_choices=self._budget.maximum_choices_per_attempt,
+                    canonical_bytes=canonical_bytes,
+                    maximum_canonical_bytes=self._budget.maximum_canonical_ledger_bytes,
+                )
+            self._state = ChoiceSessionState.FROZEN
+            return ledger
+        except Exception:
+            self._poison_if_open()
+            raise
 
     def diagnostic_record_bytes(self) -> tuple[bytes, ...]:
         """Return immutable diagnostic bytes only while the session remains open."""
 
         if self._state is not ChoiceSessionState.OPEN:
-            raise ChoiceSessionError("diagnostic records are available only on an open session")
+            raise ChoiceSessionError(
+                "diagnostic records are available only on an open session"
+            )
         return tuple(choice_record_bytes(record) for record in self._records)
