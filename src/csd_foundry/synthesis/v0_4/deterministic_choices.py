@@ -6,7 +6,7 @@ import bisect
 import hashlib
 import hmac
 from dataclasses import dataclass
-from typing import Generic, Sequence, TypeVar
+from typing import Generic, Literal, Sequence, TypeVar
 
 from csd_foundry.synthesis.v0_4.choice_paths import (
     MAX_UINT64,
@@ -26,7 +26,7 @@ DIGEST_PRIMITIVE = "hmac-sha256"
 PATH_SCHEMA_VERSION = "csd-choice-path/0.4"
 IDENTITY_SCHEMA_VERSION = "csd-identity/0.4"
 COUNTER_ENCODING = "uint64-big-endian"
-CANDIDATE_BYTE_ORDER = "big-endian"
+CANDIDATE_BYTE_ORDER: Literal["big"] = "big"
 
 _PREFIX = b"csd-choice-hmac-sha256-rejection/v1\x00"
 
