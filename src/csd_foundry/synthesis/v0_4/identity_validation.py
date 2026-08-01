@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
 
 from csd_foundry.synthesis.v0_4.canonical_values import (
     CanonicalField,
@@ -127,14 +126,14 @@ def _exact_int(data: dict[str, object], key: str) -> int:
     value = data[key]
     if type(value) is not int:
         raise ValueError(f"identity vector {key} must be an exact integer")
-    return cast(int, value)
+    return value
 
 
 def _exact_str(data: dict[str, object], key: str) -> str:
     value = data[key]
     if type(value) is not str:
         raise ValueError(f"identity vector {key} must be an exact string")
-    return cast(str, value)
+    return value
 
 
 def _role_segments(data: dict[str, object]) -> tuple[ChoiceSegment, ...]:
@@ -144,9 +143,9 @@ def _role_segments(data: dict[str, object]) -> tuple[ChoiceSegment, ...]:
     segments: list[ChoiceSegment] = []
     for segment in value:
         if type(segment) is int:
-            segments.append(cast(int, segment))
+            segments.append(segment)
         elif type(segment) is str:
-            segments.append(cast(str, segment))
+            segments.append(segment)
         else:
             raise ValueError("identity vector role segment has an invalid type")
     return tuple(segments)
@@ -332,7 +331,7 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
                 full_collision_rejected,
                 display_collision_rejected,
             ) = _ledger_assurance(seed)
-        except (CanonicalValueError, ValueError) as exc:
+        except ValueError as exc:
             errors.append(str(exc))
 
     if not canonical_type_separation:
@@ -351,7 +350,7 @@ def validate_identities(release: str = "v0.4") -> IdentityValidationReport:
         errors.append("injected display identity collision was accepted")
     if not policy_satisfied:
         errors.append("128-bit display identity exceeds the exact collision-risk ceiling")
-    if PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count != (PROVISIONAL_DESIGN_IDENTITY_CEILING):
+    if PROVISIONAL_VOLUME_ENVELOPE.raw_projected_count != PROVISIONAL_DESIGN_IDENTITY_CEILING:
         errors.append("provisional per-kind identity counts do not match the design envelope")
 
     return IdentityValidationReport(
