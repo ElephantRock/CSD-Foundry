@@ -69,9 +69,7 @@ def _inventory() -> ExecutionInventory:
         root_seed_commitment=_ROOT_SEED_COMMITMENT,
         sample_key_encoding_id=SAMPLE_KEY_ENCODING_ID,
         sample_key_encoding_version=SAMPLE_KEY_ENCODING_VERSION,
-        sample_key_encoding_policy_digest=canonical_sha256(
-            sample_key_encoding_policy_document()
-        ),
+        sample_key_encoding_policy_digest=canonical_sha256(sample_key_encoding_policy_document()),
         shard_policy_id=SHARD_POLICY_ID,
         shard_policy_version=SHARD_POLICY_VERSION,
         shard_policy_digest=canonical_sha256(shard_policy_document()),
@@ -159,9 +157,7 @@ def test_required_schema_registry_rejects_mixed_versions() -> None:
     registry = RequiredSchemaVersions()
     assert len(registry.digest) == 64
     with pytest.raises(ExecutionProtocolError):
-        RequiredSchemaVersions(
-            attempt_completion_envelope="csd-attempt-completion-envelope/0.5"
-        )
+        RequiredSchemaVersions(attempt_completion_envelope="csd-attempt-completion-envelope/0.5")
 
 
 def test_operational_retry_policy_has_explicit_ceiling() -> None:

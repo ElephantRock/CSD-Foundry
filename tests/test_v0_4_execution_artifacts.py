@@ -25,12 +25,14 @@ def _load(path: str) -> object:
 
 def test_packaged_execution_policy_documents_are_exact() -> None:
     assert _load("specs/v0.4/sample_key_encoding.json") == sample_key_encoding_policy_document()
-    assert _load(
-        "specs/v0.4/execution_validation_policy.json"
-    ) == execution_validation_policy_document()
-    assert _load("specs/v0.4/operational_retry_policy.json") == OperationalRetryPolicy(
-        DEFAULT_MAXIMUM_OPERATIONAL_RETRIES
-    ).to_json_value()
+    assert (
+        _load("specs/v0.4/execution_validation_policy.json")
+        == execution_validation_policy_document()
+    )
+    assert (
+        _load("specs/v0.4/operational_retry_policy.json")
+        == OperationalRetryPolicy(DEFAULT_MAXIMUM_OPERATIONAL_RETRIES).to_json_value()
+    )
 
 
 def test_execution_canary_catalog_is_exact() -> None:
@@ -42,9 +44,10 @@ def test_execution_canary_catalog_is_exact() -> None:
 
 
 def test_execution_report_matches_validator() -> None:
-    assert _load("reports/execution_protocol_v0.4.json") == validate_execution_protocol(
-        "v0.4"
-    ).to_dict()
+    assert (
+        _load("reports/execution_protocol_v0.4.json")
+        == validate_execution_protocol("v0.4").to_dict()
+    )
 
 
 def test_execution_schema_contains_every_current_contract() -> None:

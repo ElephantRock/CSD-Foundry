@@ -483,9 +483,7 @@ class OperationalExhaustionRecord:
         _require_digest(self.retry_policy_digest, "retry_policy_digest")
         if (
             type(self.maximum_operational_retries) is not int
-            or not 0
-            <= self.maximum_operational_retries
-            <= OPERATIONAL_RETRY_UINT8_MAX
+            or not 0 <= self.maximum_operational_retries <= OPERATIONAL_RETRY_UINT8_MAX
         ):
             raise ExecutionProtocolError("maximum_operational_retries must be an exact uint8")
         if type(self.failure_receipt_digests) is not tuple or not self.failure_receipt_digests:

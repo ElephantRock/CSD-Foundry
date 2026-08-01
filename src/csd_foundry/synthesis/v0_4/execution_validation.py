@@ -38,15 +38,9 @@ from csd_foundry.synthesis.v0_4.execution_vectors import (
 )
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
-_TARGET_ALPHA_DEFINITION_DIGEST = (
-    "0c249247fe8fe1bc74c067a535846dedf0df922e69688ac20f726289f78901c5"
-)
-_TARGET_ALPHA_NAMESPACE_DIGEST = (
-    "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
-)
-_RELEASE_ROOT_SEED_COMMITMENT = (
-    "6e5306d9779ade6c6e8bdf5d3d88431e8a4a9fb5ea2e4526949923319400661e"
-)
+_TARGET_ALPHA_DEFINITION_DIGEST = "0c249247fe8fe1bc74c067a535846dedf0df922e69688ac20f726289f78901c5"
+_TARGET_ALPHA_NAMESPACE_DIGEST = "5694c16e26537f95c870bcf1671cefd0c926846751b8b9558301031873f53e85"
+_RELEASE_ROOT_SEED_COMMITMENT = "6e5306d9779ade6c6e8bdf5d3d88431e8a4a9fb5ea2e4526949923319400661e"
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,9 +125,7 @@ def _inventory() -> ExecutionInventory:
         root_seed_commitment=_RELEASE_ROOT_SEED_COMMITMENT,
         sample_key_encoding_id=SAMPLE_KEY_ENCODING_ID,
         sample_key_encoding_version=SAMPLE_KEY_ENCODING_VERSION,
-        sample_key_encoding_policy_digest=canonical_sha256(
-            sample_key_encoding_policy_document()
-        ),
+        sample_key_encoding_policy_digest=canonical_sha256(sample_key_encoding_policy_document()),
         shard_policy_id=SHARD_POLICY_ID,
         shard_policy_version=SHARD_POLICY_VERSION,
         shard_policy_digest=canonical_sha256(shard_policy_document()),
@@ -219,9 +211,10 @@ def validate_execution_protocol(release: str) -> ExecutionProtocolValidationRepo
 
     sample_key_encoding_stable = False
     try:
-        sample_key_encoding_stable = canonical_sample_key_bytes(
-            SampleKey("v0.4", "execution-v1", 0)
-        ) == b'{"release":"v0.4","sample_index":0,"target_id":"execution-v1"}\n'
+        sample_key_encoding_stable = (
+            canonical_sample_key_bytes(SampleKey("v0.4", "execution-v1", 0))
+            == b'{"release":"v0.4","sample_index":0,"target_id":"execution-v1"}\n'
+        )
     except ExecutionProtocolError as exc:
         errors.append(str(exc))
 
@@ -288,9 +281,7 @@ def validate_execution_protocol(release: str) -> ExecutionProtocolValidationRepo
 
     mixed_versions_rejected = False
     try:
-        RequiredSchemaVersions(
-            attempt_completion_envelope="csd-attempt-completion-envelope/0.5"
-        )
+        RequiredSchemaVersions(attempt_completion_envelope="csd-attempt-completion-envelope/0.5")
     except ExecutionProtocolError:
         mixed_versions_rejected = True
 
