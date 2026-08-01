@@ -54,6 +54,14 @@ def main() -> None:
     )
     _add_release_argument(temporal_mutations, default="v0.3")
 
+    synthesize = sub.add_parser("synthesize", help="operate the synthesis engine")
+    synthesis_sub = synthesize.add_subparsers(dest="synthesis_command", required=True)
+    synthesis_contracts = synthesis_sub.add_parser(
+        "contracts",
+        help="validate synthesis contracts and release policies",
+    )
+    _add_release_argument(synthesis_contracts, default="v0.4")
+
     args = parser.parse_args()
 
     if args.command == "demo":
@@ -100,6 +108,17 @@ def main() -> None:
         temporal_mutation_result = evaluate_temporal_mutations(args.release)
         _emit(temporal_mutation_result.to_dict(), args.output)
         if not temporal_mutation_result.success:
+            raise SystemExit(1)
+        return
+
+    if args.command == "synthesize" and args.synthesis_command == "contracts":
+        from csd_foundry.synthesis.v0_4.validation import (
+            validate_release as validate_synthesis_contracts,
+        )
+
+        synthesis_result = validate_synthesis_contracts(args.release)
+        _emit(synthesis_result.to_dict(), args.output)
+        if not synthesis_result.success:
             raise SystemExit(1)
         return
 
