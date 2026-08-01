@@ -200,7 +200,11 @@ def test_operational_exhaustion_requires_every_permitted_execution() -> None:
     assert not hasattr(exhaustion, "to_infeasibility_witness")
 
     with pytest.raises(ExecutionProtocolError):
-        OperationalExhaustionRecord.from_failure_chain(_policy(), receipts[:-1])
+        OperationalExhaustionRecord.from_failure_chain(
+            _inventory(),
+            _policy(),
+            receipts[:-1],
+        )
 
 
 def test_inventory_supersession_is_append_only_and_nonreflexive() -> None:
