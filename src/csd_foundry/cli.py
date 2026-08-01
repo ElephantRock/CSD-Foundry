@@ -76,6 +76,11 @@ def main() -> None:
         help="validate deterministic choice ledgers and attempt replay",
     )
     _add_release_argument(synthesis_replay, default="v0.4")
+    synthesis_execution = synthesis_sub.add_parser(
+        "execution",
+        help="validate execution inventories and bounded operational evidence",
+    )
+    _add_release_argument(synthesis_execution, default="v0.4")
 
     args = parser.parse_args()
 
@@ -154,6 +159,17 @@ def main() -> None:
         replay_result = validate_replay(args.release)
         _emit(replay_result.to_dict(), args.output)
         if not replay_result.success:
+            raise SystemExit(1)
+        return
+
+    if args.command == "synthesize" and args.synthesis_command == "execution":
+        from csd_foundry.synthesis.v0_4.execution_validation import (
+            validate_execution_protocol,
+        )
+
+        execution_result = validate_execution_protocol(args.release)
+        _emit(execution_result.to_dict(), args.output)
+        if not execution_result.success:
             raise SystemExit(1)
         return
 
