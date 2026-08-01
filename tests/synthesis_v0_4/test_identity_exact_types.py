@@ -194,3 +194,29 @@ def test_collision_bound_rejects_nonexact_envelopes_and_bounds() -> None:
         per_kind_collision_bound(bypassed, 128)
     with pytest.raises(ChoiceValidationError):
         RationalBound(1, 2).no_greater_than(object.__new__(RationalBoundSubclass))
+
+
+def test_per_kind_collision_bound_applies_safety_margin() -> None:
+    envelope = IdentityVolumeEnvelope(
+        (IdentityKindVolume("evidence", 10),),
+        2,
+        1,
+    )
+    assert envelope.projected_count_with_margin == 20
+    bound = per_kind_collision_bound(envelope, 128)
+    assert bound.numerator == 380
+    assert bound.denominator == 1 << 129
+
+
+def test_fractional_safety_margin_rounds_each_kind_up() -> None:
+    envelope = IdentityVolumeEnvelope(
+        (
+            IdentityKindVolume("evidence", 1),
+            IdentityKindVolume("basis", 1),
+        ),
+        3,
+        2,
+    )
+    assert envelope.projected_count_with_margin == 4
+    bound = per_kind_collision_bound(envelope, 128)
+    assert bound.numerator == 4
