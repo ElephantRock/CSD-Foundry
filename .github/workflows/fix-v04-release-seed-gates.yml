@@ -1,0 +1,153 @@
+name: Fix v0.4 release seed gates
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - name: Apply shared release-seed validation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          def replace(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"missing patch anchor in {path}: {old[:100]!r}")
+              target.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace(
+              "src/csd_foundry/synthesis/v0_4/contracts.py",
+              "from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS\n",
+              "from csd_foundry.kernel.invariant_registry import EXECUTABLE_INVARIANT_IDS\n"
+              "from csd_foundry.synthesis.v0_4.choice_paths import (\n"
+              "    ChoiceValidationError,\n"
+              "    RootSeed,\n"
+              "    SeedProvenance,\n"
+              ")\n",
+          )
+          replace(
+              "src/csd_foundry/synthesis/v0_4/contracts.py",
+              '''        if _SHA256_PATTERN.fullmatch(self.root_seed) is None:
+              raise ContractValidationError("root_seed must be a lowercase 256-bit hex seed")
+          if self.root_seed_provenance != "uniform-random-256":
+              raise ContractValidationError(
+                  "release root seed requires uniform-random-256 provenance"
+              )
+          ''',
+              '''        try:
+              release_seed = RootSeed.from_hex(
+                  self.root_seed,
+                  SeedProvenance(self.root_seed_provenance),
+              )
+          except (ChoiceValidationError, ValueError) as exc:
+              raise ContractValidationError(f"invalid release root seed: {exc}") from exc
+          if not release_seed.release_eligible:
+              raise ContractValidationError(
+                  "release root seed requires uniform-random-256 provenance"
+              )
+          ''',
+          )
+          replace(
+              "src/csd_foundry/synthesis/v0_4/determinism_validation.py",
+              '''        release_seed = RootSeed.from_hex(root_seed, SeedProvenance(provenance))
+              release_seed_valid = release_seed.release_eligible
+          ''',
+              '''        release_seed = RootSeed.from_hex(root_seed, SeedProvenance(provenance))
+              release_seed_valid = release_seed.release_eligible
+              if not release_seed_valid:
+                  errors.append(
+                      "release seed provenance is valid syntax but is not release eligible"
+                  )
+          ''',
+          )
+
+          schema_path = Path("specs/v0.4/release_policy.schema.json")
+          schema = json.loads(schema_path.read_text(encoding="utf-8"))
+          schema["properties"]["root_seed"] = {
+              "allOf": [
+                  {"pattern": "^[0-9a-f]{64}$"},
+                  {"not": {"pattern": "^([0-9a-f]{2})\\1{31}$"}},
+              ],
+              "type": "string",
+          }
+          schema_path.write_text(
+              json.dumps(schema, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          test_path = Path("tests/synthesis_v0_4/test_deterministic_choices.py")
+          text = test_path.read_text(encoding="utf-8")
+          import_anchor = '''from csd_foundry.synthesis.v0_4.specs import (
+              CHOICE_ALGORITHM_SPEC,
+              RELEASE_POLICY_SPEC,
+          )
+          '''
+          import_replacement = import_anchor + '''from csd_foundry.synthesis.v0_4.validation import (
+              validate_release as validate_contract_release,
+          )
+          '''
+          if import_anchor not in text:
+              raise SystemExit("test import anchor missing")
+          text = text.replace(import_anchor, import_replacement, 1)
+          test_anchor = '''def test_choice_policy_satisfies_exact_collision_bound() -> None:
+          '''
+          new_tests = '''def test_determinism_rejects_release_ineligible_seed_provenance() -> None:
+              original = RELEASE_POLICY_SPEC["root_seed_provenance"]
+              try:
+                  RELEASE_POLICY_SPEC["root_seed_provenance"] = "developer-text"
+                  report = validate_determinism("v0.4")
+                  assert not report.success
+                  assert not report.release_seed_valid
+                  assert any("not release eligible" in error for error in report.errors)
+              finally:
+                  RELEASE_POLICY_SPEC["root_seed_provenance"] = original
+
+
+          @pytest.mark.parametrize("fixture_seed", ["00" * 32, "ab" * 32])
+          def test_contract_rejects_repeated_byte_release_seed(fixture_seed: str) -> None:
+              original = RELEASE_POLICY_SPEC["root_seed"]
+              try:
+                  RELEASE_POLICY_SPEC["root_seed"] = fixture_seed
+                  report = validate_contract_release("v0.4")
+                  assert not report.success
+                  assert any("repeated-byte fixture" in error for error in report.errors)
+              finally:
+                  RELEASE_POLICY_SPEC["root_seed"] = original
+
+
+          ''' + test_anchor
+          if test_anchor not in text:
+              raise SystemExit("test insertion anchor missing")
+          test_path.write_text(text.replace(test_anchor, new_tests, 1), encoding="utf-8")
+          PY
+      - run: ruff format src tests
+      - run: ruff check --fix src tests
+      - run: ruff format --check .
+      - run: ruff check .
+      - run: mypy src
+      - run: pytest
+      - run: csd-foundry synthesize contracts --release v0.4
+      - run: csd-foundry synthesize determinism --release v0.4
+      - name: Commit corrections
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src specs tests
+          git commit -m "Enforce release-eligible seed material"
+          git push
