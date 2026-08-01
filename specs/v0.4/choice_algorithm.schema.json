@@ -19,24 +19,19 @@
       "const": "big-endian"
     },
     "collision_risk_ceiling_denominator": {
-      "minimum": 1,
-      "type": "integer"
+      "const": 100000000000000000000000000
     },
     "collision_risk_ceiling_numerator": {
-      "minimum": 1,
-      "type": "integer"
+      "const": 15
     },
     "design_identity_ceiling": {
-      "minimum": 1,
-      "type": "integer"
+      "const": 10000000
     },
     "digest_primitive": {
       "const": "hmac-sha256"
     },
     "display_digest_bits": {
-      "minimum": 128,
-      "multipleOf": 8,
-      "type": "integer"
+      "const": 128
     },
     "draw_counter_encoding": {
       "const": "uint64-big-endian"
