@@ -63,6 +63,11 @@ def _require_positive_integer(value: object, field_name: str) -> int:
     return value
 
 
+def _require_constant(value: object, expected: str | int, field_name: str) -> None:
+    if type(value) is not type(expected) or value != expected:
+        raise ExecutionProtocolError(f"{field_name} must be the exact value {expected!r}")
+
+
 def _sample_key_value(sample_key: SampleKey) -> dict[str, object]:
     if type(sample_key) is not SampleKey:
         raise ExecutionProtocolError("sample_key must use the exact SampleKey class")
@@ -154,8 +159,9 @@ class RequiredSchemaVersions:
             "schema_version": REQUIRED_SCHEMA_VERSIONS_SCHEMA_VERSION,
             "shard_manifest": SHARD_MANIFEST_SCHEMA_VERSION,
         }
-        if self.to_json_value() != expected:
-            raise ExecutionProtocolError("required schema versions must match the frozen registry")
+        actual = self.to_json_value()
+        for field_name, expected_value in expected.items():
+            _require_constant(actual[field_name], expected_value, field_name)
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -205,10 +211,11 @@ class SampleExecutionSpec:
         _require_token(self.producer_contract_id, "producer_contract_id")
         _require_positive_integer(self.producer_contract_version, "producer_contract_version")
         _require_digest(self.producer_contract_digest, "producer_contract_digest")
-        if self.schema_version != SAMPLE_EXECUTION_SPEC_SCHEMA_VERSION:
-            raise ExecutionProtocolError(
-                f"sample execution spec schema must be {SAMPLE_EXECUTION_SPEC_SCHEMA_VERSION}"
-            )
+        _require_constant(
+            self.schema_version,
+            SAMPLE_EXECUTION_SPEC_SCHEMA_VERSION,
+            "schema_version",
+        )
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -242,10 +249,11 @@ class OperationalRetryPolicy:
                 "maximum_operational_retries must be an exact uint8 in "
                 f"0..{OPERATIONAL_RETRY_UINT8_MAX}"
             )
-        if self.schema_version != OPERATIONAL_RETRY_POLICY_SCHEMA_VERSION:
-            raise ExecutionProtocolError(
-                f"retry policy schema must be {OPERATIONAL_RETRY_POLICY_SCHEMA_VERSION}"
-            )
+        _require_constant(
+            self.schema_version,
+            OPERATIONAL_RETRY_POLICY_SCHEMA_VERSION,
+            "schema_version",
+        )
 
     @property
     def maximum_total_executions(self) -> int:
@@ -286,34 +294,39 @@ class ExecutionInventory:
     def __post_init__(self) -> None:
         if type(self) is not ExecutionInventory:
             raise ExecutionProtocolError("execution inventories must use the exact class")
-        if self.release != "v0.4":
-            raise ExecutionProtocolError("execution inventory release must be v0.4")
+        _require_constant(self.release, "v0.4", "release")
         _require_digest(self.generation_namespace_digest, "generation_namespace_digest")
         _require_digest(self.root_seed_commitment, "root_seed_commitment")
-        if self.sample_key_encoding_id != SAMPLE_KEY_ENCODING_ID:
-            raise ExecutionProtocolError("sample-key encoding ID does not match version 1")
-        if self.sample_key_encoding_version != SAMPLE_KEY_ENCODING_VERSION:
-            raise ExecutionProtocolError("sample-key encoding version does not match version 1")
+        _require_constant(
+            self.sample_key_encoding_id, SAMPLE_KEY_ENCODING_ID, "sample_key_encoding_id"
+        )
+        _require_constant(
+            self.sample_key_encoding_version,
+            SAMPLE_KEY_ENCODING_VERSION,
+            "sample_key_encoding_version",
+        )
         expected_sample_policy = canonical_sha256(sample_key_encoding_policy_document())
         if self.sample_key_encoding_policy_digest != expected_sample_policy:
             raise ExecutionProtocolError(
                 "sample-key encoding policy digest does not match version 1"
             )
-        if self.shard_policy_id != SHARD_POLICY_ID:
-            raise ExecutionProtocolError("shard policy ID does not match generation namespace v1")
-        if self.shard_policy_version != SHARD_POLICY_VERSION:
-            raise ExecutionProtocolError(
-                "shard policy version does not match generation namespace v1"
-            )
+        _require_constant(self.shard_policy_id, SHARD_POLICY_ID, "shard_policy_id")
+        _require_constant(self.shard_policy_version, SHARD_POLICY_VERSION, "shard_policy_version")
         if self.shard_policy_digest != canonical_sha256(shard_policy_document()):
             raise ExecutionProtocolError("shard policy digest does not match version 1")
         if type(self.shard_count) is not int or not 1 <= self.shard_count <= MAX_SHARD_COUNT:
             raise ExecutionProtocolError("shard_count must be an exact uint32 in 1..2^32-1")
         _require_digest(self.operational_retry_policy_digest, "operational_retry_policy_digest")
-        if self.validation_policy_id != EXECUTION_VALIDATION_POLICY_ID:
-            raise ExecutionProtocolError("validation policy ID does not match version 1")
-        if self.validation_policy_version != EXECUTION_VALIDATION_POLICY_VERSION:
-            raise ExecutionProtocolError("validation policy version does not match version 1")
+        _require_constant(
+            self.validation_policy_id,
+            EXECUTION_VALIDATION_POLICY_ID,
+            "validation_policy_id",
+        )
+        _require_constant(
+            self.validation_policy_version,
+            EXECUTION_VALIDATION_POLICY_VERSION,
+            "validation_policy_version",
+        )
         if self.validation_policy_digest != canonical_sha256(
             execution_validation_policy_document()
         ):
@@ -337,10 +350,7 @@ class ExecutionInventory:
             raise ExecutionProtocolError(
                 "inventory samples must use canonical sample-key byte order"
             )
-        if self.schema_version != EXECUTION_INVENTORY_SCHEMA_VERSION:
-            raise ExecutionProtocolError(
-                f"execution inventory schema must be {EXECUTION_INVENTORY_SCHEMA_VERSION}"
-            )
+        _require_constant(self.schema_version, EXECUTION_INVENTORY_SCHEMA_VERSION, "schema_version")
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -411,10 +421,7 @@ class OperationalFailureReceipt:
                 self.previous_failure_receipt_digest,
                 "previous_failure_receipt_digest",
             )
-        if self.schema_version != OPERATIONAL_FAILURE_SCHEMA_VERSION:
-            raise ExecutionProtocolError(
-                f"operational failure schema must be {OPERATIONAL_FAILURE_SCHEMA_VERSION}"
-            )
+        _require_constant(self.schema_version, OPERATIONAL_FAILURE_SCHEMA_VERSION, "schema_version")
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -486,6 +493,11 @@ class OperationalExhaustionRecord:
             or not 0 <= self.maximum_operational_retries <= OPERATIONAL_RETRY_UINT8_MAX
         ):
             raise ExecutionProtocolError("maximum_operational_retries must be an exact uint8")
+        expected_policy_digest = OperationalRetryPolicy(self.maximum_operational_retries).digest
+        if self.retry_policy_digest != expected_policy_digest:
+            raise ExecutionProtocolError(
+                "retry_policy_digest does not match maximum_operational_retries"
+            )
         if type(self.failure_receipt_digests) is not tuple or not self.failure_receipt_digests:
             raise ExecutionProtocolError("operational exhaustion requires receipt digests")
         for value in self.failure_receipt_digests:
@@ -493,6 +505,8 @@ class OperationalExhaustionRecord:
         if len(self.failure_receipt_digests) != len(set(self.failure_receipt_digests)):
             raise ExecutionProtocolError("operational exhaustion receipt digests must be unique")
         expected_count = self.maximum_operational_retries + 1
+        if type(self.total_execution_count) is not int:
+            raise ExecutionProtocolError("total_execution_count must be an exact integer")
         if self.total_execution_count != expected_count:
             raise ExecutionProtocolError(
                 "operational exhaustion total count must equal retries plus one"
@@ -502,10 +516,9 @@ class OperationalExhaustionRecord:
                 "operational exhaustion must commit the complete failure chain"
             )
         _require_token(self.final_reason_code, "final_reason_code")
-        if self.schema_version != OPERATIONAL_EXHAUSTION_SCHEMA_VERSION:
-            raise ExecutionProtocolError(
-                f"operational exhaustion schema must be {OPERATIONAL_EXHAUSTION_SCHEMA_VERSION}"
-            )
+        _require_constant(
+            self.schema_version, OPERATIONAL_EXHAUSTION_SCHEMA_VERSION, "schema_version"
+        )
 
     @classmethod
     def from_failure_chain(
@@ -581,10 +594,9 @@ class InventorySupersessionRecord:
         _require_token(self.reason_code, "reason_code")
         if type(self.reason_facts) is not CanonicalObject:
             raise ExecutionProtocolError("reason_facts must use the exact CanonicalObject class")
-        if self.schema_version != INVENTORY_SUPERSESSION_SCHEMA_VERSION:
-            raise ExecutionProtocolError(
-                f"inventory supersession schema must be {INVENTORY_SUPERSESSION_SCHEMA_VERSION}"
-            )
+        _require_constant(
+            self.schema_version, INVENTORY_SUPERSESSION_SCHEMA_VERSION, "schema_version"
+        )
 
     def to_json_value(self) -> dict[str, object]:
         return {
