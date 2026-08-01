@@ -23,10 +23,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Correct generator literals
+        run: python scripts/fix_issue_23_shards_generator.py
       - name: Apply shard publication layer
         run: python scripts/apply_issue_23_shards.py
-      - name: Remove one-shot generator
-        run: rm scripts/apply_issue_23_shards.py
+      - name: Remove one-shot generators
+        run: rm scripts/apply_issue_23_shards.py scripts/fix_issue_23_shards_generator.py
       - name: Install development environment
         run: |
           python -m pip install --upgrade pip
