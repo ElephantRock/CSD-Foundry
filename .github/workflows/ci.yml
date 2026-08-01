@@ -33,6 +33,7 @@ jobs:
       - run: csd-foundry synthesize identities --release v0.4
       - run: csd-foundry synthesize replay --release v0.4
       - run: csd-foundry synthesize execution --release v0.4
+      - run: csd-foundry synthesize publication --release v0.4
       - run: csd-foundry demo > /tmp/csd-foundry-demo.json && test -s /tmp/csd-foundry-demo.json
       - run: pip wheel . --no-deps --wheel-dir /tmp/csd-wheelhouse
       - name: Validate installed wheel outside the repository
@@ -48,6 +49,7 @@ jobs:
           /tmp/csd-installed/bin/csd-foundry synthesize identities --release v0.4 > identities-report.json
           /tmp/csd-installed/bin/csd-foundry synthesize replay --release v0.4 > replay-report.json
           /tmp/csd-installed/bin/csd-foundry synthesize execution --release v0.4 > execution-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize publication --release v0.4 > publication-report.json
           test -s scenario-report.json
           test -s temporal-report.json
           test -s mutation-report.json
@@ -56,3 +58,4 @@ jobs:
           test -s identities-report.json
           test -s replay-report.json
           test -s execution-report.json
+          test -s publication-report.json

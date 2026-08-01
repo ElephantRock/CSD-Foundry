@@ -1,0 +1,121 @@
+{
+  "$id": "urn:csd-foundry:operational-publication-receipt:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "else": {
+        "properties": {
+          "previous_publication_receipt_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "publication_ordinal": {
+            "const": 0
+          }
+        },
+        "required": [
+          "publication_ordinal"
+        ]
+      },
+      "then": {
+        "properties": {
+          "previous_publication_receipt_digest": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "attempt_key": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_index": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "release": {
+          "const": "v0.4"
+        },
+        "sample_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_index",
+        "release",
+        "sample_index",
+        "target_id"
+      ],
+      "type": "object"
+    },
+    "disposition": {
+      "enum": [
+        "existing-identical",
+        "published"
+      ]
+    },
+    "execution_run_id": {
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "type": "string"
+    },
+    "inventory_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "object_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "object_kind": {
+      "enum": [
+        "attempt-completion-envelope",
+        "inventory-completion-reference",
+        "shard-index",
+        "shard-manifest"
+      ]
+    },
+    "previous_publication_receipt_digest": {
+      "oneOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "publication_ordinal": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "csd-operational-publication/0.4"
+    }
+  },
+  "required": [
+    "attempt_key",
+    "disposition",
+    "execution_run_id",
+    "inventory_digest",
+    "object_digest",
+    "object_kind",
+    "previous_publication_receipt_digest",
+    "publication_ordinal",
+    "schema_version"
+  ],
+  "type": "object"
+}

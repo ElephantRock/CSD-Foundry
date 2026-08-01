@@ -1,0 +1,23 @@
+{
+  "claim_boundary": "This report validates topology-independent semantic completion envelopes, inventory-authorized completion references, append-only operational publication receipts, content-addressed no-clobber object installation, durable duplicate classification, crash recovery, canonical shard-index snapshots, verified shard manifests, and append-only manifest seals. It does not establish streaming reconciliation, global lowest-valid-attempt resolution, canonical corpus merge, planner completeness, oracle validity, infeasibility, or release-scale output.",
+  "corrupted_existing_rejected": true,
+  "crash_debris_recoverable": true,
+  "duplicate_conflicts_rejected": true,
+  "duplicate_publication_idempotent": true,
+  "errors": [],
+  "inventory_reference_authoritative": true,
+  "manifest_objects_verified": true,
+  "no_clobber_enforced": true,
+  "publication_receipts_operational": true,
+  "release": "v0.4",
+  "release_scale_claimed": false,
+  "seal_requires_verified_manifest": true,
+  "semantic_envelope_topology_independent": true,
+  "shard_index_canonical": true,
+  "staged_shard_recovery_idempotent": true,
+  "status": "valid",
+  "vector_catalog_digest": "221fcaed0db2a97a5ef4694aa958776b6d270c3137b38943c28ead759076d224",
+  "vector_count": 9,
+  "vector_evidence_version": 1,
+  "vectors_passed": 9
+}

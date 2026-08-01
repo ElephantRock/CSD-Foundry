@@ -1,0 +1,80 @@
+{
+  "$id": "urn:csd-foundry:attempt-completion-envelope:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "attempt_input_commitment_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "attempt_key": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_index": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "release": {
+          "const": "v0.4"
+        },
+        "sample_index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target_id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_index",
+        "release",
+        "sample_index",
+        "target_id"
+      ],
+      "type": "object"
+    },
+    "choice_ledger_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "completion_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "completion_status": {
+      "enum": [
+        "accepted",
+        "rejected"
+      ]
+    },
+    "generation_namespace_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "identity_ledger_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "csd-attempt-completion-envelope/0.4"
+    },
+    "search_branch_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "attempt_input_commitment_digest",
+    "attempt_key",
+    "choice_ledger_digest",
+    "completion_digest",
+    "completion_status",
+    "generation_namespace_digest",
+    "identity_ledger_digest",
+    "schema_version",
+    "search_branch_digest"
+  ],
+  "type": "object"
+}
