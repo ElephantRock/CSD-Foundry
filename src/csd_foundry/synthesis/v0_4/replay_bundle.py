@@ -116,9 +116,7 @@ class AttemptReplayBundle:
         return {
             "choice_ledger": self.choice_ledger.to_json_value(),
             "completion": self.completion.to_json_value(),
-            "identity_records": [
-                record.to_json_value() for record in ordered_identity_records
-            ],
+            "identity_records": [record.to_json_value() for record in ordered_identity_records],
             "input_commitment": self.input_commitment.to_json_value(),
             "replay_evidence_digest": self.replay_evidence_digest,
             "search_branch": self.search_branch.to_json_value(),
