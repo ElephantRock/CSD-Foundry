@@ -62,8 +62,8 @@ class FilesystemEventAdmissionStore:
     """Filesystem store with atomic no-clobber installation and restart reconstruction."""
 
     def __init__(self, root: Path) -> None:
-        if type(root) is not Path:
-            raise AdmissionStoreError("admission root must be an exact pathlib Path")
+        if not isinstance(root, Path):
+            raise AdmissionStoreError("admission root must be a pathlib Path")
         self.root = root
         self.objects_root = root / "objects"
         self.contexts_root = root / "contexts"
