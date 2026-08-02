@@ -14,7 +14,12 @@ RECONCILIATION_VECTOR_IDS = (
 )
 
 EXPECTED_RECONCILIATION_DIGESTS: dict[str, str] = {
-    vector_id: "0" * 64 for vector_id in RECONCILIATION_VECTOR_IDS
+    "semantic-manifest": "2c69a7cfc5a2c4d801dd7bf56c287aaf9f9d90280d5ba7a58eae30f73a6be9de",
+    "semantic-merkle-root": "986a1256b9c66f454d8dcef6c78647823139369f11ffadbcde4c631b98a07018",
+    "topology-run-manifests": "544e9b0acceed91a3d454d6a69439e8a589ac530ece0435970c70c7a6d264c44",
+    "topology-seals": "65c49ce6c8cd1ec6a72c44fe09a22a591aa8c713d3cc8babf511120e2466c2a7",
+    "full-replay-summary": "6bab260991e2ffce3375d4b363e90961bb4b5a718fb7da8b89dc84d73022819f",
+    "streaming-memory-bound": "560916a2f1844701a99c8ad5e07ca6a39dfbe825c4bf7e3644682d90a5e581c0",
 }
 
 
@@ -28,8 +33,8 @@ def reconciliation_vector_catalog_commitment() -> dict[str, object]:
     }
 
 
-FROZEN_RECONCILIATION_VECTOR_CATALOG_DIGEST = canonical_sha256(
-    reconciliation_vector_catalog_commitment()
+FROZEN_RECONCILIATION_VECTOR_CATALOG_DIGEST = (
+    "7646f4a95a2faede65cda315dbcf4f8b8e46083cfd44f5ea446901e6414b4d00"
 )
 
 
