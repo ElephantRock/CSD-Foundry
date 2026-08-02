@@ -206,10 +206,10 @@ def evaluate_evidence_mutations(
     mutation_digest = campaign.get("catalog_digest")
     return EvidenceMutationReport(
         baseline_vector_catalog_digest=(
-            cast(str, baseline_digest) if type(baseline_digest) is str else None
+            baseline_digest if type(baseline_digest) is str else None
         ),
         mutation_catalog_digest=(
-            cast(str, mutation_digest) if type(mutation_digest) is str else None
+            mutation_digest if type(mutation_digest) is str else None
         ),
         results=tuple(results),
         errors=tuple(errors),
@@ -614,7 +614,7 @@ def _string_list(value: dict[str, Any], field: str) -> list[str]:
 
 
 def _string_or_placeholder(value: object, placeholder: str) -> str:
-    return cast(str, value) if type(value) is str and value else placeholder
+    return value if type(value) is str and value else placeholder
 
 
 def _literal_digest(value: str) -> str:
