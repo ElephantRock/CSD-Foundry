@@ -1,0 +1,21 @@
+{
+  "schema_version": "csd-canonicalization-policy/0.5",
+  "policy_id": "csd-canonical-json",
+  "policy_version": 1,
+  "encoding": "UTF-8",
+  "unicode_normalization": "NONE_PRESERVE_CODE_POINTS",
+  "object_field_order": "SCHEMA_VERSION_FIRST_THEN_ASCENDING_UTF8_KEY_BYTES",
+  "number_policy": "EXACT_INTEGERS_ONLY",
+  "boolean_is_not_integer": true,
+  "null_allowed_when_schema_permits": true,
+  "collection_kinds": {
+    "SET": "sort members by canonical bytes and reject duplicate canonical members",
+    "MULTISET": "sort members by canonical bytes and preserve multiplicity",
+    "ORDERED_SEQUENCE": "preserve supplied order exactly"
+  },
+  "unknown_fields": "REJECT_UNLESS_SCHEMA_EXPLICITLY_PERMITS",
+  "line_termination": "LF",
+  "trailing_newline": true,
+  "digest_encoding": "sha256:<lowercase-hex>",
+  "claim_boundary": "This policy establishes deterministic v0.5 receipt and registry bytes. It does not modify or supersede immutable v0.4 canonical bytes."
+}

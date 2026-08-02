@@ -1,0 +1,131 @@
+{
+  "schema_version": "contract-catalog/0.5",
+  "catalog_version": 1,
+  "status": "FROZEN_FOR_IMPLEMENTATION",
+  "canonicalization_policy": "specs/v0.5/canonicalization_policy_v1.json",
+  "projection_phase_policy": "specs/v0.5/projection_phase_order_v1.json",
+  "contracts": [
+    {
+      "name": "raw-event",
+      "schema_path": "schemas/v0.5/raw-event.schema.json",
+      "schema_version": "raw-event/1",
+      "digest_field": "raw_event_digest",
+      "domain_prefix": "RAW_EVENT\u0000"
+    },
+    {
+      "name": "signature-set",
+      "schema_path": "schemas/v0.5/signature-set.schema.json",
+      "schema_version": "signature-set/1",
+      "digest_field": "signature_set_digest",
+      "domain_prefix": "SIGNATURE_SET\u0000"
+    },
+    {
+      "name": "validation-policy",
+      "schema_path": "schemas/v0.5/validation-policy.schema.json",
+      "schema_version": "validation-policy/1",
+      "digest_field": "policy_digest",
+      "domain_prefix": "VALIDATION_POLICY\u0000"
+    },
+    {
+      "name": "validated-event",
+      "schema_path": "schemas/v0.5/validated-event.schema.json",
+      "schema_version": "validated-event/1",
+      "digest_field": "validated_event_digest",
+      "domain_prefix": "VALIDATED_EVENT\u0000"
+    },
+    {
+      "name": "event-validation-failure",
+      "schema_path": "schemas/v0.5/event-validation-failure.schema.json",
+      "schema_version": "event-validation-failure/1",
+      "digest_field": "failure_receipt_digest",
+      "domain_prefix": "EVENT_VALIDATION_FAILURE\u0000"
+    },
+    {
+      "name": "clock-claim",
+      "schema_path": "schemas/v0.5/clock-claim.schema.json",
+      "schema_version": "clock-claim/1",
+      "digest_field": "clock_claim_digest",
+      "domain_prefix": "CLOCK_CLAIM\u0000"
+    },
+    {
+      "name": "clock-projection-failure",
+      "schema_path": "schemas/v0.5/clock-projection-failure.schema.json",
+      "schema_version": "clock-projection-failure/1",
+      "digest_field": "clock_projection_failure_digest",
+      "domain_prefix": "CLOCK_PROJECTION_FAILURE\u0000"
+    },
+    {
+      "name": "semantic-projection-receipt",
+      "schema_path": "schemas/v0.5/semantic-projection-receipt.schema.json",
+      "schema_version": "semantic-projection-receipt/1",
+      "digest_field": "semantic_projection_receipt_digest",
+      "domain_prefix": "SEMANTIC_PROJECTION_RECEIPT\u0000"
+    },
+    {
+      "name": "registry-event",
+      "schema_path": "schemas/v0.5/registry-event.schema.json",
+      "schema_version": "registry-event/1",
+      "digest_field": "registry_event_digest",
+      "domain_prefix": "REGISTRY_EVENT\u0000"
+    },
+    {
+      "name": "disposition-receipt",
+      "schema_path": "schemas/v0.5/disposition-receipt.schema.json",
+      "schema_version": "disposition-receipt/1",
+      "digest_field": "disposition_receipt_digest",
+      "domain_prefix": "DISPOSITION_RECEIPT\u0000"
+    },
+    {
+      "name": "invalidation-event",
+      "schema_path": "schemas/v0.5/invalidation-event.schema.json",
+      "schema_version": "invalidation-event/1",
+      "digest_field": "invalidation_event_digest",
+      "domain_prefix": "INVALIDATION_EVENT\u0000"
+    },
+    {
+      "name": "quarantine-marker",
+      "schema_path": "schemas/v0.5/quarantine-marker.schema.json",
+      "schema_version": "quarantine-marker/1",
+      "digest_field": "quarantine_marker_digest",
+      "domain_prefix": "QUARANTINE_MARKER\u0000"
+    },
+    {
+      "name": "clock-completion-receipt",
+      "schema_path": "schemas/v0.5/clock-completion-receipt.schema.json",
+      "schema_version": "clock-completion-receipt/1",
+      "digest_field": "clock_completion_receipt_digest",
+      "domain_prefix": "CLOCK_COMPLETION_RECEIPT\u0000"
+    },
+    {
+      "name": "release-request",
+      "schema_path": "schemas/v0.5/release-request.schema.json",
+      "schema_version": "release-request/1",
+      "digest_field": "release_request_digest",
+      "domain_prefix": "RELEASE_REQUEST\u0000"
+    },
+    {
+      "name": "promotion-request",
+      "schema_path": "schemas/v0.5/promotion-request.schema.json",
+      "schema_version": "promotion-request/1",
+      "digest_field": "promotion_request_digest",
+      "domain_prefix": "PROMOTION_REQUEST\u0000"
+    },
+    {
+      "name": "release-manifest",
+      "schema_path": "schemas/v0.5/release-manifest.schema.json",
+      "schema_version": "release-manifest/1",
+      "digest_field": "release_manifest_digest",
+      "domain_prefix": "RELEASE_MANIFEST\u0000"
+    }
+  ],
+  "charter_invariants": [
+    "TEMP-SAFE-01",
+    "RAP-SAFE-01",
+    "REL-ARCH-01",
+    "VAL-SAFE-01",
+    "RAP-INV-01",
+    "RAP-INV-02"
+  ],
+  "change_rule": "Any semantic or byte-level change requires a new schema, policy, catalog, or evidence version. Published v1 bytes are never edited in place.",
+  "catalog_digest": "sha256:fe9607cd5af6c9623410f7bef0a5624bbfff8323d72c09c1537dd3fa0078b351"
+}

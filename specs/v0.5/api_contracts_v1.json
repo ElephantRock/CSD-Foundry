@@ -1,0 +1,47 @@
+{
+  "schema_version": "api-contract-registry/0.5",
+  "registry_version": 1,
+  "status": "FROZEN_FOR_IMPLEMENTATION",
+  "apis": [
+    {
+      "api_id": "claim_clock_successor",
+      "inputs": ["previous_committed_sequence", "previous_completion_digest", "proposed_sequence", "attempt_id", "claimant_id", "validated_event_digest"],
+      "success": "Returns one immutable ClockClaim installed by atomic compare-and-append.",
+      "failure": ["CLOCK_SEQUENCE_NOT_SUCCESSOR", "CLOCK_HEAD_CHANGED", "CLOCK_CLAIM_CONFLICT"],
+      "side_effect_rule": "No semantic projection begins before a claim is durably installed."
+    },
+    {
+      "api_id": "complete_clock_claim",
+      "inputs": ["clock_claim_digest", "semantic_projection_receipt_digest", "registry_root_digests", "disposition_receipt_digest", "quarantine_epoch", "quarantine_marker_digests"],
+      "success": "Publishes exactly one ClockCompletionReceipt and advances the committed head.",
+      "failure": ["PROJECTION_ORDER_VIOLATION", "DIGEST_MISMATCH", "CLOCK_HEAD_CHANGED"],
+      "side_effect_rule": "The head advances only after every mandatory phase is committed."
+    },
+    {
+      "api_id": "fail_clock_claim",
+      "inputs": ["clock_claim_digest", "failure_phase", "failure_code", "failure_detail_digest"],
+      "success": "Publishes ClockProjectionFailure and leaves the committed head unchanged.",
+      "side_effect_rule": "A failed attempt is auditable by attempt_id but never becomes a committed tick."
+    },
+    {
+      "api_id": "may_use_asset",
+      "inputs": ["asset_id", "consumer_quarantine_epoch", "current_snapshot_digest"],
+      "success": "Returns ALLOW only if current eligibility is reconstructable, the consumer epoch is current, and the asset is not quarantined.",
+      "failure": ["QUARANTINE_EPOCH_STALE", "ASSET_QUARANTINED", "ELIGIBILITY_CONTEXT_UNAVAILABLE"],
+      "side_effect_rule": "Failure is closed for operational use."
+    },
+    {
+      "api_id": "reconstruct_asset_at_epoch",
+      "inputs": ["asset_id", "historical_quarantine_epoch"],
+      "success": "Returns historical state reconstructed from immutable event logs and roots.",
+      "side_effect_rule": "Historical eligibility never authorizes current operational use."
+    },
+    {
+      "api_id": "compile_release",
+      "inputs": ["release_request_digest"],
+      "success": "Produces a new immutable ReleaseManifest after independent eligibility validation.",
+      "failure": ["RELEASE_SNAPSHOT_NOT_COMPLETE", "REUSE_CLASS_EXCEEDED", "ASSET_QUARANTINED", "RELEASE_INVALIDATED_DURING_COMPILE"],
+      "side_effect_rule": "This API is event-triggered and is never called as a mandatory ClockAdvanced phase."
+    }
+  ]
+}

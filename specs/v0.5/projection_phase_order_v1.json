@@ -1,0 +1,17 @@
+{
+  "schema_version": "projection-phase-order/1",
+  "policy_id": "csd-clock-projection-order",
+  "policy_version": 1,
+  "ordered_phases": [
+    "SEMANTIC",
+    "EVIDENCE_REGISTRY",
+    "ASSUMPTION_REGISTRY",
+    "ALTERNATIVE_MODEL_REGISTRY",
+    "DISPOSITION",
+    "QUARANTINE_COMMIT"
+  ],
+  "release_compilation_phase": null,
+  "release_compilation_rule": "EVENT_TRIGGERED_AFTER_COMPLETED_SNAPSHOT",
+  "failure_rule": "ANY_MANDATORY_PHASE_FAILURE_FAILS_THE_TICK_CLOSED",
+  "claim_boundary": "The order governs committed tick construction. Release compilation is intentionally excluded."
+}
