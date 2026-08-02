@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Callable, TypeVar
+from typing import Callable, TypeVar, cast
 
 AUTHORITY_GRANT_SCHEMA_VERSION = "assumption-authority-grant/1"
 SEPARATION_DUTY_RULE_SCHEMA_VERSION = "assumption-separation-duty-rule/1"
@@ -58,7 +58,7 @@ GLOBAL_ASSUMPTION_SCOPE = "scope:*"
 
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
-_MATERIALITY_RANK = {value: index for index, value in enumerate(ASSUMPTION_MATERIALITIES)}
+_MATERIALITY_RANK = {item: index for index, item in enumerate(ASSUMPTION_MATERIALITIES)}
 _T = TypeVar("_T")
 
 
@@ -89,7 +89,7 @@ class AssumptionAuthorityGrant:
         _require_token(self.grant_id, "ASSUMPTION_AUTHORITY_GRANT_ID_INVALID")
         _require_action(self.action, "ASSUMPTION_AUTHORITY_GRANT_ACTION_INVALID")
         _require_token(self.authority_id, "ASSUMPTION_AUTHORITY_GRANT_AUTHORITY_INVALID")
-        _require_canonical_scopes(self.scope_ids, "ASSUMPTION_AUTHORITY_GRANT_SCOPE_INVALID")
+        _require_scopes(self.scope_ids, "ASSUMPTION_AUTHORITY_GRANT_SCOPE_INVALID")
         _require_materialities(
             self.assumption_materialities,
             "ASSUMPTION_AUTHORITY_GRANT_MATERIALITY_INVALID",
@@ -108,7 +108,7 @@ class AssumptionAuthorityGrant:
             raise AssumptionGovernanceContractError(
                 "ASSUMPTION_AUTHORITY_GRANT_CHALLENGE_MATERIALITY_UNEXPECTED"
             )
-        _require_effective_interval(
+        _require_interval(
             self.effective_from_sequence,
             self.effective_until_sequence,
             "ASSUMPTION_AUTHORITY_GRANT_INTERVAL_INVALID",
@@ -133,27 +133,27 @@ class AssumptionAuthorityGrant:
         challenge_materialities: tuple[str, ...] = (),
         effective_until_sequence: int | None = None,
     ) -> AssumptionAuthorityGrant:
-        canonical_scopes = _canonical_scopes(scope_ids)
-        canonical_assumption_materialities = _canonical_materialities(assumption_materialities)
-        canonical_challenge_materialities = _canonical_materialities(challenge_materialities)
+        scopes = _canonical_scopes(scope_ids)
+        assumption_levels = _canonical_materialities(assumption_materialities)
+        challenge_levels = _canonical_materialities(challenge_materialities)
         unsigned = {
             "schema_version": AUTHORITY_GRANT_SCHEMA_VERSION,
             "action": action,
-            "assumption_materialities": list(canonical_assumption_materialities),
+            "assumption_materialities": list(assumption_levels),
             "authority_id": authority_id,
-            "challenge_materialities": list(canonical_challenge_materialities),
+            "challenge_materialities": list(challenge_levels),
             "effective_from_sequence": effective_from_sequence,
             "effective_until_sequence": effective_until_sequence,
             "grant_id": grant_id,
-            "scope_ids": list(canonical_scopes),
+            "scope_ids": list(scopes),
         }
         return cls(
             grant_id=grant_id,
             action=action,
             authority_id=authority_id,
-            scope_ids=canonical_scopes,
-            assumption_materialities=canonical_assumption_materialities,
-            challenge_materialities=canonical_challenge_materialities,
+            scope_ids=scopes,
+            assumption_materialities=assumption_levels,
+            challenge_materialities=challenge_levels,
             effective_from_sequence=effective_from_sequence,
             effective_until_sequence=effective_until_sequence,
             grant_digest=_domain_digest("ASSUMPTION_AUTHORITY_GRANT", unsigned),
@@ -194,13 +194,13 @@ class AssumptionSeparationDutyRule:
     def __post_init__(self) -> None:
         _require_token(self.rule_id, "ASSUMPTION_DUTY_RULE_ID_INVALID")
         _require_action(self.action, "ASSUMPTION_DUTY_RULE_ACTION_INVALID")
-        _require_sorted_members(
+        _require_members(
             self.conflicting_roles,
             ASSUMPTION_GOVERNANCE_ROLES,
             "ASSUMPTION_DUTY_RULE_ROLE_INVALID",
             allow_empty=False,
         )
-        _require_canonical_scopes(self.scope_ids, "ASSUMPTION_DUTY_RULE_SCOPE_INVALID")
+        _require_scopes(self.scope_ids, "ASSUMPTION_DUTY_RULE_SCOPE_INVALID")
         _require_materialities(
             self.assumption_materialities,
             "ASSUMPTION_DUTY_RULE_MATERIALITY_INVALID",
@@ -223,23 +223,23 @@ class AssumptionSeparationDutyRule:
         scope_ids: tuple[str, ...],
         assumption_materialities: tuple[str, ...],
     ) -> AssumptionSeparationDutyRule:
-        canonical_roles = tuple(sorted(conflicting_roles))
-        canonical_scopes = _canonical_scopes(scope_ids)
-        canonical_materialities = _canonical_materialities(assumption_materialities)
+        roles = tuple(sorted(conflicting_roles))
+        scopes = _canonical_scopes(scope_ids)
+        levels = _canonical_materialities(assumption_materialities)
         unsigned = {
             "schema_version": SEPARATION_DUTY_RULE_SCHEMA_VERSION,
             "action": action,
-            "assumption_materialities": list(canonical_materialities),
-            "conflicting_roles": list(canonical_roles),
+            "assumption_materialities": list(levels),
+            "conflicting_roles": list(roles),
             "rule_id": rule_id,
-            "scope_ids": list(canonical_scopes),
+            "scope_ids": list(scopes),
         }
         return cls(
             rule_id=rule_id,
             action=action,
-            conflicting_roles=canonical_roles,
-            scope_ids=canonical_scopes,
-            assumption_materialities=canonical_materialities,
+            conflicting_roles=roles,
+            scope_ids=scopes,
+            assumption_materialities=levels,
             rule_digest=_domain_digest("ASSUMPTION_SEPARATION_DUTY_RULE", unsigned),
         )
 
@@ -279,14 +279,14 @@ class AssumptionDutyException:
         _require_token(self.rule_id, "ASSUMPTION_DUTY_EXCEPTION_RULE_ID_INVALID")
         _require_action(self.action, "ASSUMPTION_DUTY_EXCEPTION_ACTION_INVALID")
         _require_token(self.authority_id, "ASSUMPTION_DUTY_EXCEPTION_AUTHORITY_INVALID")
-        _require_sorted_members(
+        _require_members(
             self.conflicting_roles,
             ASSUMPTION_GOVERNANCE_ROLES,
             "ASSUMPTION_DUTY_EXCEPTION_ROLE_INVALID",
             allow_empty=False,
         )
-        _require_canonical_scopes(self.scope_ids, "ASSUMPTION_DUTY_EXCEPTION_SCOPE_INVALID")
-        _require_sorted_tokens(
+        _require_scopes(self.scope_ids, "ASSUMPTION_DUTY_EXCEPTION_SCOPE_INVALID")
+        _require_tokens(
             self.assumption_ids,
             "ASSUMPTION_DUTY_EXCEPTION_ASSUMPTION_INVALID",
             allow_empty=True,
@@ -297,7 +297,7 @@ class AssumptionDutyException:
             allow_empty=False,
         )
         _require_token(self.reason_code, "ASSUMPTION_DUTY_EXCEPTION_REASON_INVALID")
-        _require_effective_interval(
+        _require_interval(
             self.effective_from_sequence,
             self.effective_until_sequence,
             "ASSUMPTION_DUTY_EXCEPTION_INTERVAL_INVALID",
@@ -325,33 +325,33 @@ class AssumptionDutyException:
         effective_from_sequence: int,
         effective_until_sequence: int,
     ) -> AssumptionDutyException:
-        canonical_roles = tuple(sorted(conflicting_roles))
-        canonical_scopes = _canonical_scopes(scope_ids)
-        canonical_assumption_ids = tuple(sorted(assumption_ids))
-        canonical_materialities = _canonical_materialities(assumption_materialities)
+        roles = tuple(sorted(conflicting_roles))
+        scopes = _canonical_scopes(scope_ids)
+        assumptions = tuple(sorted(assumption_ids))
+        levels = _canonical_materialities(assumption_materialities)
         unsigned = {
             "schema_version": DUTY_EXCEPTION_SCHEMA_VERSION,
             "action": action,
-            "assumption_ids": list(canonical_assumption_ids),
-            "assumption_materialities": list(canonical_materialities),
+            "assumption_ids": list(assumptions),
+            "assumption_materialities": list(levels),
             "authority_id": authority_id,
-            "conflicting_roles": list(canonical_roles),
+            "conflicting_roles": list(roles),
             "effective_from_sequence": effective_from_sequence,
             "effective_until_sequence": effective_until_sequence,
             "exception_id": exception_id,
             "reason_code": reason_code,
             "rule_id": rule_id,
-            "scope_ids": list(canonical_scopes),
+            "scope_ids": list(scopes),
         }
         return cls(
             exception_id=exception_id,
             rule_id=rule_id,
             action=action,
             authority_id=authority_id,
-            conflicting_roles=canonical_roles,
-            scope_ids=canonical_scopes,
-            assumption_ids=canonical_assumption_ids,
-            assumption_materialities=canonical_materialities,
+            conflicting_roles=roles,
+            scope_ids=scopes,
+            assumption_ids=assumptions,
+            assumption_materialities=levels,
             reason_code=reason_code,
             effective_from_sequence=effective_from_sequence,
             effective_until_sequence=effective_until_sequence,
@@ -395,42 +395,43 @@ class AssumptionAuthorityPolicy:
     def __post_init__(self) -> None:
         _require_token(self.policy_id, "ASSUMPTION_AUTHORITY_POLICY_ID_INVALID")
         _require_digest(self.authority_root_digest, "ASSUMPTION_AUTHORITY_ROOT_INVALID")
-        _require_canonical_objects(
+        _require_objects(
             self.grants,
             lambda item: item.grant_id,
             "ASSUMPTION_AUTHORITY_GRANTS_NOT_CANONICAL",
             allow_empty=False,
         )
-        _require_canonical_objects(
+        _require_objects(
             self.separation_duty_rules,
             lambda item: item.rule_id,
             "ASSUMPTION_DUTY_RULES_NOT_CANONICAL",
             allow_empty=True,
         )
-        _require_canonical_objects(
+        _require_objects(
             self.duty_exceptions,
             lambda item: item.exception_id,
             "ASSUMPTION_DUTY_EXCEPTIONS_NOT_CANONICAL",
             allow_empty=True,
         )
-        if self.grant_set_digest != _set_digest(
+        expected_grants = _set_digest(
             "ASSUMPTION_AUTHORITY_GRANT_SET",
             [item.to_json_value() for item in self.grants],
-        ):
+        )
+        expected_rules = _set_digest(
+            "ASSUMPTION_SEPARATION_DUTY_RULE_SET",
+            [item.to_json_value() for item in self.separation_duty_rules],
+        )
+        expected_exceptions = _set_digest(
+            "ASSUMPTION_DUTY_EXCEPTION_SET",
+            [item.to_json_value() for item in self.duty_exceptions],
+        )
+        if self.grant_set_digest != expected_grants:
             raise AssumptionGovernanceContractError(
                 "ASSUMPTION_AUTHORITY_GRANT_SET_DIGEST_MISMATCH"
             )
-        if self.separation_duty_rule_set_digest != _set_digest(
-            "ASSUMPTION_SEPARATION_DUTY_RULE_SET",
-            [item.to_json_value() for item in self.separation_duty_rules],
-        ):
-            raise AssumptionGovernanceContractError(
-                "ASSUMPTION_DUTY_RULE_SET_DIGEST_MISMATCH"
-            )
-        if self.exception_set_digest != _set_digest(
-            "ASSUMPTION_DUTY_EXCEPTION_SET",
-            [item.to_json_value() for item in self.duty_exceptions],
-        ):
+        if self.separation_duty_rule_set_digest != expected_rules:
+            raise AssumptionGovernanceContractError("ASSUMPTION_DUTY_RULE_SET_DIGEST_MISMATCH")
+        if self.exception_set_digest != expected_exceptions:
             raise AssumptionGovernanceContractError(
                 "ASSUMPTION_DUTY_EXCEPTION_SET_DIGEST_MISMATCH"
             )
@@ -491,9 +492,9 @@ class AssumptionAuthorityPolicy:
         )
 
     def _validate_exceptions(self) -> None:
-        rules_by_id = {item.rule_id: item for item in self.separation_duty_rules}
+        rules = {item.rule_id: item for item in self.separation_duty_rules}
         for exception in self.duty_exceptions:
-            rule = rules_by_id.get(exception.rule_id)
+            rule = rules.get(exception.rule_id)
             if rule is None:
                 raise AssumptionGovernanceContractError(
                     "ASSUMPTION_DUTY_EXCEPTION_RULE_MISSING",
@@ -514,14 +515,13 @@ class AssumptionAuthorityPolicy:
                     "ASSUMPTION_DUTY_EXCEPTION_SCOPE_WIDENING",
                     exception.exception_id,
                 )
-            if not set(exception.assumption_materialities).issubset(
-                rule.assumption_materialities
-            ):
+            if not set(exception.assumption_materialities).issubset(rule.assumption_materialities):
                 raise AssumptionGovernanceContractError(
                     "ASSUMPTION_DUTY_EXCEPTION_MATERIALITY_WIDENING",
                     exception.exception_id,
                 )
-            if not any(_exception_is_covered_by_grant(exception, grant) for grant in self.grants):
+            covered = any(_exception_covered(exception, grant) for grant in self.grants)
+            if not covered:
                 raise AssumptionGovernanceContractError(
                     "ASSUMPTION_DUTY_EXCEPTION_GRANT_MISSING",
                     exception.exception_id,
@@ -537,9 +537,7 @@ class AssumptionAuthorityPolicy:
             "grants": [item.to_json_value() for item in self.grants],
             "policy_id": self.policy_id,
             "separation_duty_rule_set_digest": self.separation_duty_rule_set_digest,
-            "separation_duty_rules": [
-                item.to_json_value() for item in self.separation_duty_rules
-            ],
+            "separation_duty_rules": [item.to_json_value() for item in self.separation_duty_rules],
         }
 
     def to_json_value(self) -> dict[str, object]:
@@ -572,9 +570,9 @@ class AssumptionAuthorityPolicyCommit:
     def __post_init__(self) -> None:
         _require_token(self.policy_id, "ASSUMPTION_POLICY_COMMIT_POLICY_ID_INVALID")
         _require_digest(self.policy_digest, "ASSUMPTION_POLICY_COMMIT_POLICY_DIGEST_INVALID")
-        if (self.predecessor_policy_digest is None) != (
-            self.predecessor_commit_receipt_digest is None
-        ):
+        predecessor_missing = self.predecessor_policy_digest is None
+        receipt_missing = self.predecessor_commit_receipt_digest is None
+        if predecessor_missing != receipt_missing:
             raise AssumptionGovernanceContractError(
                 "ASSUMPTION_POLICY_COMMIT_PREDECESSOR_INCOMPLETE"
             )
@@ -671,9 +669,7 @@ class AssumptionAuthorityPolicyCommit:
             effective_from_sequence=effective_from_sequence,
             approval_policy_digest=approval_policy_digest,
             signature_set_digest=signature_set_digest,
-            commit_receipt_digest=_domain_digest(
-                "ASSUMPTION_AUTHORITY_POLICY_COMMIT", unsigned
-            ),
+            commit_receipt_digest=_domain_digest("ASSUMPTION_AUTHORITY_POLICY_COMMIT", unsigned),
         )
 
     def _unsigned_value(self) -> dict[str, object]:
@@ -736,10 +732,8 @@ class DecisionAssumptionBinding:
             "DECISION_ASSUMPTION_BINDING_EVIDENCE_ROOT_INVALID",
         )
         if type(self.logical_clock_sequence) is not int or self.logical_clock_sequence < 0:
-            raise AssumptionGovernanceContractError(
-                "DECISION_ASSUMPTION_BINDING_CLOCK_INVALID"
-            )
-        _require_sorted_tokens(
+            raise AssumptionGovernanceContractError("DECISION_ASSUMPTION_BINDING_CLOCK_INVALID")
+        _require_tokens(
             self.required_assumption_ids,
             "DECISION_ASSUMPTION_BINDING_ASSUMPTIONS_INVALID",
             allow_empty=False,
@@ -764,7 +758,7 @@ class DecisionAssumptionBinding:
         logical_clock_sequence: int,
         required_assumption_ids: tuple[str, ...],
     ) -> DecisionAssumptionBinding:
-        canonical_ids = tuple(sorted(required_assumption_ids))
+        assumptions = tuple(sorted(required_assumption_ids))
         unsigned = {
             "schema_version": DECISION_ASSUMPTION_BINDING_SCHEMA_VERSION,
             "assumption_registry_root": assumption_registry_root,
@@ -772,7 +766,7 @@ class DecisionAssumptionBinding:
             "decision_id": decision_id,
             "evidence_registry_root": evidence_registry_root,
             "logical_clock_sequence": logical_clock_sequence,
-            "required_assumption_ids": list(canonical_ids),
+            "required_assumption_ids": list(assumptions),
             "semantic_projection_receipt_digest": semantic_projection_receipt_digest,
             "validated_event_digest": validated_event_digest,
         }
@@ -784,7 +778,7 @@ class DecisionAssumptionBinding:
             assumption_registry_root=assumption_registry_root,
             evidence_registry_root=evidence_registry_root,
             logical_clock_sequence=logical_clock_sequence,
-            required_assumption_ids=canonical_ids,
+            required_assumption_ids=assumptions,
             binding_digest=_domain_digest("DECISION_ASSUMPTION_BINDING", unsigned),
         )
 
@@ -824,7 +818,7 @@ class AssumptionEvaluationWork:
     work_digest: str
 
     def __post_init__(self) -> None:
-        for name, value in self._counter_values().items():
+        for name, value in self._counters().items():
             if type(value) is not int or value < 0:
                 raise AssumptionGovernanceContractError(
                     "ASSUMPTION_EVALUATION_WORK_COUNTER_INVALID",
@@ -850,18 +844,19 @@ class AssumptionEvaluationWork:
         active_challenges_evaluated: int,
         separation_duty_rules_evaluated: int,
     ) -> AssumptionEvaluationWork:
-        unsigned = {
-            "schema_version": ASSUMPTION_EVALUATION_WORK_SCHEMA_VERSION,
+        counters = {
             "active_challenges_evaluated": active_challenges_evaluated,
             "assumption_dependency_edges_examined": assumption_dependency_edges_examined,
             "assumption_events_replayed": assumption_events_replayed,
             "assumption_histories_reconstructed": assumption_histories_reconstructed,
             "authority_decisions_evaluated": authority_decisions_evaluated,
-            "evidence_dependency_references_evaluated": (
-                evidence_dependency_references_evaluated
-            ),
+            "evidence_dependency_references_evaluated": evidence_dependency_references_evaluated,
             "separation_duty_rules_evaluated": separation_duty_rules_evaluated,
             "unique_assumption_nodes_evaluated": unique_assumption_nodes_evaluated,
+        }
+        unsigned: dict[str, object] = {
+            "schema_version": ASSUMPTION_EVALUATION_WORK_SCHEMA_VERSION,
+            **counters,
         }
         return cls(
             assumption_histories_reconstructed=assumption_histories_reconstructed,
@@ -869,20 +864,16 @@ class AssumptionEvaluationWork:
             authority_decisions_evaluated=authority_decisions_evaluated,
             unique_assumption_nodes_evaluated=unique_assumption_nodes_evaluated,
             assumption_dependency_edges_examined=assumption_dependency_edges_examined,
-            evidence_dependency_references_evaluated=(
-                evidence_dependency_references_evaluated
-            ),
+            evidence_dependency_references_evaluated=evidence_dependency_references_evaluated,
             active_challenges_evaluated=active_challenges_evaluated,
             separation_duty_rules_evaluated=separation_duty_rules_evaluated,
             work_digest=_domain_digest("ASSUMPTION_EVALUATION_WORK", unsigned),
         )
 
-    def _counter_values(self) -> dict[str, int]:
+    def _counters(self) -> dict[str, int]:
         return {
             "active_challenges_evaluated": self.active_challenges_evaluated,
-            "assumption_dependency_edges_examined": (
-                self.assumption_dependency_edges_examined
-            ),
+            "assumption_dependency_edges_examined": self.assumption_dependency_edges_examined,
             "assumption_events_replayed": self.assumption_events_replayed,
             "assumption_histories_reconstructed": self.assumption_histories_reconstructed,
             "authority_decisions_evaluated": self.authority_decisions_evaluated,
@@ -896,7 +887,7 @@ class AssumptionEvaluationWork:
     def _unsigned_value(self) -> dict[str, object]:
         return {
             "schema_version": ASSUMPTION_EVALUATION_WORK_SCHEMA_VERSION,
-            **self._counter_values(),
+            **self._counters(),
         }
 
     def to_json_value(self) -> dict[str, object]:
@@ -931,17 +922,17 @@ class AssumptionResolutionAuthorityBinding:
             "ASSUMPTION_RESOLUTION_BINDING_AUTHORITY_INVALID",
         )
         _require_digest(self.event_digest, "ASSUMPTION_RESOLUTION_BINDING_EVENT_INVALID")
-        _require_sorted_tokens(
+        _require_tokens(
             self.resolved_challenge_ids,
             "ASSUMPTION_RESOLUTION_BINDING_RESOLVED_INVALID",
             allow_empty=False,
         )
-        _require_sorted_tokens(
+        _require_tokens(
             self.pre_active_challenge_ids,
             "ASSUMPTION_RESOLUTION_BINDING_PRE_SET_INVALID",
             allow_empty=False,
         )
-        _require_sorted_tokens(
+        _require_tokens(
             self.post_active_challenge_ids,
             "ASSUMPTION_RESOLUTION_BINDING_POST_SET_INVALID",
             allow_empty=True,
@@ -986,9 +977,9 @@ class AssumptionResolutionAuthorityBinding:
         grant_id: str,
         grant_digest: str,
     ) -> AssumptionResolutionAuthorityBinding:
-        canonical_resolved = tuple(sorted(resolved_challenge_ids))
-        canonical_pre = tuple(sorted(pre_active_challenge_ids))
-        canonical_post = tuple(sorted(post_active_challenge_ids))
+        resolved = tuple(sorted(resolved_challenge_ids))
+        pre = tuple(sorted(pre_active_challenge_ids))
+        post = tuple(sorted(post_active_challenge_ids))
         unsigned = {
             "schema_version": RESOLUTION_AUTHORITY_BINDING_SCHEMA_VERSION,
             "action": action,
@@ -998,9 +989,9 @@ class AssumptionResolutionAuthorityBinding:
             "grant_id": grant_id,
             "policy_commit_receipt_digest": policy_commit_receipt_digest,
             "policy_digest": policy_digest,
-            "post_active_challenge_ids": list(canonical_post),
-            "pre_active_challenge_ids": list(canonical_pre),
-            "resolved_challenge_ids": list(canonical_resolved),
+            "post_active_challenge_ids": list(post),
+            "pre_active_challenge_ids": list(pre),
+            "resolved_challenge_ids": list(resolved),
             "resolver_authority_id": resolver_authority_id,
         }
         return cls(
@@ -1008,16 +999,14 @@ class AssumptionResolutionAuthorityBinding:
             action=action,
             resolver_authority_id=resolver_authority_id,
             event_digest=event_digest,
-            resolved_challenge_ids=canonical_resolved,
-            pre_active_challenge_ids=canonical_pre,
-            post_active_challenge_ids=canonical_post,
+            resolved_challenge_ids=resolved,
+            pre_active_challenge_ids=pre,
+            post_active_challenge_ids=post,
             policy_digest=policy_digest,
             policy_commit_receipt_digest=policy_commit_receipt_digest,
             grant_id=grant_id,
             grant_digest=grant_digest,
-            binding_digest=_domain_digest(
-                "ASSUMPTION_RESOLUTION_AUTHORITY_BINDING", unsigned
-            ),
+            binding_digest=_domain_digest("ASSUMPTION_RESOLUTION_AUTHORITY_BINDING", unsigned),
         )
 
     def _unsigned_value(self) -> dict[str, object]:
@@ -1041,9 +1030,9 @@ class AssumptionResolutionAuthorityBinding:
 
 
 def canonical_cycle_witness(cycle_path: tuple[str, ...]) -> tuple[str, ...]:
-    """Canonicalize a directed cycle by rotating its smallest identity to the front."""
+    """Rotate a directed cycle so its smallest identity is first."""
 
-    _require_tuple_of_strings(cycle_path, "ASSUMPTION_CYCLE_WITNESS_INVALID")
+    _require_tuple(cycle_path, "ASSUMPTION_CYCLE_WITNESS_INVALID")
     if len(cycle_path) < 2 or cycle_path[0] != cycle_path[-1]:
         raise AssumptionGovernanceContractError("ASSUMPTION_CYCLE_WITNESS_NOT_CLOSED")
     ring = cycle_path[:-1]
@@ -1053,12 +1042,12 @@ def canonical_cycle_witness(cycle_path: tuple[str, ...]) -> tuple[str, ...]:
         _require_token(identity, "ASSUMPTION_CYCLE_WITNESS_ID_INVALID")
     if len(set(ring)) != len(ring):
         raise AssumptionGovernanceContractError("ASSUMPTION_CYCLE_WITNESS_REPEATED_NODE")
-    smallest = min(range(len(ring)), key=lambda index: ring[index])
-    rotated = ring[smallest:] + ring[:smallest]
+    start = min(range(len(ring)), key=lambda index: ring[index])
+    rotated = ring[start:] + ring[:start]
     return rotated + (rotated[0],)
 
 
-def _exception_is_covered_by_grant(
+def _exception_covered(
     exception: AssumptionDutyException,
     grant: AssumptionAuthorityGrant,
 ) -> bool:
@@ -1070,9 +1059,9 @@ def _exception_is_covered_by_grant(
         return False
     if exception.effective_from_sequence < grant.effective_from_sequence:
         return False
-    if grant.effective_until_sequence is not None:
-        return exception.effective_until_sequence <= grant.effective_until_sequence
-    return True
+    if grant.effective_until_sequence is None:
+        return True
+    return exception.effective_until_sequence <= grant.effective_until_sequence
 
 
 def _require_action(value: object, code: str) -> None:
@@ -1090,61 +1079,57 @@ def _require_digest(value: object, code: str) -> None:
         raise AssumptionGovernanceContractError(code)
 
 
-def _require_tuple_of_strings(value: object, code: str) -> None:
+def _require_tuple(value: object, code: str) -> tuple[str, ...]:
     if type(value) is not tuple or not all(type(item) is str for item in value):
         raise AssumptionGovernanceContractError(code)
+    return cast(tuple[str, ...], value)
 
 
-def _require_sorted_tokens(value: object, code: str, *, allow_empty: bool) -> None:
-    _require_tuple_of_strings(value, code)
-    assert isinstance(value, tuple)
-    if not allow_empty and not value:
+def _require_tokens(value: object, code: str, *, allow_empty: bool) -> None:
+    items = _require_tuple(value, code)
+    if not allow_empty and not items:
         raise AssumptionGovernanceContractError(code)
-    if value != tuple(sorted(value)) or len(set(value)) != len(value):
+    if items != tuple(sorted(items)) or len(set(items)) != len(items):
         raise AssumptionGovernanceContractError(code)
-    for item in value:
+    for item in items:
         _require_token(item, code)
 
 
-def _require_sorted_members(
+def _require_members(
     value: object,
     allowed: tuple[str, ...],
     code: str,
     *,
     allow_empty: bool,
 ) -> None:
-    _require_tuple_of_strings(value, code)
-    assert isinstance(value, tuple)
-    if not allow_empty and not value:
+    items = _require_tuple(value, code)
+    if not allow_empty and not items:
         raise AssumptionGovernanceContractError(code)
-    if value != tuple(sorted(value)) or len(set(value)) != len(value):
+    if items != tuple(sorted(items)) or len(set(items)) != len(items):
         raise AssumptionGovernanceContractError(code)
-    if not set(value).issubset(allowed):
+    if not set(items).issubset(allowed):
         raise AssumptionGovernanceContractError(code)
 
 
 def _canonical_scopes(scope_ids: tuple[str, ...]) -> tuple[str, ...]:
     if GLOBAL_ASSUMPTION_SCOPE in scope_ids:
         if scope_ids != (GLOBAL_ASSUMPTION_SCOPE,):
-            raise AssumptionGovernanceContractError(
-                "ASSUMPTION_AUTHORITY_GLOBAL_SCOPE_MIXED"
-            )
+            raise AssumptionGovernanceContractError("ASSUMPTION_AUTHORITY_GLOBAL_SCOPE_MIXED")
         return scope_ids
     return tuple(sorted(scope_ids))
 
 
-def _require_canonical_scopes(value: object, code: str) -> None:
-    _require_tuple_of_strings(value, code)
-    assert isinstance(value, tuple)
-    if not value or len(set(value)) != len(value):
+def _require_scopes(value: object, code: str) -> None:
+    items = _require_tuple(value, code)
+    if not items or len(set(items)) != len(items):
         raise AssumptionGovernanceContractError(code)
-    if GLOBAL_ASSUMPTION_SCOPE in value:
-        if value != (GLOBAL_ASSUMPTION_SCOPE,):
+    if GLOBAL_ASSUMPTION_SCOPE in items:
+        if items != (GLOBAL_ASSUMPTION_SCOPE,):
             raise AssumptionGovernanceContractError(code)
         return
-    if value != tuple(sorted(value)):
+    if items != tuple(sorted(items)):
         raise AssumptionGovernanceContractError(code)
-    for item in value:
+    for item in items:
         _require_token(item, code)
 
 
@@ -1153,43 +1138,33 @@ def _canonical_materialities(values: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _require_materialities(value: object, code: str, *, allow_empty: bool) -> None:
-    _require_tuple_of_strings(value, code)
-    assert isinstance(value, tuple)
-    if not allow_empty and not value:
+    items = _require_tuple(value, code)
+    if not allow_empty and not items:
         raise AssumptionGovernanceContractError(code)
-    if len(set(value)) != len(value) or not set(value).issubset(ASSUMPTION_MATERIALITIES):
+    if len(set(items)) != len(items) or not set(items).issubset(ASSUMPTION_MATERIALITIES):
         raise AssumptionGovernanceContractError(code)
-    if value != _canonical_materialities(value):
+    if items != _canonical_materialities(items):
         raise AssumptionGovernanceContractError(code)
 
 
-def _require_effective_interval(
-    effective_from_sequence: object,
-    effective_until_sequence: object,
-    code: str,
-) -> None:
-    if type(effective_from_sequence) is not int or effective_from_sequence < 0:
+def _require_interval(start: object, end: object, code: str) -> None:
+    if type(start) is not int or start < 0:
         raise AssumptionGovernanceContractError(code)
-    if effective_until_sequence is not None:
-        if type(effective_until_sequence) is not int:
-            raise AssumptionGovernanceContractError(code)
-        if effective_until_sequence <= effective_from_sequence:
+    if end is not None:
+        if type(end) is not int or end <= start:
             raise AssumptionGovernanceContractError(code)
 
 
-def _require_canonical_objects(
-    values: object,
+def _require_objects(
+    values: tuple[_T, ...],
     key: Callable[[_T], str],
     code: str,
     *,
     allow_empty: bool,
 ) -> None:
-    if type(values) is not tuple:
+    if type(values) is not tuple or (not allow_empty and not values):
         raise AssumptionGovernanceContractError(code)
-    typed_values = values
-    if not allow_empty and not typed_values:
-        raise AssumptionGovernanceContractError(code)
-    keys = [key(item) for item in typed_values]
+    keys = [key(item) for item in values]
     if keys != sorted(keys) or len(set(keys)) != len(keys):
         raise AssumptionGovernanceContractError(code)
 
@@ -1202,7 +1177,12 @@ def _scope_is_subset(candidate: tuple[str, ...], boundary: tuple[str, ...]) -> b
     return set(candidate).issubset(boundary)
 
 
-def _require_self_digest(domain: str, unsigned: dict[str, object], actual: str, code: str) -> None:
+def _require_self_digest(
+    domain: str,
+    unsigned: dict[str, object],
+    actual: str,
+    code: str,
+) -> None:
     _require_digest(actual, code)
     if actual != _domain_digest(domain, unsigned):
         raise AssumptionGovernanceContractError(code)
@@ -1213,17 +1193,16 @@ def _set_digest(domain: str, values: list[dict[str, object]]) -> str:
 
 
 def _domain_digest(domain: str, value: dict[str, object]) -> str:
-    return "sha256:" + hashlib.sha256(domain.encode("utf-8") + _json_bytes(value)).hexdigest()
+    payload = domain.encode("utf-8") + _json_bytes(value)
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def _json_bytes(value: object) -> bytes:
-    return (
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        + "\n"
-    ).encode("utf-8")
+    rendered = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return (rendered + "\n").encode("utf-8")
