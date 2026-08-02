@@ -224,10 +224,7 @@ def _eligible_for_expiry(evidence: EvidenceUnit | None, clock_sequence: int) -> 
         return False
     if evidence.last_clock_sequence >= clock_sequence:
         return False
-    return (
-        evidence.expires_at_sequence is not None
-        and clock_sequence >= evidence.expires_at_sequence
-    )
+    return evidence.expires_at_sequence is not None and clock_sequence >= evidence.expires_at_sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -498,9 +495,7 @@ def _apply_events(
 ) -> None:
     for event in events:
         evidence_id = _event_entity_id(event)
-        previous = project_evidence_history(
-            store.reconstruct_entity("EVIDENCE_UNIT", evidence_id)
-        )
+        previous = project_evidence_history(store.reconstruct_entity("EVIDENCE_UNIT", evidence_id))
         decision = authority.require(event, previous)
         current = reduce_evidence(previous, event)
         store.append(event)
