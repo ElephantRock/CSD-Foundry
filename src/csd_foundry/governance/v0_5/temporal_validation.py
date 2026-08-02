@@ -163,7 +163,8 @@ class AtomicTemporalValidationReport:
             "release_compilation_invocations": self.release_compilation_invocations,
             "errors": list(self.errors),
             "claim_boundary": (
-                "Establishes deterministic single-host temporal serialization and atomic visibility "
+                "Establishes deterministic single-host temporal serialization and "
+                "atomic visibility "
                 "for the POSIX reference store and supplied projection artifacts. It does not "
                 "establish distributed consensus, substantive registry or disposition correctness, "
                 "external truth, or production safety."
