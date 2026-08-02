@@ -9,7 +9,9 @@ from csd_foundry.governance.v0_5.contracts import (
     ClockClaim,
     RegistryEvent,
     SemanticProjectionReceipt,
+    ValidatedEvent,
 )
+from csd_foundry.governance.v0_5.evidence import EvidenceUnit
 from csd_foundry.governance.v0_5.evidence_governance import (
     EvidenceAuthorityGrant,
     EvidenceAuthorityPolicy,
@@ -65,7 +67,7 @@ def _seed_store(vector_id: str) -> InMemoryRegistryStore:
     return store
 
 
-def _context(sequence: int) -> tuple[ClockClaim, object, SemanticProjectionReceipt]:
+def _context(sequence: int) -> tuple[ClockClaim, ValidatedEvent, SemanticProjectionReceipt]:
     validated_event = build_reference_validated_event()
     claim = cast(
         ClockClaim,
@@ -93,7 +95,7 @@ class _ReferenceImpactResolver(EvidenceImpactResolver):
     def resolve(
         self,
         *,
-        evidence: object,
+        evidence: EvidenceUnit,
         trigger_event: RegistryEvent,
         store: RegistryStore,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
