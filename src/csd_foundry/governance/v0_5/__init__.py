@@ -1,5 +1,29 @@
-"""Executable v0.5 governance contract substrate."""
+"""Executable v0.5 governance contract and event-admission substrate."""
 
+from csd_foundry.governance.v0_5.admission import (
+    AdmissionEvidenceBundle,
+    AdmissionOutcome,
+    CommittedContextResolver,
+    CommittedValidationContext,
+    EventAdmissionEngine,
+    EventAdmissionStore,
+    SignatureRecord,
+    SignatureVerifier,
+    SignerAuthorityResolver,
+    ValidationPolicyRegistry,
+    reconstruct_accepted,
+    require_validated_event,
+)
+from csd_foundry.governance.v0_5.admission_store import (
+    AdmissionStoreConflictError,
+    AdmissionStoreError,
+    FilesystemEventAdmissionStore,
+    InMemoryEventAdmissionStore,
+)
+from csd_foundry.governance.v0_5.admission_validation import (
+    AdmissionValidationReport,
+    validate_event_admission,
+)
 from csd_foundry.governance.v0_5.canonicalization import (
     GovernanceContractError,
     canonical_bytes,
@@ -34,14 +58,25 @@ from csd_foundry.governance.v0_5.validation import (
 
 __all__ = [
     "CONTRACT_TYPES",
+    "AdmissionEvidenceBundle",
+    "AdmissionOutcome",
+    "AdmissionStoreConflictError",
+    "AdmissionStoreError",
+    "AdmissionValidationReport",
     "ClockClaim",
     "ClockCompletionReceipt",
     "ClockProjectionFailure",
+    "CommittedContextResolver",
+    "CommittedValidationContext",
     "ContractObject",
     "DispositionReceipt",
+    "EventAdmissionEngine",
+    "EventAdmissionStore",
     "EventValidationFailure",
+    "FilesystemEventAdmissionStore",
     "GovernanceContractError",
     "GovernanceContractValidationReport",
+    "InMemoryEventAdmissionStore",
     "InvalidationEvent",
     "PromotionRequest",
     "QuarantineMarker",
@@ -50,12 +85,19 @@ __all__ = [
     "ReleaseManifest",
     "ReleaseRequest",
     "SemanticProjectionReceipt",
+    "SignatureRecord",
     "SignatureSet",
+    "SignatureVerifier",
+    "SignerAuthorityResolver",
     "ValidatedEvent",
     "ValidationPolicy",
+    "ValidationPolicyRegistry",
     "build_contract",
     "canonical_bytes",
     "domain_digest",
     "parse_contract",
+    "reconstruct_accepted",
+    "require_validated_event",
+    "validate_event_admission",
     "validate_governance_contracts",
 ]
