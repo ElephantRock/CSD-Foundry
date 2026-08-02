@@ -99,6 +99,12 @@ def evidence_vectors() -> dict[str, Any]:
     }
 
 
+def evidence_mutation_manifest() -> dict[str, Any]:
+    """Return a defensive copy of the committed v0.5 evidence mutation campaign."""
+
+    return load_json("data/canary/v0.5/evidence-mutations-v1/manifest.json")
+
+
 def _manifest_files(manifest: dict[str, Any], field: str) -> tuple[str, ...]:
     value = manifest.get(field)
     if type(value) is not list or any(type(item) is not str for item in value):
