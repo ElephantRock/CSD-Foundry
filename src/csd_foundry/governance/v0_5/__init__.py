@@ -81,6 +81,12 @@ from csd_foundry.governance.v0_5.evidence_governance import (
     GovernedEvidenceApplyResult,
     GovernedEvidenceRegistry,
 )
+from csd_foundry.governance.v0_5.evidence_mutations import (
+    EvidenceMutationError,
+    EvidenceMutationReport,
+    EvidenceMutationResult,
+    evaluate_evidence_mutations,
+)
 from csd_foundry.governance.v0_5.evidence_validation import (
     EvidenceConformanceError,
     EvidenceRegistryValidationReport,
@@ -161,6 +167,9 @@ __all__ = [
     "EvidenceChallengePolicy",
     "EvidenceConformanceError",
     "EvidenceGovernanceError",
+    "EvidenceMutationError",
+    "EvidenceMutationReport",
+    "EvidenceMutationResult",
     "EvidenceRegistry",
     "EvidenceRegistryError",
     "EvidenceRegistryValidationReport",
@@ -217,6 +226,7 @@ __all__ = [
     "build_registry_event",
     "canonical_bytes",
     "domain_digest",
+    "evaluate_evidence_mutations",
     "parse_contract",
     "project_evidence_history",
     "reconstruct_accepted",
