@@ -21,9 +21,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_runtime_report_matches_frozen_standalone_report() -> None:
-    expected = json.loads(
-        (_ROOT / "reports/contract_freeze_v0.5.json").read_text(encoding="utf-8")
-    )
+    expected = json.loads((_ROOT / "reports/contract_freeze_v0.5.json").read_text(encoding="utf-8"))
     report = validate_governance_contracts("v0.5")
     assert report.success
     assert report.to_dict() == expected
