@@ -68,9 +68,7 @@ def _normalize(value: Any, schema: dict[str, Any]) -> Any:
         if kind in {"SET", "MULTISET"}:
             keyed = sorted(
                 (
-                    json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode(
-                        "utf-8"
-                    ),
+                    json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
                     item,
                 )
                 for item in items
