@@ -1,0 +1,35 @@
+{
+  "schema_version": "event-admission-vectors/1",
+  "accepted_receipt_digests": [
+    "sha256:e553df2bd7169abf3d3638bfbfa88082bbd5033e7394ead236ddcad38207e7ec",
+    "sha256:618f44cd3a46439e881826143de13f6a2a430424f29723b27c0400813402d81b"
+  ],
+  "failure_receipt_digests": {
+    "authority-scope-rejected": "sha256:e2f6fa7b1fd906892b52b7dd3d2f2ea0d75a12d431f73e330454d4464539e0a5",
+    "duplicate-signer-rejected": "sha256:f908ac21ca92f4057161f1650868d5fe3d65406492e0b68d54d76abed4baa0b7",
+    "raw-digest-mismatch": "sha256:cfdee64b801494fb70140b5d971608da2598f24e7888c3879cf68bdd9007c6dc",
+    "raw-schema-rejected": "sha256:c5e89aa6d29d2c23b307295c6bd05eb1fce26adb975f76fd89dae77228f8f12c",
+    "signature-algorithm-not-allowed": "sha256:5c4b71b5c77cb7c68de211da8a7ae100e6616757dabb8fab9df2db160a0de74e",
+    "signature-digest-mismatch": "sha256:b71707df5d0c00276cf811451f890fd08d7660b8f240bc5720fba13d4feecb91",
+    "signature-invalid": "sha256:dc307478e4e5a33dfff142af8f74df6a78651afc500d5b00c867ba930e394e85",
+    "signature-threshold-not-met": "sha256:ae95d94e505db0c9da1c325e7d7a390fa9032b875a95ff79cab19e49f51a4269",
+    "validation-context-not-committed": "sha256:4d0385cb657dea98031afedae6e766ade9e93b4b8059a717d029556310b741bc",
+    "validation-context-stale": "sha256:17c63d2d8f03f02ec784d96e38e8fff51242ab680a8a791dc3c1ef582c18b53f",
+    "validation-context-unavailable": "sha256:d7733bca2d1cd71ae174e765114e76c866dd70e874dfb862d4cc2ffbc8c0e7cf",
+    "validation-policy-not-allowed": "sha256:3c81749c4ebec4054fd7160864a900fcbc98c83095997fb1683b6ebf5c7570ff"
+  },
+  "failure_code_sets": {
+    "authority-scope-rejected": ["AUTHORITY_SCOPE_REJECTED", "SIGNATURE_THRESHOLD_NOT_MET"],
+    "duplicate-signer-rejected": ["SIGNATURE_INVALID"],
+    "raw-digest-mismatch": ["RAW_DIGEST_MISMATCH"],
+    "raw-schema-rejected": ["RAW_SCHEMA_REJECTED"],
+    "signature-algorithm-not-allowed": ["SIGNATURE_ALGORITHM_NOT_ALLOWED", "SIGNATURE_THRESHOLD_NOT_MET"],
+    "signature-digest-mismatch": ["SIGNATURE_DIGEST_MISMATCH", "SIGNATURE_THRESHOLD_NOT_MET"],
+    "signature-invalid": ["SIGNATURE_INVALID", "SIGNATURE_THRESHOLD_NOT_MET"],
+    "signature-threshold-not-met": ["SIGNATURE_THRESHOLD_NOT_MET"],
+    "validation-context-not-committed": ["VALIDATION_CONTEXT_NOT_COMMITTED"],
+    "validation-context-stale": ["VALIDATION_CONTEXT_NOT_COMMITTED"],
+    "validation-context-unavailable": ["VALIDATION_CONTEXT_UNAVAILABLE"],
+    "validation-policy-not-allowed": ["VALIDATION_POLICY_NOT_ALLOWED"]
+  }
+}
