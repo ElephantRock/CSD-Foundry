@@ -302,9 +302,8 @@ def _reduce_independent(
         if valid_from < issued:
             raise EvidenceConformanceError("EVIDENCE_VALIDITY_PRECEDES_ISSUANCE")
         expires = payload.get("expires_at_sequence")
-        if expires is not None:
-            if type(expires) is not int or expires <= valid_from:
-                raise EvidenceConformanceError("EVIDENCE_EXPIRY_NOT_AFTER_VALID_FROM")
+        if expires is not None and (type(expires) is not int or expires <= valid_from):
+            raise EvidenceConformanceError("EVIDENCE_EXPIRY_NOT_AFTER_VALID_FROM")
         scope_ids = _token_tuple(payload, "scope_ids", allow_empty=False)
         dependency_ids = _token_tuple(payload, "dependency_ids")
         evidence_id = _required_token(event, "entity_id")
