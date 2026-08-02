@@ -366,7 +366,9 @@ class EventAdmissionEngine:
         if signature_set is not None and validation_policy is not None and raw_event is not None:
             policy_value = validation_policy.to_json_value()
             allowed_algorithms = set(cast(list[str], policy_value["allowed_signature_algorithms"]))
-            signature_values = cast(list[dict[str, Any]], signature_set.to_json_value()["signatures"])
+            signature_values = cast(
+                list[dict[str, Any]], signature_set.to_json_value()["signatures"]
+            )
             seen_signers: set[str] = set()
             for signature_value in signature_values:
                 signature = SignatureRecord.from_json(signature_value)
@@ -428,7 +430,12 @@ class EventAdmissionEngine:
             self._store.put_contract(failure)
             return AdmissionOutcome(accepted=None, failure=failure)
 
-        if raw_event is None or signature_set is None or validation_policy is None or context is None:
+        if (
+            raw_event is None
+            or signature_set is None
+            or validation_policy is None
+            or context is None
+        ):
             raise GovernanceContractError("ADMISSION_INTERNAL_INCOMPLETE")
 
         accepted = cast(
