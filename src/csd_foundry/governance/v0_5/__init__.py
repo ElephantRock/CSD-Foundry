@@ -1,0 +1,61 @@
+"""Executable v0.5 governance contract substrate."""
+
+from csd_foundry.governance.v0_5.canonicalization import (
+    GovernanceContractError,
+    canonical_bytes,
+    domain_digest,
+)
+from csd_foundry.governance.v0_5.contracts import (
+    CONTRACT_TYPES,
+    ClockClaim,
+    ClockCompletionReceipt,
+    ClockProjectionFailure,
+    ContractObject,
+    DispositionReceipt,
+    EventValidationFailure,
+    InvalidationEvent,
+    PromotionRequest,
+    QuarantineMarker,
+    RawEvent,
+    RegistryEvent,
+    ReleaseManifest,
+    ReleaseRequest,
+    SemanticProjectionReceipt,
+    SignatureSet,
+    ValidatedEvent,
+    ValidationPolicy,
+    build_contract,
+    parse_contract,
+)
+from csd_foundry.governance.v0_5.validation import (
+    GovernanceContractValidationReport,
+    validate_governance_contracts,
+)
+
+__all__ = [
+    "CONTRACT_TYPES",
+    "ClockClaim",
+    "ClockCompletionReceipt",
+    "ClockProjectionFailure",
+    "ContractObject",
+    "DispositionReceipt",
+    "EventValidationFailure",
+    "GovernanceContractError",
+    "GovernanceContractValidationReport",
+    "InvalidationEvent",
+    "PromotionRequest",
+    "QuarantineMarker",
+    "RawEvent",
+    "RegistryEvent",
+    "ReleaseManifest",
+    "ReleaseRequest",
+    "SemanticProjectionReceipt",
+    "SignatureSet",
+    "ValidatedEvent",
+    "ValidationPolicy",
+    "build_contract",
+    "canonical_bytes",
+    "domain_digest",
+    "parse_contract",
+    "validate_governance_contracts",
+]
