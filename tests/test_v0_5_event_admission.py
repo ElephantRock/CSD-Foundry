@@ -52,9 +52,10 @@ def test_runtime_admission_matches_frozen_evidence() -> None:
     assert report["failure_code_sets"] == vectors["failure_code_sets"]
     assert report["accepted_receipts"] == committed_report["accepted_receipts"]
     assert report["rejected_receipts"] == committed_report["rejected_receipts"]
-    assert report["reconstructed_acceptance_count"] == committed_report[
-        "reconstructed_acceptance_count"
-    ]
+    assert (
+        report["reconstructed_acceptance_count"]
+        == committed_report["reconstructed_acceptance_count"]
+    )
     assert report["reducer_boundary_enforced"] == committed_report["reducer_boundary_enforced"]
     assert report["restart_deterministic"] == committed_report["restart_deterministic"]
     assert report["status"] == committed_report["status"]
