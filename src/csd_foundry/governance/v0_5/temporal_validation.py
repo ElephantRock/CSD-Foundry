@@ -10,11 +10,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 
-from csd_foundry.governance.v0_5.admission_validation import build_reference_admission_fixture
+from csd_foundry.governance.v0_5.admission_validation import (
+    build_reference_admission_fixture,
+)
 from csd_foundry.governance.v0_5.contracts import (
     ClockClaim,
     ClockCompletionReceipt,
-    ClockProjectionFailure,
     SemanticProjectionReceipt,
     ValidatedEvent,
 )
@@ -324,7 +325,9 @@ def _validate_process_concurrency(
             winner = next(claim for claim in claims if claim.digest == winners[0][2])
             completed = coordinator.complete_claim(head, winner, event)
             if completed.completion is None or store.read_head().clock_sequence != 1:
-                errors.append("winning process claim did not produce exactly one committed successor")
+                errors.append(
+                    "winning process claim did not produce exactly one committed successor"
+                )
         return claimant_count, len(winners), len(losers)
 
 
@@ -396,6 +399,7 @@ def _validate_recovery(
         completion = _build_reference_completion(result.claim, event, semantic, artifacts)
         store.put_contract(semantic)
         store.record_attempt_artifact("crash-after-prepare", "semantic", semantic)
+        store.record_projection_artifacts(result.claim, semantic, artifacts)
         store.prepare_completion(result.claim, completion)
         if store.current_snapshot() is not None:
             errors.append("prepared completion became visible before head publication")
@@ -408,7 +412,9 @@ def _validate_recovery(
         second_reopen = FilesystemTemporalStore(root)
         chain_a = tuple(item.canonical_bytes for item in reopened.reconstruct_chain())
         chain_b = tuple(item.canonical_bytes for item in second_reopen.reconstruct_chain())
-        restart_deterministic = reopened.read_head() == second_reopen.read_head() and chain_a == chain_b
+        restart_deterministic = (
+            reopened.read_head() == second_reopen.read_head() and chain_a == chain_b
+        )
         if not restart_deterministic:
             errors.append("restart changed committed temporal identity")
 
