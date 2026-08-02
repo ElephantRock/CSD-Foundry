@@ -397,8 +397,7 @@ def _verify_projection_bundle(
     value = _json_object(payload, "projection bundle")
     digest = value.pop("projection_bundle_digest", None)
     expected = (
-        "sha256:"
-        + hashlib.sha256(b"TEMPORAL_PROJECTION_BUNDLE\0" + _json_bytes(value)).hexdigest()
+        "sha256:" + hashlib.sha256(b"TEMPORAL_PROJECTION_BUNDLE\0" + _json_bytes(value)).hexdigest()
     )
     if digest != expected:
         raise TemporalStoreConflictError("projection bundle digest is invalid")
