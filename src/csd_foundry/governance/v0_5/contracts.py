@@ -19,7 +19,6 @@ from csd_foundry.governance.v0_5.resources import contract_catalog, load_json
 
 JSONScalar: TypeAlias = None | bool | int | str
 JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
-FrozenValue: TypeAlias = JSONScalar | "FrozenArray" | "FrozenObject"
 
 _RANK = {"D0": 0, "D1": 1, "D2": 2, "D3": 3, "BENCHMARK": 4}
 
@@ -32,6 +31,9 @@ class FrozenArray:
 @dataclass(frozen=True, slots=True)
 class FrozenObject:
     fields: tuple[tuple[str, FrozenValue], ...]
+
+
+FrozenValue: TypeAlias = JSONScalar | FrozenArray | FrozenObject
 
 
 def freeze_json(value: Any) -> FrozenValue:
@@ -145,66 +147,82 @@ class ContractObject:
 
 
 class RawEvent(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "raw-event"
 
 
 class SignatureSet(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "signature-set"
 
 
 class ValidationPolicy(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "validation-policy"
 
 
 class ValidatedEvent(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "validated-event"
 
 
 class EventValidationFailure(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "event-validation-failure"
 
 
 class ClockClaim(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "clock-claim"
 
 
 class ClockProjectionFailure(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "clock-projection-failure"
 
 
 class SemanticProjectionReceipt(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "semantic-projection-receipt"
 
 
 class RegistryEvent(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "registry-event"
 
 
 class DispositionReceipt(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "disposition-receipt"
 
 
 class InvalidationEvent(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "invalidation-event"
 
 
 class QuarantineMarker(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "quarantine-marker"
 
 
 class ClockCompletionReceipt(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "clock-completion-receipt"
 
 
 class ReleaseRequest(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "release-request"
 
 
 class PromotionRequest(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "promotion-request"
 
 
 class ReleaseManifest(ContractObject):
+    __slots__ = ()
     CONTRACT_NAME = "release-manifest"
 
 
