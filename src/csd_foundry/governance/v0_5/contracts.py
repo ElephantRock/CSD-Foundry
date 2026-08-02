@@ -72,20 +72,21 @@ class ContractObject:
     """Immutable schema-validated object with frozen v0.5 identity semantics."""
 
     value: FrozenObject
-    CONTRACT_NAME: ClassVar[str]
+    CONTRACT_NAME: ClassVar[str] = ""
 
-    @classmethod
-    def from_json(cls, value: dict[str, Any]) -> ContractObject:
-        if type(value) is not dict:
+    def __post_init__(self) -> None:
+        if type(self.value) is not FrozenObject:
             raise GovernanceContractError("CONTRACT_VALUE_NOT_OBJECT")
-        entry = contract_entry(cls.CONTRACT_NAME)
-        schema = contract_schema(cls.CONTRACT_NAME)
-        candidate = deepcopy(value)
+        if not self.CONTRACT_NAME:
+            raise GovernanceContractError("ABSTRACT_CONTRACT_TYPE")
+        entry = contract_entry(self.CONTRACT_NAME)
+        schema = contract_schema(self.CONTRACT_NAME)
+        candidate = self.to_json_value()
         try:
             Draft202012Validator(schema).validate(candidate)
         except ValidationError as exc:
             raise GovernanceContractError("SCHEMA_REJECTED", exc.json_path) from exc
-        _semantic_validate(cls.CONTRACT_NAME, candidate)
+        _semantic_validate(self.CONTRACT_NAME, candidate)
         expected = domain_digest(
             candidate,
             schema,
@@ -95,6 +96,12 @@ class ContractObject:
         actual = candidate.get(entry.digest_field)
         if actual != expected:
             raise GovernanceContractError("DIGEST_MISMATCH", entry.digest_field)
+
+    @classmethod
+    def from_json(cls, value: dict[str, Any]) -> ContractObject:
+        if type(value) is not dict:
+            raise GovernanceContractError("CONTRACT_VALUE_NOT_OBJECT")
+        candidate = deepcopy(value)
         frozen = freeze_json(candidate)
         if type(frozen) is not FrozenObject:
             raise GovernanceContractError("CONTRACT_VALUE_NOT_OBJECT")
