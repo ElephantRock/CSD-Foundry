@@ -1188,7 +1188,7 @@ def _set_digest(domain: str, values: list[dict[str, object]]) -> str:
     return _domain_digest(domain, {"members": values})
 
 
-def _domain_digest(domain: str, value: dict[str, object]) -> str:
+def _domain_digest(domain: str, value: object) -> str:
     payload = domain.encode("utf-8") + _json_bytes(value)
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
