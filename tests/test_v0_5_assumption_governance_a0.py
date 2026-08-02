@@ -132,18 +132,14 @@ def _entry(
     predecessor: AssumptionPolicyLedgerEntry | None,
     signers: tuple[str, ...] | None = None,
 ) -> AssumptionPolicyLedgerEntry:
-    signature_set_digest = _digest(
-        f"signatures:{policy.policy_id}:{effective_from_sequence}"
-    )
+    signature_set_digest = _digest(f"signatures:{policy.policy_id}:{effective_from_sequence}")
     commit = AssumptionAuthorityPolicyCommit.build(
         policy=policy,
         predecessor_policy_digest=(
             None if predecessor is None else predecessor.policy.policy_digest
         ),
         predecessor_commit_receipt_digest=(
-            None
-            if predecessor is None
-            else predecessor.policy_commit.commit_receipt_digest
+            None if predecessor is None else predecessor.policy_commit.commit_receipt_digest
         ),
         effective_from_sequence=effective_from_sequence,
         approval_policy_digest=approval_policy.approval_policy_digest,
@@ -383,9 +379,7 @@ def _next_evidence(previous, operation: str, clock_sequence: int, **payload: obj
         entity_sequence=previous.current_entity_sequence + 1,
         previous_entity_event_digest=previous.current_event_digest,
         clock_sequence=clock_sequence,
-        source_receipt_digest=_digest(
-            f"{operation}:{previous.evidence_id}:{clock_sequence}"
-        ),
+        source_receipt_digest=_digest(f"{operation}:{previous.evidence_id}:{clock_sequence}"),
         payload={"operation": operation, **payload},
     )
 
@@ -464,9 +458,7 @@ def test_known_terminal_and_clock_expired_evidence_are_rejected_at_admission() -
     )
     assert rejected_decision.code == "ASSUMPTION_EVIDENCE_TERMINAL"
 
-    registered_expiring = registry.apply(
-        _register_evidence(evidence_id="evidence:expiring")
-    )
+    registered_expiring = registry.apply(_register_evidence(evidence_id="evidence:expiring"))
     verified_expiring = registry.apply(
         _next_evidence(
             registered_expiring,
