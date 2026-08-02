@@ -101,6 +101,13 @@ class TemporalStore(Protocol):
         contract: ContractObject,
     ) -> None: ...
 
+    def record_projection_artifacts(
+        self,
+        claim: ClockClaim,
+        semantic_receipt: SemanticProjectionReceipt,
+        artifacts: ProjectionArtifacts,
+    ) -> None: ...
+
     def record_failure(self, claim: ClockClaim, failure: ClockProjectionFailure) -> None: ...
 
     def prepare_completion(self, claim: ClockClaim, completion: ClockCompletionReceipt) -> None: ...
@@ -242,6 +249,7 @@ class TemporalProjectionCoordinator:
                 semantic_receipt=semantic_receipt,
             )
             self._verify_projection_artifacts(artifacts)
+            self._store.record_projection_artifacts(claim, semantic_receipt, artifacts)
             completion = self._build_completion(
                 claim=claim,
                 validated_event=validated_event,
