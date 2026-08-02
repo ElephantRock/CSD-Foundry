@@ -1,5 +1,23 @@
 {
   "schema_version": "event-admission-vectors/1",
+  "signature_records": {
+    "alice": {
+      "signer_id": "alice",
+      "key_id": "key-alice-1",
+      "algorithm": "ed25519",
+      "signed_digest": "sha256:57f9b4eb9ffe22e7fdcafd90c6450311da148933a1fa03c5bddee23c738ac0d3",
+      "signature_base64": "dDDDi/oXQQbax2YOo3JXoOJ0Rs0WWPsxc8Nv0LA27FY=",
+      "authority_scope": "csd.events"
+    },
+    "bob": {
+      "signer_id": "bob",
+      "key_id": "key-bob-1",
+      "algorithm": "ed25519",
+      "signed_digest": "sha256:57f9b4eb9ffe22e7fdcafd90c6450311da148933a1fa03c5bddee23c738ac0d3",
+      "signature_base64": "wJNbOJVnjJMQ2C1NNIEGTFQUB7gQvjXUirbpJZzQtSM=",
+      "authority_scope": "csd.events"
+    }
+  },
   "accepted_receipt_digests": [
     "sha256:e553df2bd7169abf3d3638bfbfa88082bbd5033e7394ead236ddcad38207e7ec",
     "sha256:618f44cd3a46439e881826143de13f6a2a430424f29723b27c0400813402d81b"
