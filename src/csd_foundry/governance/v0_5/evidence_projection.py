@@ -224,7 +224,9 @@ def _eligible_for_expiry(evidence: EvidenceUnit | None, clock_sequence: int) -> 
         return False
     if evidence.last_clock_sequence >= clock_sequence:
         return False
-    return evidence.expires_at_sequence is not None and clock_sequence >= evidence.expires_at_sequence
+    return (
+        evidence.expires_at_sequence is not None and clock_sequence >= evidence.expires_at_sequence
+    )
 
 
 @dataclass(frozen=True, slots=True)
