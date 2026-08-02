@@ -1,0 +1,214 @@
+{
+  "baseline_vector_catalog_digest": "sha256:32a7b0e3d3ba7ebd50f88b4c0c939fdd23f4a2394592d4e049bf717bb65701b4",
+  "catalog_digest": "sha256:e2fde18a05ef22069db68fcf74291f9f8380139d369489479410b5a8fcbf70da",
+  "claim_boundary": "This campaign establishes that declared serialized evidence defects are detected relative to the committed evidence-v1 corpus and independent validator. It does not establish completeness of the mutation space, external truth, real-world dependency completeness, or production safety.",
+  "classification_values": [
+    "EQUIVALENT",
+    "INVALID_MUTATION",
+    "KILLED",
+    "SURVIVED"
+  ],
+  "mutation_version": 1,
+  "mutations": [
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_AUTHORITY_DENIED",
+      "family": "AUTHORITY_BYPASS",
+      "mode": "REJECTED",
+      "mutation_id": "EM-AUTH-001",
+      "operator": "SUBSTITUTE_VERIFY_AUTHORITY",
+      "parameters": {
+        "authority_id": "authority:intruder",
+        "stage": "AUTHORITY"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A02-MATERIAL-CHALLENGE",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_EXPECTED_ROOT_MISMATCH",
+      "family": "MATERIAL_CHALLENGE_SUPPRESSION",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-CHALLENGE-001",
+      "operator": "DOWNGRADE_MATERIAL_CHALLENGE",
+      "parameters": {
+        "reason_code": "LOW_SEVERITY_METADATA_GAP"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A05-DEPENDENCY-CHAIN",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_EXPECTED_ROOT_MISMATCH",
+      "family": "DEPENDENCY_REMOVAL",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-DEPENDENCY-001",
+      "operator": "REMOVE_DEPENDENCY",
+      "parameters": {
+        "evidence_id": "evidence:a"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A05-DEPENDENCY-CHAIN",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_DEPENDENCY_CYCLE",
+      "family": "DEPENDENCY_CYCLE_ACCEPTANCE",
+      "mode": "REJECTED",
+      "mutation_id": "EM-DEPENDENCY-002",
+      "operator": "INTRODUCE_DEPENDENCY_CYCLE",
+      "parameters": {
+        "dependency_id": "evidence:a",
+        "evidence_id": "evidence:b",
+        "stage": "USE"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_EXPECTED_ROOT_MISMATCH",
+      "family": "EXPIRY_SUPPRESSION",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-EXPIRY-001",
+      "operator": "SUPPRESS_EXPIRY",
+      "parameters": {}
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_EXPECTED_ROOT_MISMATCH",
+      "family": "HISTORY_DELETION",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-HISTORY-001",
+      "operator": "DELETE_VERIFY_EVENT",
+      "parameters": {}
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "DIGEST_MISMATCH",
+      "family": "EVENT_DIGEST_CORRUPTION",
+      "mode": "REJECTED",
+      "mutation_id": "EM-INTEGRITY-001",
+      "operator": "CORRUPT_EVENT_DIGEST",
+      "parameters": {
+        "stage": "CONTRACT"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_PREDECESSOR_MISMATCH",
+      "family": "PREDECESSOR_CORRUPTION",
+      "mode": "REJECTED",
+      "mutation_id": "EM-INTEGRITY-002",
+      "operator": "CORRUPT_PREDECESSOR",
+      "parameters": {
+        "stage": "HISTORY"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_TERMINAL_IDENTITY_REUSE",
+      "family": "TERMINAL_REVIVAL",
+      "mode": "REJECTED",
+      "mutation_id": "EM-LIFECYCLE-001",
+      "operator": "APPEND_TERMINAL_REVIVAL",
+      "parameters": {
+        "stage": "HISTORY"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A06-LIMITATION-ACCEPTED",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_EXPECTED_ROOT_MISMATCH",
+      "family": "LIMITATION_REMOVAL",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-LIMIT-001",
+      "operator": "REMOVE_LIMITATION",
+      "parameters": {}
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_SEQUENCE_MISMATCH",
+      "family": "NONCANONICAL_EVENT_ORDER",
+      "mode": "REJECTED",
+      "mutation_id": "EM-ORDER-001",
+      "operator": "REORDER_EVENTS",
+      "parameters": {
+        "stage": "HISTORY"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_AUTHORITY_POLICY_DIGEST_MISMATCH",
+      "family": "AUTHORITY_POLICY_CORRUPTION",
+      "mode": "CATALOG_ERROR",
+      "mutation_id": "EM-POLICY-001",
+      "operator": "CORRUPT_AUTHORITY_POLICY_DIGEST",
+      "parameters": {}
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_EXPECTED_ROOT_MISMATCH",
+      "family": "PROVENANCE_REWRITE",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-PROVENANCE-001",
+      "operator": "REWRITE_SOURCE_ID",
+      "parameters": {
+        "source_id": "assessment:rewritten"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_ADMISSIBILITY_RECEIPT_MISMATCH",
+      "family": "ADMISSIBILITY_RECEIPT_CORRUPTION",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-RECEIPT-001",
+      "operator": "CORRUPT_EXPECTED_RECEIPT",
+      "parameters": {}
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_REUSE_CLASS_INSUFFICIENT",
+      "family": "REUSE_ESCALATION",
+      "mode": "REJECTED",
+      "mutation_id": "EM-REUSE-001",
+      "operator": "ESCALATE_REUSE_CLASS",
+      "parameters": {
+        "required_reuse_class": "BENCHMARK",
+        "stage": "USE"
+      }
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_EXPECTED_ROOT_MISMATCH",
+      "family": "REGISTRY_ROOT_CORRUPTION",
+      "mode": "ACCEPTED_ERROR",
+      "mutation_id": "EM-ROOT-001",
+      "operator": "CORRUPT_EXPECTED_ROOT",
+      "parameters": {}
+    },
+    {
+      "baseline_vector_id": "EV-A01-REGISTER-VERIFY",
+      "expected_classification": "KILLED",
+      "expected_detector": "EVIDENCE_SCOPE_INSUFFICIENT",
+      "family": "SCOPE_WIDENING",
+      "mode": "REJECTED",
+      "mutation_id": "EM-SCOPE-001",
+      "operator": "WIDEN_USE_SCOPE",
+      "parameters": {
+        "scope_ids": [
+          "control:99"
+        ],
+        "stage": "USE"
+      }
+    }
+  ],
+  "schema_version": "evidence-mutation-campaign/1"
+}
