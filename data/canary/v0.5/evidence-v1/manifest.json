@@ -1,0 +1,91 @@
+{
+  "accepted_files": [
+    "ev-a01-register-verify.json",
+    "ev-a02-material-challenge.json",
+    "ev-a03-advisory-challenge.json",
+    "ev-a05-dependency-chain.json",
+    "ev-a06-limitation-accepted.json"
+  ],
+  "authority_policy": {
+    "authority_root_digest": "sha256:d5abea2a479a0b8db602fbf63537193f2085cd3bd25486b9534b5052397d1a6c",
+    "committed_at_sequence": 0,
+    "grants": [
+      {
+        "authority_id": "authority:challenger",
+        "operation": "CHALLENGE",
+        "scope_ids": []
+      },
+      {
+        "authority_id": "authority:clock",
+        "operation": "EXPIRE",
+        "scope_ids": []
+      },
+      {
+        "authority_id": "authority:resolver",
+        "operation": "INVALIDATE",
+        "scope_ids": []
+      },
+      {
+        "authority_id": "authority:issuer",
+        "operation": "REGISTER",
+        "scope_ids": [
+          "control:17"
+        ]
+      },
+      {
+        "authority_id": "authority:verifier",
+        "operation": "REJECT",
+        "scope_ids": []
+      },
+      {
+        "authority_id": "authority:resolver",
+        "operation": "RESOLVE_CHALLENGE",
+        "scope_ids": []
+      },
+      {
+        "authority_id": "authority:issuer",
+        "operation": "SUPERSEDE",
+        "scope_ids": []
+      },
+      {
+        "authority_id": "authority:verifier",
+        "operation": "VERIFY",
+        "scope_ids": [
+          "control:17"
+        ]
+      }
+    ],
+    "policy_digest": "sha256:11ed942626eac18967daeb0f658a92ba71b311510917455d13729c37bad2050f",
+    "policy_id": "policy:evidence-v1",
+    "schema_version": "evidence-authority-policy/1"
+  },
+  "catalog_digest": "sha256:32a7b0e3d3ba7ebd50f88b4c0c939fdd23f4a2394592d4e049bf717bb65701b4",
+  "challenge_policy": {
+    "policy_digest": "sha256:f333a799792d23a6acae837076f16459a94c6fc91cb2e665fba117083629e354",
+    "rules": [
+      {
+        "materiality": "ADVISORY",
+        "reason_code": "LOW_SEVERITY_METADATA_GAP"
+      },
+      {
+        "materiality": "MATERIAL",
+        "reason_code": "SOURCE_RELIABILITY_DISPUTED"
+      }
+    ],
+    "schema_version": "evidence-challenge-policy/1"
+  },
+  "claim_boundary": "These vectors establish deterministic evidence-history, authority, dependency, and admissibility behavior relative to the encoded policies. They do not establish external truth, source completeness, or production safety.",
+  "rejected_files": [
+    "ev-r01-unauthorized-verify.json",
+    "ev-r02-terminal-revival.json",
+    "ev-r03-predecessor-mismatch.json",
+    "ev-r06-event-digest-mismatch.json",
+    "ev-r07-scope-insufficient.json",
+    "ev-r08-reuse-escalation.json",
+    "ev-r09-dependency-cycle.json",
+    "ev-r11-expired-by-time.json"
+  ],
+  "schema_version": "evidence-conformance-manifest/0.5",
+  "vector_schema_version": "evidence-conformance-vectors/0.5",
+  "vector_version": 1
+}
