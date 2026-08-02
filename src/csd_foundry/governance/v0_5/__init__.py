@@ -1,4 +1,4 @@
-"""Executable v0.5 governance, admission, and temporal substrate."""
+"""Executable v0.5 governance, admission, temporal, and registry substrate."""
 
 from csd_foundry.governance.v0_5.admission import (
     AdmissionEvidenceBundle,
@@ -53,6 +53,17 @@ from csd_foundry.governance.v0_5.contracts import (
     build_contract,
     parse_contract,
 )
+from csd_foundry.governance.v0_5.registry import (
+    FilesystemRegistryStore,
+    InMemoryRegistryStore,
+    RegistryAppendResult,
+    RegistryEntityHead,
+    RegistrySnapshot,
+    RegistryStore,
+    RegistryStoreConflictError,
+    RegistryStoreError,
+    build_registry_event,
+)
 from csd_foundry.governance.v0_5.temporal import (
     ClaimInstallResult,
     OrderedProjectionAdapter,
@@ -101,10 +112,12 @@ __all__ = [
     "EventAdmissionStore",
     "EventValidationFailure",
     "FilesystemEventAdmissionStore",
+    "FilesystemRegistryStore",
     "FilesystemTemporalStore",
     "GovernanceContractError",
     "GovernanceContractValidationReport",
     "InMemoryEventAdmissionStore",
+    "InMemoryRegistryStore",
     "InMemoryTemporalStore",
     "InvalidationEvent",
     "OrderedProjectionAdapter",
@@ -114,7 +127,13 @@ __all__ = [
     "QuarantineMarker",
     "RawEvent",
     "ReferencePayloadSchemaResolver",
+    "RegistryAppendResult",
+    "RegistryEntityHead",
     "RegistryEvent",
+    "RegistrySnapshot",
+    "RegistryStore",
+    "RegistryStoreConflictError",
+    "RegistryStoreError",
     "ReleaseManifest",
     "ReleaseRequest",
     "SemanticProjectionReceipt",
@@ -136,6 +155,7 @@ __all__ = [
     "ValidationPolicy",
     "ValidationPolicyRegistry",
     "build_contract",
+    "build_registry_event",
     "canonical_bytes",
     "domain_digest",
     "parse_contract",
