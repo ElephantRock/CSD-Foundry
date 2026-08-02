@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:clock-completion-receipt:1",
+  "title": "Clock Completion Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "decisionClass": {
+      "type": "string",
+      "enum": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "BENCHMARK"
+      ]
+    },
+    "registryType": {
+      "type": "string",
+      "enum": [
+        "EVIDENCE_UNIT",
+        "ASSUMPTION",
+        "ALTERNATIVE_MODEL"
+      ]
+    },
+    "projectionPhase": {
+      "type": "string",
+      "enum": [
+        "SEMANTIC",
+        "EVIDENCE_REGISTRY",
+        "ASSUMPTION_REGISTRY",
+        "ALTERNATIVE_MODEL_REGISTRY",
+        "DISPOSITION",
+        "QUARANTINE_COMMIT"
+      ]
+    },
+    "dispositionAction": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT_AND_PROCEED",
+        "FLAG_AND_PROCEED",
+        "ESCALATE_AND_HOLD",
+        "BLOCK",
+        "EXCLUDE_FROM_RELEASE"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "clock-completion-receipt/1"
+    },
+    "clock_sequence": {
+      "$ref": "#/$defs/positiveInteger"
+    },
+    "previous_completion_digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "clock_claim_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "validated_event_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "semantic_projection_receipt_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "registry_root_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence_unit": {
+          "$ref": "#/$defs/digest"
+        },
+        "assumption": {
+          "$ref": "#/$defs/digest"
+        },
+        "alternative_model": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "evidence_unit",
+        "assumption",
+        "alternative_model"
+      ]
+    },
+    "disposition_receipt_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "quarantine_epoch": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "quarantine_marker_digests": {
+      "type": "array",
+      "x-csd-collection-kind": "SET",
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "completion_policy_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "clock_completion_receipt_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "clock_sequence",
+    "previous_completion_digest",
+    "clock_claim_digest",
+    "validated_event_digest",
+    "semantic_projection_receipt_digest",
+    "registry_root_digests",
+    "disposition_receipt_digest",
+    "quarantine_epoch",
+    "quarantine_marker_digests",
+    "completion_policy_digest",
+    "clock_completion_receipt_digest"
+  ]
+}
