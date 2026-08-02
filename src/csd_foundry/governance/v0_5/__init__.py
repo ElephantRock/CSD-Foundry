@@ -53,6 +53,15 @@ from csd_foundry.governance.v0_5.contracts import (
     build_contract,
     parse_contract,
 )
+from csd_foundry.governance.v0_5.evidence import (
+    EVIDENCE_PAYLOAD_SCHEMA_VERSION,
+    EvidenceRegistry,
+    EvidenceRegistryError,
+    EvidenceUnit,
+    build_evidence_event,
+    project_evidence_history,
+    reduce_evidence,
+)
 from csd_foundry.governance.v0_5.registry import (
     FilesystemRegistryStore,
     InMemoryRegistryStore,
@@ -94,6 +103,7 @@ from csd_foundry.governance.v0_5.validation import (
 
 __all__ = [
     "CONTRACT_TYPES",
+    "EVIDENCE_PAYLOAD_SCHEMA_VERSION",
     "AdmissionEvidenceBundle",
     "AdmissionOutcome",
     "AdmissionStoreConflictError",
@@ -111,6 +121,9 @@ __all__ = [
     "EventAdmissionEngine",
     "EventAdmissionStore",
     "EventValidationFailure",
+    "EvidenceRegistry",
+    "EvidenceRegistryError",
+    "EvidenceUnit",
     "FilesystemEventAdmissionStore",
     "FilesystemRegistryStore",
     "FilesystemTemporalStore",
@@ -155,11 +168,14 @@ __all__ = [
     "ValidationPolicy",
     "ValidationPolicyRegistry",
     "build_contract",
+    "build_evidence_event",
     "build_registry_event",
     "canonical_bytes",
     "domain_digest",
     "parse_contract",
+    "project_evidence_history",
     "reconstruct_accepted",
+    "reduce_evidence",
     "require_validated_event",
     "validate_atomic_temporal",
     "validate_event_admission",
