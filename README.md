@@ -2,20 +2,20 @@
 
 CSD Foundry is an executable reasoning-data foundry for the Control-Status Discipline (CSD).
 It turns governed state transitions into machine-verifiable labels, adversarial mutations,
-training records, and evaluation evidence.
+training records, evaluation evidence, and eventually runtime decision receipts.
 
 ## Status
 
-**Temporal and Governance Kernel v0.3, completed v0.4 deterministic execution substrate, and
-frozen v0.5 governance contracts**. The repository contains:
+**Temporal and Governance Kernel v0.3, completed v0.4 deterministic execution substrate,
+and implemented v0.5-A through v0.5-C governed-execution slices.**
+
+The repository currently contains:
 
 - a typed CSD kernel for dependency invalidation, basis survival, restoration, retirement,
   logical time, expiry, profile changes, reassessment requests, and heartbeat obligations;
-- independent state, transition, and event-specific invariant checks;
+- independent state, transition, temporal, and event-specific invariant checks;
 - a manifest-complete executable registry for all 21 CSD Reasoning Seed v0.1 scenarios;
-- transition, sequence, multi-control, observation, and rejected-transition case types;
-- ten deterministic temporal/governance scenarios with complete replay evidence;
-- legacy and temporal mutation kill-matrix evaluators;
+- deterministic temporal/governance scenarios and mutation kill matrices;
 - typed v0.4 synthesis targets, rejection causes, search budgets, completeness witnesses,
   structural holdout rules, mutation severity, and deterministic serialization policies;
 - deterministic HMAC choices, canonical identities, bounded attempt replay, immutable execution
@@ -24,15 +24,49 @@ frozen v0.5 governance contracts**. The repository contains:
   `FULL_REPLAY`, topology-independent semantic manifests, separate run evidence, and final seals;
 - frozen v0.5 event-validation, temporal-completion, registry, disposition, quarantine, release,
   and promotion contracts with commit-blocking conformance vectors;
+- executable v0.5 canonicalization and immutable typed contract objects;
+- deterministic `ValidatedEvent` admission and reconstruction boundaries;
+- atomic compare-and-append temporal claims, ordered projection commitments, failure-no-advance,
+  crash recovery, and committed-head visibility;
 - the immutable CSD Reasoning Seed v0.1 and its original generator and validator.
 
 The included seed remains an unbenchmarked synthetic seed. Passing validation establishes
-coverage relative to the encoded CSD semantics; it does not prove real-world dependency
-completeness, model generalization, scheduler fairness, or production safety. Release-scale
-generation remains blocked until performance and stochastic mutation-risk policies are
-empirically frozen.
+coverage relative to the encoded CSD semantics and committed test evidence. It does not prove
+real-world dependency completeness, external truth, model generalization, scheduler fairness,
+or production safety. Release-scale generation remains blocked until governed registries,
+disposition, quarantine, the vertical slice, synthesis, and empirical policy gates are complete.
 
-## Architecture
+## Platform direction
+
+The repository is completing CSD as the first governed reasoning domain. The frozen platform
+direction is broader:
+
+```text
+narrow domain-neutral governance microkernel
+        +
+versioned domain packs
+        +
+external specialist oracles
+        +
+governed open-ended exploration
+        ↓
+proof-carrying cognition episodes
+```
+
+CSD is intended to become the first domain pack, not a universal ontology. Domain breadth will
+come from a domain-definition toolchain, reusable reasoning archetypes, a Reasoning ABI,
+assurance-aware cross-domain composition, and a separate exploration plane whose hypotheses
+remain distinct from verified assertions.
+
+The governing principle is:
+
+> **Open at ingestion, bounded at assertion.**
+
+See `docs/FOUNDRY_PLATFORM_CHARTER_v1.0.md` for the normative strategic boundary. The charter is
+normative for project direction and constitutional invariants, but not for exact syntax,
+schemas, algorithms, model choices, or deployment topology.
+
+## Current architecture
 
 ```text
 manifest-aligned scenario registry
@@ -59,10 +93,13 @@ constraint-valid state/event planning and construction
         ↓
 structural canonicalization and holdout assignment
         ↓
-natural-language rendering
+Verified Cognition Episodes
         ↓
-SFT / preference / evaluation releases
+SFT / preference / process / verifier / repair / RL / benchmark releases
 ```
+
+The first seven lines are substantially implemented. Registry, disposition, quarantine,
+trajectory-synthesis, episode, compiler, and empirical-learning layers remain ahead.
 
 ## Quick start
 
@@ -88,17 +125,23 @@ csd-foundry synthesize execution --release v0.4
 csd-foundry synthesize publication --release v0.4
 csd-foundry synthesize reconciliation --release v0.4
 python scripts/validate_contract_freeze_v0_5.py
+csd-foundry-governance --release v0.5
+csd-foundry-admission --release v0.5
+csd-foundry-temporal-v0-5 --release v0.5
 python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
 ```
 
 The scenario validator enforces exact agreement between the immutable manifest and executable
 registry. The temporal validator executes canonical logical-time and governance trajectories,
 retains complete ordered oracle results, checks full replay identity, and verifies exact event
-consequences. The v0.4 validators check contracts, choice determinism, identity allocation,
-attempt replay, immutable execution authority, no-clobber publication, sealed shard evidence,
-bounded streaming reconciliation, topology-independent semantic commitments, and complete
-independent replay. The v0.5 contract validator checks the frozen identity, authority, ordering,
-quarantine, and release boundaries before runtime implementation.
+consequences.
+
+The v0.4 validators check contracts, choice determinism, identity allocation, attempt replay,
+immutable execution authority, no-clobber publication, sealed shard evidence, bounded streaming
+reconciliation, topology-independent semantic commitments, and complete independent replay.
+
+The v0.5 gates validate frozen contracts, canonicalization, accepted and rejected event admission,
+and atomic temporal completion in editable and installed-wheel environments.
 
 ## Current coverage
 
@@ -131,6 +174,10 @@ Reconciliation vector commitments:        6 / 6
 Frozen v0.5 foundational contracts:      16
 v0.5 accepted contract fixtures:         16
 v0.5 rejection vectors:                    5
+Atomic temporal concurrent claimants:     12
+Atomic temporal concurrent winners:        1
+Atomic temporal concurrent losers:        11
+Release compilation during clock tick:     0
 ```
 
 Machine-readable evidence and specifications are committed at:
@@ -141,6 +188,7 @@ Machine-readable evidence and specifications are committed at:
 - `reports/publication_protocol_v0.4.json`
 - `reports/reconciliation_protocol_v0.4.json`
 - `reports/contract_freeze_v0.5.json`
+- `reports/atomic_temporal_v0.5.json`
 - `specs/v0.4/`
 - `specs/v0.5/`
 
@@ -160,12 +208,9 @@ represents:
 - legacy expired evidence whose historical source did not record an expiry timestamp.
 
 Heartbeat receipt and reassessment requests cannot promote source state or assurance. Expired
-or invalidated evidence cannot be restored under the same identity. A profile change does not
-rewrite or invalidate historical evidence; it recomputes which preserved bases remain eligible
-for the current required profile. Profile changes, reassessment requests, and heartbeat records
-require I3 authority in both transition execution and independent verification. Request closure
-must target known requests that are pending in the pre-state. Every temporal/governance event
-must preserve unrelated historical state and append its exact canonical audit record.
+or invalidated evidence cannot be restored under the same identity. A profile change preserves
+historical evidence and bases while recomputing the eligible current view. Protected governance
+events require I3 authority in both transition execution and independent verification.
 
 ## v0.4 synthesis and execution boundary
 
@@ -177,7 +222,7 @@ anomalies, and release serialization failure. Each cause has one stable subsyste
 Targets may be required, exploratory, machine-proven infeasible, or unresolved. Search exhaustion
 is never treated as proof of infeasibility. Machine-proven infeasibility requires an explicit
 witness using an approved proof method. Semantic generation decisions prohibit floating-point
-values; statistical thresholds are exact decimal strings until calibrated and frozen.
+values; statistical thresholds remain exact decimal strings until calibrated and frozen.
 
 The completed execution substrate keeps semantic attempt evidence independent of workers,
 retries, timestamps, run identities, shard indexes, and storage paths. Streaming reconciliation
@@ -188,24 +233,40 @@ separately. Whole-corpus in-memory materialization is prohibited.
 See `docs/SYNTHESIS_V0_4_CONTRACTS.md`, `docs/publication_protocol_v0.4.md`, and
 `docs/reconciliation_protocol_v0.4.md`.
 
-## v0.5 foundational contract boundary
+## v0.5 governed-execution boundary
 
-The v0.5 freeze defines `ValidatedEvent`, validation failures, atomic clock claims and completion
-receipts, semantic and disposition projection ordering, event-sourced registries, quarantine,
-and event-triggered release and promotion. It freezes authority, identity, ordering, replay, and
-safety contracts while leaving performance limits and replay optimizations measurement-dependent.
+The v0.5 contract freeze defines `ValidatedEvent`, validation failures, atomic clock claims and
+completion receipts, semantic and disposition projection ordering, event-sourced registries,
+quarantine, and event-triggered release and promotion.
 
-See `docs/CONTRACT_FREEZE_v0.5.md` and `docs/STRATEGIC_ROADMAP.md`.
+The implemented v0.5-A through v0.5-C slices now provide:
+
+- executable canonicalization and typed contract objects;
+- accepted or rejected event-admission receipts;
+- reconstruction of accepted events without signature reinterpretation;
+- compare-and-append temporal claims;
+- ordered projection commitments;
+- failure receipts without sequence advancement;
+- prepared-completion recovery;
+- current visibility only through the committed temporal head;
+- exclusion of release compilation from ordinary ticks.
+
+Registry, disposition, and quarantine references in v0.5-C are orchestration placeholders. Their
+substantive reducers and eligibility semantics remain v0.5-D and v0.5-E work.
+
+See `docs/CONTRACT_FREEZE_v0.5.md`, `docs/ATOMIC_TEMPORAL_v0.5.md`,
+`docs/STRATEGIC_ROADMAP.md`, and `docs/FOUNDRY_PLATFORM_CHARTER_v1.0.md`.
 
 ## Project layout
 
 ```text
-src/csd_foundry/kernel/             State, events, transitions, invariants, oracle
+src/csd_foundry/kernel/             CSD state, events, transitions, invariants, oracle
 src/csd_foundry/scenarios/          Typed scenario contracts, registry, release runner
 src/csd_foundry/scenarios/v0_1/     Manifest-complete v0.1 scenario definitions
 src/csd_foundry/temporal/           Canonical temporal/governance release scenarios
 src/csd_foundry/synthesis/          Mutation evaluation and synthesis protocols
 src/csd_foundry/synthesis/v0_4/     Deterministic synthesis and execution substrate
+src/csd_foundry/governance/v0_5/    Contract, admission, and atomic temporal substrate
 src/csd_foundry/fixtures/v0_1/      Compatibility fixtures for the bootstrap API
 specs/v0.4/                         Reviewable synthesis and execution schemas
 specs/v0.5/                         Frozen governance and Reality Assurance policies
@@ -220,11 +281,15 @@ tests/                              Kernel, protocol, mutation, and synthesis te
 
 The current implementation does not establish:
 
-- a production `ValidatedEvent` admission engine or signature/key verification;
-- an atomic committed temporal-head store;
-- evidence, assumption, or alternative-model registry reducers;
-- a disposition oracle, quarantine index, or governed release compiler;
+- production cryptographic key management or distributed event-admission authority;
+- distributed consensus or multi-host temporal-head safety;
+- substantive evidence, assumption, or alternative-model registry reducers;
+- a substantive disposition oracle, quarantine index, or governed release compiler;
+- full primary/shadow model replay as an operational subsystem;
 - a complete trajectory planner or state/event constructor;
+- a canonical Verified Cognition Episode or data compilers;
+- a domain-neutral microkernel, CognitionDL, domain-pack compiler, or Reasoning ABI;
+- a governed open-ended exploration plane;
 - fairness or liveness of a real scheduler;
 - completeness of real-world dependency declarations;
 - correspondence between encoded evidence and external truth;
@@ -235,18 +300,20 @@ These remain release boundaries rather than inferred capabilities.
 
 ## Immediate roadmap
 
-1. Implement the v0.5 canonicalization library and typed contract objects.
-2. Implement `ValidatedEvent` admission and validation-policy receipts.
-3. Implement the atomic temporal claim, projection, failure, and completion protocol.
-4. Implement evidence, assumption, and alternative-model registries.
-5. Implement the separate disposition oracle and synchronous quarantine.
-6. Prove the committed M-03/M-15 governed vertical slice.
-7. Implement event-triggered release and promotion.
-8. Build the performance benchmark harness and freeze reference SLOs.
-9. Resume joint coverage planning, state/event construction, structural assurance, and the empirical pilot.
+1. Implement evidence-unit, assumption, and alternative-model registries and roots.
+2. Implement the separate disposition oracle and synchronous quarantine.
+3. Prove the committed M-03/M-15 governed vertical slice.
+4. Implement event-triggered release and promotion.
+5. Build the performance benchmark harness and freeze reference pilot SLOs.
+6. Resume joint coverage planning, state/event construction, structural assurance, and episode compilation.
+7. Run the empirical model pilot before authorizing release-scale generation.
+8. After the governed CSD vertical slice, extract the domain-neutral microkernel boundary and make CSD the first domain pack.
+9. Implement the minimal domain-definition compiler and Reasoning ABI before broad multi-domain expansion.
+10. Add governed open-ended exploration only with explicit epistemic typing and promotion boundaries.
 
 ## Claim boundary
 
-Passing tests establishes correctness relative to the implemented CSD semantics and test
-coverage. It does not establish dependency completeness, external truth, general reasoning
-transfer, scheduler fairness, or production safety.
+Passing tests establishes correctness relative to the implemented CSD semantics, frozen
+contracts, and test coverage. It does not establish dependency completeness, external truth,
+general reasoning transfer, scheduler fairness, production safety, or completion of the broader
+platform architecture.
