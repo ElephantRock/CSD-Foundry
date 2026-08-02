@@ -408,10 +408,7 @@ class AssumptionPolicyLedgerEntry:
             raise AssumptionGovernanceExecutionContractError(
                 "ASSUMPTION_POLICY_LEDGER_GRANT_SET_MISMATCH"
             )
-        if (
-            commit.separation_duty_rule_set_digest
-            != self.policy.separation_duty_rule_set_digest
-        ):
+        if commit.separation_duty_rule_set_digest != self.policy.separation_duty_rule_set_digest:
             raise AssumptionGovernanceExecutionContractError(
                 "ASSUMPTION_POLICY_LEDGER_DUTY_RULE_SET_MISMATCH"
             )
@@ -809,13 +806,9 @@ def _validate_receipt_threshold(
     rule = approval_policy.rule_for(receipt.approval_class)
     signers = set(receipt.valid_signer_ids)
     if not signers.issubset(rule.eligible_signer_ids):
-        raise AssumptionGovernanceExecutionContractError(
-            "ASSUMPTION_APPROVAL_SIGNER_INELIGIBLE"
-        )
+        raise AssumptionGovernanceExecutionContractError("ASSUMPTION_APPROVAL_SIGNER_INELIGIBLE")
     if len(signers) < rule.required_signature_count:
-        raise AssumptionGovernanceExecutionContractError(
-            "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
-        )
+        raise AssumptionGovernanceExecutionContractError("ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET")
     if not set(rule.required_signer_ids).issubset(signers):
         raise AssumptionGovernanceExecutionContractError(
             "ASSUMPTION_APPROVAL_REQUIRED_SIGNER_MISSING"
@@ -826,9 +819,7 @@ def _order_policy_entries(
     entries: tuple[AssumptionPolicyLedgerEntry, ...],
 ) -> tuple[AssumptionPolicyLedgerEntry, ...]:
     if type(entries) is not tuple or not entries:
-        raise AssumptionGovernanceExecutionContractError(
-            "ASSUMPTION_POLICY_LEDGER_EMPTY"
-        )
+        raise AssumptionGovernanceExecutionContractError("ASSUMPTION_POLICY_LEDGER_EMPTY")
     by_commit: dict[str, AssumptionPolicyLedgerEntry] = {}
     for entry in entries:
         digest = entry.policy_commit.commit_receipt_digest
@@ -839,14 +830,10 @@ def _order_policy_entries(
         by_commit[digest] = entry
 
     genesis = [
-        entry
-        for entry in entries
-        if entry.policy_commit.predecessor_commit_receipt_digest is None
+        entry for entry in entries if entry.policy_commit.predecessor_commit_receipt_digest is None
     ]
     if len(genesis) != 1:
-        raise AssumptionGovernanceExecutionContractError(
-            "ASSUMPTION_POLICY_CHAIN_GENESIS_INVALID"
-        )
+        raise AssumptionGovernanceExecutionContractError("ASSUMPTION_POLICY_CHAIN_GENESIS_INVALID")
 
     children: dict[str, list[AssumptionPolicyLedgerEntry]] = {}
     for entry in entries:
@@ -871,9 +858,7 @@ def _order_policy_entries(
 
     for sibling_set in children.values():
         if len(sibling_set) > 1:
-            raise AssumptionGovernanceExecutionContractError(
-                "ASSUMPTION_POLICY_CHAIN_FORK"
-            )
+            raise AssumptionGovernanceExecutionContractError("ASSUMPTION_POLICY_CHAIN_FORK")
 
     ordered: list[AssumptionPolicyLedgerEntry] = []
     current = genesis[0]
@@ -881,9 +866,7 @@ def _order_policy_entries(
     while True:
         digest = current.policy_commit.commit_receipt_digest
         if digest in seen:
-            raise AssumptionGovernanceExecutionContractError(
-                "ASSUMPTION_POLICY_CHAIN_INVALID"
-            )
+            raise AssumptionGovernanceExecutionContractError("ASSUMPTION_POLICY_CHAIN_INVALID")
         seen.add(digest)
         ordered.append(current)
         child_set = children.get(digest, [])
@@ -900,9 +883,7 @@ def _order_policy_entries(
         current = child
 
     if len(seen) != len(entries):
-        raise AssumptionGovernanceExecutionContractError(
-            "ASSUMPTION_POLICY_CHAIN_INVALID"
-        )
+        raise AssumptionGovernanceExecutionContractError("ASSUMPTION_POLICY_CHAIN_INVALID")
     return tuple(ordered)
 
 
@@ -944,9 +925,9 @@ def _require_self_digest(
 
 
 def _domain_digest(domain: str, value: object) -> str:
-    return "sha256:" + hashlib.sha256(
-        domain.encode("utf-8") + b"\0" + _json_bytes(value)
-    ).hexdigest()
+    return (
+        "sha256:" + hashlib.sha256(domain.encode("utf-8") + b"\0" + _json_bytes(value)).hexdigest()
+    )
 
 
 def _json_bytes(value: object) -> bytes:
