@@ -146,7 +146,9 @@ class FilesystemTemporalStore:
             return ClaimInstallResult(claim, True, "CLAIM_ACQUIRED")
 
     def put_contract(self, contract: ContractObject) -> None:
-        self._install(self._object_path(contract.CONTRACT_NAME, contract.digest), contract.canonical_bytes)
+        self._install(
+            self._object_path(contract.CONTRACT_NAME, contract.digest), contract.canonical_bytes
+        )
 
     def get_contract(self, contract_name: str, digest: str) -> ContractObject | None:
         path = self._object_path(contract_name, digest)
@@ -163,7 +165,9 @@ class FilesystemTemporalStore:
         _require_token(attempt_id)
         _require_token(artifact_name)
         self.put_contract(contract)
-        self._install(self.attempts / attempt_id / f"{artifact_name}.json", contract.canonical_bytes)
+        self._install(
+            self.attempts / attempt_id / f"{artifact_name}.json", contract.canonical_bytes
+        )
 
     def record_projection_artifacts(
         self,
@@ -248,7 +252,9 @@ class FilesystemTemporalStore:
                 return "NO_ACTIVE_CLAIM"
             completion_path = self.attempts / _attempt_id(active) / "completion.json"
             if completion_path.is_file():
-                completion = _parse_contract("clock-completion-receipt", completion_path.read_bytes())
+                completion = _parse_contract(
+                    "clock-completion-receipt", completion_path.read_bytes()
+                )
                 if type(completion) is not ClockCompletionReceipt:
                     raise TemporalStoreConflictError("prepared completion has wrong type")
                 self._verify_prepared(active, completion)
@@ -266,7 +272,9 @@ class FilesystemTemporalStore:
     def _verify_prepared(self, claim: ClockClaim, completion: ClockCompletionReceipt) -> None:
         _verify_completion(claim, completion)
         attempt = self.attempts / _attempt_id(claim)
-        _verify_projection_bundle((attempt / "projection-bundle.json").read_bytes(), claim, completion)
+        _verify_projection_bundle(
+            (attempt / "projection-bundle.json").read_bytes(), claim, completion
+        )
         semantic_digest = cast(
             str, completion.to_json_value()["semantic_projection_receipt_digest"]
         )
@@ -334,7 +342,9 @@ class FilesystemTemporalStore:
             os.link(temporary, final_path)
         except FileExistsError:
             if final_path.read_bytes() != payload:
-                raise TemporalStoreConflictError("concurrent immutable install conflicted") from None
+                raise TemporalStoreConflictError(
+                    "concurrent immutable install conflicted"
+                ) from None
         temporary.unlink(missing_ok=True)
         _fsync_directory(final_path.parent)
 
@@ -375,9 +385,9 @@ def _projection_bundle_bytes(
         "release_compilation_invocations": artifacts.release_compilation_invocations,
     }
     unsigned = _json_bytes(value)
-    value["projection_bundle_digest"] = "sha256:" + hashlib.sha256(
-        b"TEMPORAL_PROJECTION_BUNDLE\0" + unsigned
-    ).hexdigest()
+    value["projection_bundle_digest"] = (
+        "sha256:" + hashlib.sha256(b"TEMPORAL_PROJECTION_BUNDLE\0" + unsigned).hexdigest()
+    )
     return _json_bytes(value)
 
 
@@ -386,9 +396,10 @@ def _verify_projection_bundle(
 ) -> None:
     value = _json_object(payload, "projection bundle")
     digest = value.pop("projection_bundle_digest", None)
-    expected = "sha256:" + hashlib.sha256(
-        b"TEMPORAL_PROJECTION_BUNDLE\0" + _json_bytes(value)
-    ).hexdigest()
+    expected = (
+        "sha256:"
+        + hashlib.sha256(b"TEMPORAL_PROJECTION_BUNDLE\0" + _json_bytes(value)).hexdigest()
+    )
     if digest != expected:
         raise TemporalStoreConflictError("projection bundle digest is invalid")
     rebuilt = dict(value)
