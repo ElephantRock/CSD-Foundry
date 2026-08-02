@@ -226,9 +226,7 @@ def test_limitations_require_explicit_acceptance() -> None:
     _verify(governed, "evidence:1", 2)
     evaluator = EvidenceAdmissibilityEvaluator(store, _policy(), _challenge_policy())
     blocked = evaluator.evaluate(_request("evidence:1"))
-    accepted = evaluator.evaluate(
-        _request("evidence:1", accepted_limitations=("LAB_ONLY",))
-    )
+    accepted = evaluator.evaluate(_request("evidence:1", accepted_limitations=("LAB_ONLY",)))
     assert blocked.code == "EVIDENCE_LIMITATION_NOT_ACCEPTED"
     assert accepted.allowed
 
