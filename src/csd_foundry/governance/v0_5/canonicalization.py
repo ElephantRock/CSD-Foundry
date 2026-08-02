@@ -85,6 +85,8 @@ def canonical_bytes(value: Any, schema: dict[str, Any]) -> bytes:
             allow_nan=False,
             separators=(",", ":"),
         )
+    except GovernanceContractError:
+        raise
     except (UnicodeEncodeError, ValueError) as exc:
         _fail("CANONICALIZATION_FAILED", str(exc))
     return (rendered + "\n").encode("utf-8")
