@@ -86,6 +86,11 @@ def main() -> None:
         help="validate append-only content-addressed publication",
     )
     _add_release_argument(synthesis_publication, default="v0.4")
+    synthesis_reconciliation = synthesis_sub.add_parser(
+        "reconciliation",
+        help="validate streaming cross-shard reconciliation and canonical merge",
+    )
+    _add_release_argument(synthesis_reconciliation, default="v0.4")
 
     args = parser.parse_args()
 
@@ -186,6 +191,17 @@ def main() -> None:
         publication_result = validate_publication_protocol(args.release)
         _emit(publication_result.to_dict(), args.output)
         if not publication_result.success:
+            raise SystemExit(1)
+        return
+
+    if args.command == "synthesize" and args.synthesis_command == "reconciliation":
+        from csd_foundry.synthesis.v0_4.reconciliation_validation import (
+            validate_reconciliation,
+        )
+
+        reconciliation_result = validate_reconciliation(args.release)
+        _emit(reconciliation_result.to_dict(), args.output)
+        if not reconciliation_result.success:
             raise SystemExit(1)
         return
 
