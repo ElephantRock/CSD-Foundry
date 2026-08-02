@@ -35,6 +35,7 @@ where = ["src"]
 "share/csd-foundry/schemas/v0.5" = ["schemas/v0.5/*.json"]
 "share/csd-foundry/data/canary/v0.5/contract-v1" = ["data/canary/v0.5/contract-v1/*.json"]
 "share/csd-foundry/data/canary/v0.5/admission-v1" = ["data/canary/v0.5/admission-v1/*.json"]
+"share/csd-foundry/data/canary/v0.5/temporal-v1" = ["data/canary/v0.5/temporal-v1/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
