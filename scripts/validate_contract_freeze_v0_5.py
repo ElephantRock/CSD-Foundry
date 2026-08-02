@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate frozen CSD Foundry v0.5 foundational contracts."""
+
 from __future__ import annotations
 
 import argparse
@@ -58,8 +59,7 @@ def _normalize(value: Any, schema: dict[str, Any]) -> Any:
     if isinstance(value, dict):
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
         return {
-            key: _normalize(value[key], properties.get(key, {}))
-            for key in _ordered_keys(value)
+            key: _normalize(value[key], properties.get(key, {})) for key in _ordered_keys(value)
         }
     if isinstance(value, list):
         item_schema = schema.get("items", {}) if isinstance(schema, dict) else {}
@@ -68,9 +68,9 @@ def _normalize(value: Any, schema: dict[str, Any]) -> Any:
         if kind in {"SET", "MULTISET"}:
             keyed = sorted(
                 (
-                    json.dumps(
-                        item, ensure_ascii=False, separators=(",", ":")
-                    ).encode("utf-8"),
+                    json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode(
+                        "utf-8"
+                    ),
                     item,
                 )
                 for item in items
@@ -99,9 +99,7 @@ def canonical_bytes(value: Any, schema: dict[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def domain_digest(
-    value: dict[str, Any], schema: dict[str, Any], field: str, prefix: str
-) -> str:
+def domain_digest(value: dict[str, Any], schema: dict[str, Any], field: str, prefix: str) -> str:
     unsigned = deepcopy(value)
     unsigned.pop(field, None)
     payload = prefix.encode("utf-8") + canonical_bytes(unsigned, schema)
@@ -175,10 +173,7 @@ def _fixture(schema: dict[str, Any], root: dict[str, Any]) -> Any:
         type_name = next(item for item in type_name if item != "null")
     if type_name == "object" or "properties" in schema:
         properties = schema.get("properties", {})
-        return {
-            name: _fixture(properties[name], root)
-            for name in schema.get("required", [])
-        }
+        return {name: _fixture(properties[name], root) for name in schema.get("required", [])}
     if type_name == "array":
         count = max(1, schema.get("minItems", 0))
         return [_fixture(schema.get("items", {}), root) for _ in range(count)]
@@ -198,24 +193,24 @@ def _fixture(schema: dict[str, Any], root: dict[str, Any]) -> Any:
 
 
 def _semantic_validate(name: str, value: dict[str, Any]) -> None:
-    if name in {"clock-claim", "clock-projection-failure"} and value[
-        "proposed_sequence"
-    ] != value["previous_committed_sequence"] + 1:
-        raise ContractFreezeError("CLOCK_SEQUENCE_NOT_SUCCESSOR")
-    if name == "clock-projection-failure" and value[
-        "recorded_against_tick"
-    ] != value["previous_committed_sequence"]:
-        raise ContractFreezeError("FAILURE_CONTEXT_TICK_MISMATCH")
     if (
-        name == "semantic-projection-receipt"
-        and value["projection_result"] != "COMPLETED"
+        name in {"clock-claim", "clock-projection-failure"}
+        and value["proposed_sequence"] != value["previous_committed_sequence"] + 1
     ):
+        raise ContractFreezeError("CLOCK_SEQUENCE_NOT_SUCCESSOR")
+    if (
+        name == "clock-projection-failure"
+        and value["recorded_against_tick"] != value["previous_committed_sequence"]
+    ):
+        raise ContractFreezeError("FAILURE_CONTEXT_TICK_MISMATCH")
+    if name == "semantic-projection-receipt" and value["projection_result"] != "COMPLETED":
         raise ContractFreezeError("SEMANTIC_PROJECTION_NOT_COMPLETED")
     if name == "validated-event" and value["validation_result"] != "ACCEPTED":
         raise ContractFreezeError("VALIDATION_RESULT_NOT_ACCEPTED")
-    if name == "release-manifest" and RANK[value["release_class"]] > RANK[
-        value["maximum_reuse_class"]
-    ]:
+    if (
+        name == "release-manifest"
+        and RANK[value["release_class"]] > RANK[value["maximum_reuse_class"]]
+    ):
         raise ContractFreezeError("REUSE_CLASS_BELOW_RELEASE_CLASS")
 
 
@@ -230,33 +225,25 @@ def validate(root: Path) -> dict[str, Any]:
     codes = _load(spec / "rejection_code_registry_v1.json")
     apis = _load(spec / "api_contracts_v1.json")
 
-    if catalog.get("catalog_digest") != _catalog_digest(
-        catalog, b"CONTRACT_CATALOG\0"
-    ):
+    if catalog.get("catalog_digest") != _catalog_digest(catalog, b"CONTRACT_CATALOG\0"):
         errors.append("contract catalog digest changed")
-    if vectors.get("catalog_digest") != _catalog_digest(
-        vectors, b"CONTRACT_VECTOR_CATALOG\0"
-    ):
+    if vectors.get("catalog_digest") != _catalog_digest(vectors, b"CONTRACT_VECTOR_CATALOG\0"):
         errors.append("vector catalog digest changed")
     if catalog.get("status") != "FROZEN_FOR_IMPLEMENTATION":
         errors.append("catalog is not frozen")
     if (
-        policy.get("object_field_order")
-        != "SCHEMA_VERSION_FIRST_THEN_ASCENDING_UTF8_KEY_BYTES"
+        policy.get("object_field_order") != "SCHEMA_VERSION_FIRST_THEN_ASCENDING_UTF8_KEY_BYTES"
         or policy.get("number_policy") != "EXACT_INTEGERS_ONLY"
     ):
         errors.append("canonical policy changed")
     if (
         phases.get("ordered_phases") != PHASES
         or phases.get("release_compilation_phase") is not None
-        or phases.get("release_compilation_rule")
-        != "EVENT_TRIGGERED_AFTER_COMPLETED_SNAPSHOT"
+        or phases.get("release_compilation_rule") != "EVENT_TRIGGERED_AFTER_COMPLETED_SNAPSHOT"
     ):
         errors.append("projection or release policy changed")
 
-    actual_invariants = {
-        item["invariant_id"] for item in invariants.get("invariants", [])
-    }
+    actual_invariants = {item["invariant_id"] for item in invariants.get("invariants", [])}
     if actual_invariants != INVARIANTS:
         errors.append("charter invariant registry changed")
     code_values = [item["code"] for item in codes.get("codes", [])]
@@ -283,9 +270,7 @@ def validate(root: Path) -> dict[str, Any]:
             errors.append(f"{name}: invalid schema: {exc}")
             continue
         _check_arrays(schema.get("properties", {}), name, errors)
-        actual_version = (
-            schema.get("properties", {}).get("schema_version", {}).get("const")
-        )
+        actual_version = schema.get("properties", {}).get("schema_version", {}).get("const")
         if actual_version != entry["schema_version"]:
             errors.append(f"{name}: version mismatch")
         schemas[name] = schema
@@ -349,19 +334,14 @@ def validate(root: Path) -> dict[str, Any]:
         "schema_version": "contract-freeze-validation-report/0.5",
         "status": "valid" if not errors else "invalid",
         "contract_count": len(schemas),
-        "canonicalization_vector_count": len(
-            vectors.get("canonicalization_vectors", [])
-        ),
+        "canonicalization_vector_count": len(vectors.get("canonicalization_vectors", [])),
         "contract_vector_count": len(expected_digests),
         "invalid_vector_count": len(vectors.get("invalid_vectors", [])),
         "catalog_digest": catalog.get("catalog_digest"),
         "vector_catalog_digest": vectors.get("catalog_digest"),
         "charter_invariants": sorted(actual_invariants),
         "projection_phases": phases.get("ordered_phases"),
-        "release_compilation_event_triggered": phases.get(
-            "release_compilation_phase"
-        )
-        is None,
+        "release_compilation_event_triggered": phases.get("release_compilation_phase") is None,
         "errors": errors,
         "claim_boundary": (
             "This report establishes schema, canonical-byte, digest-domain, selected "
@@ -373,9 +353,7 @@ def validate(root: Path) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1]
-    )
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
     report = validate(args.root)
     print(json.dumps(report, indent=2, sort_keys=True))
