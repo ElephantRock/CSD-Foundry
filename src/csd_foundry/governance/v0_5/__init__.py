@@ -81,6 +81,12 @@ from csd_foundry.governance.v0_5.evidence_governance import (
     GovernedEvidenceApplyResult,
     GovernedEvidenceRegistry,
 )
+from csd_foundry.governance.v0_5.evidence_validation import (
+    EvidenceConformanceError,
+    EvidenceRegistryValidationReport,
+    IndependentEvidenceProjection,
+    validate_evidence_registry,
+)
 from csd_foundry.governance.v0_5.registry import (
     FilesystemRegistryStore,
     InMemoryRegistryStore,
@@ -153,9 +159,11 @@ __all__ = [
     "EvidenceAuthorityPolicy",
     "EvidenceAuthorityResolver",
     "EvidenceChallengePolicy",
+    "EvidenceConformanceError",
     "EvidenceGovernanceError",
     "EvidenceRegistry",
     "EvidenceRegistryError",
+    "EvidenceRegistryValidationReport",
     "EvidenceUnit",
     "EvidenceUseRequest",
     "FilesystemEventAdmissionStore",
@@ -168,6 +176,7 @@ __all__ = [
     "InMemoryEventAdmissionStore",
     "InMemoryRegistryStore",
     "InMemoryTemporalStore",
+    "IndependentEvidenceProjection",
     "InvalidationEvent",
     "OrderedProjectionAdapter",
     "PayloadSchemaResolver",
@@ -215,5 +224,6 @@ __all__ = [
     "require_validated_event",
     "validate_atomic_temporal",
     "validate_event_admission",
+    "validate_evidence_registry",
     "validate_governance_contracts",
 ]
