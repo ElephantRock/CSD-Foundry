@@ -1,0 +1,692 @@
+"""Deterministic expiry planning, impact receipts, and staged evidence projection."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from dataclasses import dataclass
+from typing import Protocol, cast
+
+from csd_foundry.governance.v0_5.contracts import (
+    ClockClaim,
+    RegistryEvent,
+    SemanticProjectionReceipt,
+    ValidatedEvent,
+)
+from csd_foundry.governance.v0_5.evidence import (
+    EvidenceUnit,
+    build_evidence_event,
+    project_evidence_history,
+    reduce_evidence,
+)
+from csd_foundry.governance.v0_5.evidence_governance import (
+    EvidenceAuthorityDecision,
+    EvidenceAuthorityPolicy,
+    EvidenceAuthorityResolver,
+)
+from csd_foundry.governance.v0_5.registry import InMemoryRegistryStore, RegistryStore
+
+EXPIRY_PLAN_SCHEMA_VERSION = "evidence-expiry-plan/1"
+IMPACT_RECEIPT_SCHEMA_VERSION = "evidence-impact-receipt/1"
+PROJECTION_PLAN_SCHEMA_VERSION = "evidence-projection-plan/1"
+
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+_TERMINAL = {"EXPIRED", "INVALIDATED", "REJECTED", "SUPERSEDED"}
+_IMPACT_OPERATIONS = {"CHALLENGE", "EXPIRE", "INVALIDATE", "SUPERSEDE"}
+
+
+class EvidenceProjectionError(RuntimeError):
+    """Stable fail-closed error for staged evidence projection."""
+
+    def __init__(self, code: str, detail: str | None = None) -> None:
+        super().__init__(code if detail is None else f"{code}: {detail}")
+        self.code = code
+        self.detail = detail
+
+
+class EvidenceIntentResolver(Protocol):
+    """Resolve explicit evidence events from admitted runtime inputs."""
+
+    def resolve(
+        self,
+        *,
+        claim: ClockClaim,
+        validated_event: ValidatedEvent,
+        semantic_receipt: SemanticProjectionReceipt,
+        store: RegistryStore,
+    ) -> tuple[RegistryEvent, ...]: ...
+
+
+class EvidenceImpactResolver(Protocol):
+    """Enumerate known candidate dependents without deciding CSD semantics."""
+
+    def resolve(
+        self,
+        *,
+        evidence: EvidenceUnit,
+        trigger_event: RegistryEvent,
+        store: RegistryStore,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]: ...
+
+
+class EmptyEvidenceIntentResolver:
+    """Reference resolver for ticks carrying no explicit evidence command."""
+
+    def resolve(
+        self,
+        *,
+        claim: ClockClaim,
+        validated_event: ValidatedEvent,
+        semantic_receipt: SemanticProjectionReceipt,
+        store: RegistryStore,
+    ) -> tuple[RegistryEvent, ...]:
+        del claim, validated_event, semantic_receipt, store
+        return ()
+
+
+class EmptyEvidenceImpactResolver:
+    """Reference impact boundary when no CSD basis index is supplied."""
+
+    def resolve(
+        self,
+        *,
+        evidence: EvidenceUnit,
+        trigger_event: RegistryEvent,
+        store: RegistryStore,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        del evidence, trigger_event, store
+        return (), ()
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceExpiryPlan:
+    """Deterministic proposals for evidence whose declared validity has ended."""
+
+    clock_sequence: int
+    predecessor_root_digest: str
+    authority_policy_digest: str
+    expiry_authority_id: str
+    source_receipt_digest: str
+    events: tuple[RegistryEvent, ...]
+    plan_digest: str
+
+    def __post_init__(self) -> None:
+        if type(self.clock_sequence) is not int or self.clock_sequence < 0:
+            raise EvidenceProjectionError("EVIDENCE_EXPIRY_CLOCK_INVALID")
+        _require_digest(self.predecessor_root_digest, "EVIDENCE_EXPIRY_ROOT_INVALID")
+        _require_digest(self.authority_policy_digest, "EVIDENCE_EXPIRY_POLICY_INVALID")
+        _require_token(self.expiry_authority_id, "EVIDENCE_EXPIRY_AUTHORITY_INVALID")
+        _require_digest(self.source_receipt_digest, "EVIDENCE_EXPIRY_SOURCE_RECEIPT_INVALID")
+        if type(self.events) is not tuple:
+            raise EvidenceProjectionError("EVIDENCE_EXPIRY_EVENTS_INVALID")
+        identities = tuple(_event_entity_id(event) for event in self.events)
+        if identities != tuple(sorted(identities)) or len(set(identities)) != len(identities):
+            raise EvidenceProjectionError("EVIDENCE_EXPIRY_EVENT_ORDER_INVALID")
+        if self.plan_digest != _domain_digest("EVIDENCE_EXPIRY_PLAN", self._unsigned_value()):
+            raise EvidenceProjectionError("EVIDENCE_EXPIRY_PLAN_DIGEST_MISMATCH")
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        clock_sequence: int,
+        predecessor_root_digest: str,
+        authority_policy_digest: str,
+        expiry_authority_id: str,
+        source_receipt_digest: str,
+        events: tuple[RegistryEvent, ...],
+    ) -> EvidenceExpiryPlan:
+        unsigned = {
+            "schema_version": EXPIRY_PLAN_SCHEMA_VERSION,
+            "authority_policy_digest": authority_policy_digest,
+            "clock_sequence": clock_sequence,
+            "event_digests": [event.digest for event in events],
+            "expiry_authority_id": expiry_authority_id,
+            "predecessor_root_digest": predecessor_root_digest,
+            "source_receipt_digest": source_receipt_digest,
+        }
+        return cls(
+            clock_sequence=clock_sequence,
+            predecessor_root_digest=predecessor_root_digest,
+            authority_policy_digest=authority_policy_digest,
+            expiry_authority_id=expiry_authority_id,
+            source_receipt_digest=source_receipt_digest,
+            events=events,
+            plan_digest=_domain_digest("EVIDENCE_EXPIRY_PLAN", unsigned),
+        )
+
+    def _unsigned_value(self) -> dict[str, object]:
+        return {
+            "schema_version": EXPIRY_PLAN_SCHEMA_VERSION,
+            "authority_policy_digest": self.authority_policy_digest,
+            "clock_sequence": self.clock_sequence,
+            "event_digests": [event.digest for event in self.events],
+            "expiry_authority_id": self.expiry_authority_id,
+            "predecessor_root_digest": self.predecessor_root_digest,
+            "source_receipt_digest": self.source_receipt_digest,
+        }
+
+    def to_json_value(self) -> dict[str, object]:
+        return {**self._unsigned_value(), "plan_digest": self.plan_digest}
+
+
+class EvidenceExpiryPlanner:
+    """Plan explicit EXPIRE events from a committed logical clock position."""
+
+    def __init__(
+        self,
+        *,
+        authority_policy: EvidenceAuthorityPolicy,
+        expiry_authority_id: str,
+    ) -> None:
+        self.authority = EvidenceAuthorityResolver(authority_policy)
+        _require_token(expiry_authority_id, "EVIDENCE_EXPIRY_AUTHORITY_INVALID")
+        self.expiry_authority_id = expiry_authority_id
+
+    def plan(
+        self,
+        *,
+        store: RegistryStore,
+        clock_sequence: int,
+        source_receipt_digest: str,
+    ) -> EvidenceExpiryPlan:
+        if type(clock_sequence) is not int or clock_sequence < 0:
+            raise EvidenceProjectionError("EVIDENCE_EXPIRY_CLOCK_INVALID")
+        _require_digest(source_receipt_digest, "EVIDENCE_EXPIRY_SOURCE_RECEIPT_INVALID")
+        snapshot = store.snapshot("EVIDENCE_UNIT")
+        events: list[RegistryEvent] = []
+        for chain in store.reconstruct_snapshot("EVIDENCE_UNIT"):
+            evidence = project_evidence_history(chain)
+            if evidence is None or evidence.status in _TERMINAL:
+                continue
+            if evidence.status not in {"VERIFIED", "CHALLENGED"}:
+                continue
+            if evidence.last_clock_sequence >= clock_sequence:
+                continue
+            if evidence.expires_at_sequence is None or clock_sequence < evidence.expires_at_sequence:
+                continue
+            event = build_evidence_event(
+                evidence_id=evidence.evidence_id,
+                entity_sequence=evidence.current_entity_sequence + 1,
+                previous_entity_event_digest=evidence.current_event_digest,
+                clock_sequence=clock_sequence,
+                source_receipt_digest=source_receipt_digest,
+                payload={
+                    "operation": "EXPIRE",
+                    "expiry_authority_id": self.expiry_authority_id,
+                },
+            )
+            decision = self.authority.require(event, evidence)
+            if not decision.allowed:
+                raise EvidenceProjectionError("EVIDENCE_EXPIRY_AUTHORITY_DENIED")
+            reduce_evidence(evidence, event)
+            events.append(event)
+        ordered = tuple(sorted(events, key=_event_entity_id))
+        return EvidenceExpiryPlan.build(
+            clock_sequence=clock_sequence,
+            predecessor_root_digest=snapshot.root_digest,
+            authority_policy_digest=self.authority.policy.policy_digest,
+            expiry_authority_id=self.expiry_authority_id,
+            source_receipt_digest=source_receipt_digest,
+            events=ordered,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceImpactReceipt:
+    """A reassessment request; it is not a substantive CSD verdict."""
+
+    evidence_id: str
+    previous_status: str
+    current_status: str
+    trigger_event_digest: str
+    affected_dependency_ids: tuple[str, ...]
+    candidate_basis_ids: tuple[str, ...]
+    candidate_semantic_object_ids: tuple[str, ...]
+    impact_kind: str
+    evidence_registry_root_digest: str
+    completeness_boundary: str
+    receipt_digest: str
+
+    def __post_init__(self) -> None:
+        _require_token(self.evidence_id, "EVIDENCE_IMPACT_ID_INVALID")
+        _require_token(self.previous_status, "EVIDENCE_IMPACT_PREVIOUS_STATUS_INVALID")
+        _require_token(self.current_status, "EVIDENCE_IMPACT_CURRENT_STATUS_INVALID")
+        _require_digest(self.trigger_event_digest, "EVIDENCE_IMPACT_EVENT_INVALID")
+        _require_sorted_tokens(
+            self.affected_dependency_ids,
+            "EVIDENCE_IMPACT_DEPENDENCIES_INVALID",
+        )
+        _require_sorted_tokens(self.candidate_basis_ids, "EVIDENCE_IMPACT_BASES_INVALID")
+        _require_sorted_tokens(
+            self.candidate_semantic_object_ids,
+            "EVIDENCE_IMPACT_OBJECTS_INVALID",
+        )
+        _require_token(self.impact_kind, "EVIDENCE_IMPACT_KIND_INVALID")
+        _require_digest(self.evidence_registry_root_digest, "EVIDENCE_IMPACT_ROOT_INVALID")
+        if type(self.completeness_boundary) is not str or not self.completeness_boundary:
+            raise EvidenceProjectionError("EVIDENCE_IMPACT_BOUNDARY_INVALID")
+        if self.receipt_digest != _domain_digest("EVIDENCE_IMPACT_RECEIPT", self._unsigned_value()):
+            raise EvidenceProjectionError("EVIDENCE_IMPACT_RECEIPT_DIGEST_MISMATCH")
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        evidence_id: str,
+        previous_status: str,
+        current_status: str,
+        trigger_event_digest: str,
+        affected_dependency_ids: tuple[str, ...],
+        candidate_basis_ids: tuple[str, ...],
+        candidate_semantic_object_ids: tuple[str, ...],
+        impact_kind: str,
+        evidence_registry_root_digest: str,
+        completeness_boundary: str,
+    ) -> EvidenceImpactReceipt:
+        dependencies = tuple(sorted(set(affected_dependency_ids)))
+        bases = tuple(sorted(set(candidate_basis_ids)))
+        objects = tuple(sorted(set(candidate_semantic_object_ids)))
+        unsigned = {
+            "schema_version": IMPACT_RECEIPT_SCHEMA_VERSION,
+            "affected_dependency_ids": list(dependencies),
+            "candidate_basis_ids": list(bases),
+            "candidate_semantic_object_ids": list(objects),
+            "completeness_boundary": completeness_boundary,
+            "current_status": current_status,
+            "evidence_id": evidence_id,
+            "evidence_registry_root_digest": evidence_registry_root_digest,
+            "impact_kind": impact_kind,
+            "previous_status": previous_status,
+            "trigger_event_digest": trigger_event_digest,
+        }
+        return cls(
+            evidence_id=evidence_id,
+            previous_status=previous_status,
+            current_status=current_status,
+            trigger_event_digest=trigger_event_digest,
+            affected_dependency_ids=dependencies,
+            candidate_basis_ids=bases,
+            candidate_semantic_object_ids=objects,
+            impact_kind=impact_kind,
+            evidence_registry_root_digest=evidence_registry_root_digest,
+            completeness_boundary=completeness_boundary,
+            receipt_digest=_domain_digest("EVIDENCE_IMPACT_RECEIPT", unsigned),
+        )
+
+    def _unsigned_value(self) -> dict[str, object]:
+        return {
+            "schema_version": IMPACT_RECEIPT_SCHEMA_VERSION,
+            "affected_dependency_ids": list(self.affected_dependency_ids),
+            "candidate_basis_ids": list(self.candidate_basis_ids),
+            "candidate_semantic_object_ids": list(self.candidate_semantic_object_ids),
+            "completeness_boundary": self.completeness_boundary,
+            "current_status": self.current_status,
+            "evidence_id": self.evidence_id,
+            "evidence_registry_root_digest": self.evidence_registry_root_digest,
+            "impact_kind": self.impact_kind,
+            "previous_status": self.previous_status,
+            "trigger_event_digest": self.trigger_event_digest,
+        }
+
+    def to_json_value(self) -> dict[str, object]:
+        return {**self._unsigned_value(), "receipt_digest": self.receipt_digest}
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceProjectionPlan:
+    """Attempt-local evidence projection, safe to reference only after later D5 publication."""
+
+    clock_claim_digest: str
+    validated_event_digest: str
+    semantic_receipt_digest: str
+    clock_sequence: int
+    predecessor_root_digest: str
+    projected_root_digest: str
+    authority_policy_digest: str
+    expiry_plan_digest: str
+    event_digests: tuple[str, ...]
+    authority_decision_digests: tuple[str, ...]
+    impact_receipt_digests: tuple[str, ...]
+    events: tuple[RegistryEvent, ...]
+    authority_decisions: tuple[EvidenceAuthorityDecision, ...]
+    impact_receipts: tuple[EvidenceImpactReceipt, ...]
+    plan_digest: str
+
+    def __post_init__(self) -> None:
+        for value in (
+            self.clock_claim_digest,
+            self.validated_event_digest,
+            self.semantic_receipt_digest,
+            self.predecessor_root_digest,
+            self.projected_root_digest,
+            self.authority_policy_digest,
+            self.expiry_plan_digest,
+            self.plan_digest,
+            *self.event_digests,
+            *self.authority_decision_digests,
+            *self.impact_receipt_digests,
+        ):
+            _require_digest(value, "EVIDENCE_PROJECTION_DIGEST_INVALID")
+        if type(self.clock_sequence) is not int or self.clock_sequence < 1:
+            raise EvidenceProjectionError("EVIDENCE_PROJECTION_CLOCK_INVALID")
+        if self.event_digests != tuple(event.digest for event in self.events):
+            raise EvidenceProjectionError("EVIDENCE_PROJECTION_EVENT_DIGESTS_MISMATCH")
+        if self.authority_decision_digests != tuple(
+            item.decision_digest for item in self.authority_decisions
+        ):
+            raise EvidenceProjectionError("EVIDENCE_PROJECTION_AUTHORITY_DIGESTS_MISMATCH")
+        if self.impact_receipt_digests != tuple(item.receipt_digest for item in self.impact_receipts):
+            raise EvidenceProjectionError("EVIDENCE_PROJECTION_IMPACT_DIGESTS_MISMATCH")
+        if self.plan_digest != _domain_digest("EVIDENCE_PROJECTION_PLAN", self._unsigned_value()):
+            raise EvidenceProjectionError("EVIDENCE_PROJECTION_PLAN_DIGEST_MISMATCH")
+
+    def _unsigned_value(self) -> dict[str, object]:
+        return {
+            "schema_version": PROJECTION_PLAN_SCHEMA_VERSION,
+            "authority_decision_digests": list(self.authority_decision_digests),
+            "authority_policy_digest": self.authority_policy_digest,
+            "clock_claim_digest": self.clock_claim_digest,
+            "clock_sequence": self.clock_sequence,
+            "event_digests": list(self.event_digests),
+            "expiry_plan_digest": self.expiry_plan_digest,
+            "impact_receipt_digests": list(self.impact_receipt_digests),
+            "predecessor_root_digest": self.predecessor_root_digest,
+            "projected_root_digest": self.projected_root_digest,
+            "semantic_receipt_digest": self.semantic_receipt_digest,
+            "validated_event_digest": self.validated_event_digest,
+        }
+
+    def to_json_value(self) -> dict[str, object]:
+        return {**self._unsigned_value(), "plan_digest": self.plan_digest}
+
+
+class StagedEvidenceProjectionAdapter:
+    """Project evidence in an isolated store; D5 will own atomic publication."""
+
+    def __init__(
+        self,
+        *,
+        authority_policy: EvidenceAuthorityPolicy,
+        expiry_authority_id: str,
+        intent_resolver: EvidenceIntentResolver | None = None,
+        impact_resolver: EvidenceImpactResolver | None = None,
+    ) -> None:
+        self.authority = EvidenceAuthorityResolver(authority_policy)
+        self.expiry_planner = EvidenceExpiryPlanner(
+            authority_policy=authority_policy,
+            expiry_authority_id=expiry_authority_id,
+        )
+        self.intent_resolver = intent_resolver or EmptyEvidenceIntentResolver()
+        self.impact_resolver = impact_resolver or EmptyEvidenceImpactResolver()
+
+    def project(
+        self,
+        *,
+        claim: ClockClaim,
+        validated_event: ValidatedEvent,
+        semantic_receipt: SemanticProjectionReceipt,
+        committed_store: RegistryStore,
+    ) -> EvidenceProjectionPlan:
+        clock_sequence = _claim_sequence(claim)
+        _verify_context(claim, validated_event, semantic_receipt)
+        predecessor = committed_store.snapshot("EVIDENCE_UNIT")
+        staged = _clone_store(committed_store)
+        source_receipt_digest = _projection_source_receipt(
+            claim,
+            validated_event,
+            semantic_receipt,
+        )
+
+        explicit_events = _canonical_event_order(
+            self.intent_resolver.resolve(
+                claim=claim,
+                validated_event=validated_event,
+                semantic_receipt=semantic_receipt,
+                store=staged,
+            )
+        )
+        decisions: list[EvidenceAuthorityDecision] = []
+        impacts: list[EvidenceImpactReceipt] = []
+        _apply_staged_events(
+            events=explicit_events,
+            staged=staged,
+            authority=self.authority,
+            impact_resolver=self.impact_resolver,
+            decisions=decisions,
+            impacts=impacts,
+        )
+
+        expiry_plan = self.expiry_planner.plan(
+            store=staged,
+            clock_sequence=clock_sequence,
+            source_receipt_digest=source_receipt_digest,
+        )
+        _apply_staged_events(
+            events=expiry_plan.events,
+            staged=staged,
+            authority=self.authority,
+            impact_resolver=self.impact_resolver,
+            decisions=decisions,
+            impacts=impacts,
+        )
+        ordered_events = (*explicit_events, *expiry_plan.events)
+        projected_root = staged.snapshot("EVIDENCE_UNIT").root_digest
+        unsigned = {
+            "schema_version": PROJECTION_PLAN_SCHEMA_VERSION,
+            "authority_decision_digests": [item.decision_digest for item in decisions],
+            "authority_policy_digest": self.authority.policy.policy_digest,
+            "clock_claim_digest": claim.digest,
+            "clock_sequence": clock_sequence,
+            "event_digests": [event.digest for event in ordered_events],
+            "expiry_plan_digest": expiry_plan.plan_digest,
+            "impact_receipt_digests": [item.receipt_digest for item in impacts],
+            "predecessor_root_digest": predecessor.root_digest,
+            "projected_root_digest": projected_root,
+            "semantic_receipt_digest": semantic_receipt.digest,
+            "validated_event_digest": validated_event.digest,
+        }
+        return EvidenceProjectionPlan(
+            clock_claim_digest=claim.digest,
+            validated_event_digest=validated_event.digest,
+            semantic_receipt_digest=semantic_receipt.digest,
+            clock_sequence=clock_sequence,
+            predecessor_root_digest=predecessor.root_digest,
+            projected_root_digest=projected_root,
+            authority_policy_digest=self.authority.policy.policy_digest,
+            expiry_plan_digest=expiry_plan.plan_digest,
+            event_digests=tuple(event.digest for event in ordered_events),
+            authority_decision_digests=tuple(item.decision_digest for item in decisions),
+            impact_receipt_digests=tuple(item.receipt_digest for item in impacts),
+            events=tuple(ordered_events),
+            authority_decisions=tuple(decisions),
+            impact_receipts=tuple(impacts),
+            plan_digest=_domain_digest("EVIDENCE_PROJECTION_PLAN", unsigned),
+        )
+
+
+def _apply_staged_events(
+    *,
+    events: tuple[RegistryEvent, ...],
+    staged: RegistryStore,
+    authority: EvidenceAuthorityResolver,
+    impact_resolver: EvidenceImpactResolver,
+    decisions: list[EvidenceAuthorityDecision],
+    impacts: list[EvidenceImpactReceipt],
+) -> None:
+    for event in events:
+        evidence_id = _event_entity_id(event)
+        previous = project_evidence_history(
+            staged.reconstruct_entity("EVIDENCE_UNIT", evidence_id)
+        )
+        decision = authority.require(event, previous)
+        current = reduce_evidence(previous, event)
+        staged.append(event)
+        decisions.append(decision)
+        operation = _event_operation(event)
+        if previous is None or operation not in _IMPACT_OPERATIONS:
+            continue
+        affected_dependencies = _dependent_evidence_ids(staged, evidence_id)
+        bases, objects = impact_resolver.resolve(
+            evidence=current,
+            trigger_event=event,
+            store=staged,
+        )
+        root = staged.snapshot("EVIDENCE_UNIT").root_digest
+        impacts.append(
+            EvidenceImpactReceipt.build(
+                evidence_id=evidence_id,
+                previous_status=previous.status,
+                current_status=current.status,
+                trigger_event_digest=event.digest,
+                affected_dependency_ids=affected_dependencies,
+                candidate_basis_ids=bases,
+                candidate_semantic_object_ids=objects,
+                impact_kind="REASSESSMENT_REQUIRED",
+                evidence_registry_root_digest=root,
+                completeness_boundary=(
+                    "Known transitive evidence dependents plus resolver-supplied candidate CSD "
+                    "references; substantive survival is decided by the semantic projector."
+                ),
+            )
+        )
+
+
+def _clone_store(source: RegistryStore) -> InMemoryRegistryStore:
+    target = InMemoryRegistryStore()
+    for chain in source.reconstruct_snapshot("EVIDENCE_UNIT"):
+        for event in chain:
+            target.append(event)
+    return target
+
+
+def _canonical_event_order(events: tuple[RegistryEvent, ...]) -> tuple[RegistryEvent, ...]:
+    keys = [
+        (
+            _event_entity_id(event),
+            cast(int, event.to_json_value()["entity_sequence"]),
+        )
+        for event in events
+    ]
+    if len(set(keys)) != len(keys):
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_DUPLICATE_EVENT_POSITION")
+    return tuple(
+        event
+        for _, event in sorted(
+            zip(keys, events, strict=True),
+            key=lambda item: item[0],
+        )
+    )
+
+
+def _dependent_evidence_ids(store: RegistryStore, evidence_id: str) -> tuple[str, ...]:
+    projections: dict[str, EvidenceUnit] = {}
+    for chain in store.reconstruct_snapshot("EVIDENCE_UNIT"):
+        current = project_evidence_history(chain)
+        if current is not None:
+            projections[current.evidence_id] = current
+    affected: set[str] = set()
+    frontier = {evidence_id}
+    while frontier:
+        next_frontier: set[str] = set()
+        for current in projections.values():
+            if current.evidence_id in affected:
+                continue
+            if any(dependency in frontier for dependency in current.dependency_ids):
+                affected.add(current.evidence_id)
+                next_frontier.add(current.evidence_id)
+        frontier = next_frontier
+    return tuple(sorted(affected))
+
+
+def _claim_sequence(claim: ClockClaim) -> int:
+    value = claim.to_json_value().get("proposed_sequence")
+    if type(value) is not int or value < 1:
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_CLAIM_SEQUENCE_INVALID")
+    return value
+
+
+def _verify_context(
+    claim: ClockClaim,
+    validated_event: ValidatedEvent,
+    semantic_receipt: SemanticProjectionReceipt,
+) -> None:
+    claim_value = claim.to_json_value()
+    semantic_value = semantic_receipt.to_json_value()
+    if claim_value.get("validated_event_digest") != validated_event.digest:
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_EVENT_MISMATCH")
+    if semantic_value.get("clock_claim_digest") != claim.digest:
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_SEMANTIC_CLAIM_MISMATCH")
+    if semantic_value.get("validated_event_digest") != validated_event.digest:
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_SEMANTIC_EVENT_MISMATCH")
+    if semantic_value.get("projection_sequence") != claim_value.get("proposed_sequence"):
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_SEMANTIC_SEQUENCE_MISMATCH")
+
+
+def _projection_source_receipt(
+    claim: ClockClaim,
+    validated_event: ValidatedEvent,
+    semantic_receipt: SemanticProjectionReceipt,
+) -> str:
+    return _domain_digest(
+        "EVIDENCE_PROJECTION_SOURCE",
+        {
+            "clock_claim_digest": claim.digest,
+            "semantic_receipt_digest": semantic_receipt.digest,
+            "validated_event_digest": validated_event.digest,
+        },
+    )
+
+
+def _event_entity_id(event: RegistryEvent) -> str:
+    value = event.to_json_value().get("entity_id")
+    if type(value) is not str:
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_EVENT_ID_INVALID")
+    return value
+
+
+def _event_operation(event: RegistryEvent) -> str:
+    payload = event.to_json_value().get("payload")
+    if type(payload) is not dict:
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_EVENT_PAYLOAD_INVALID")
+    operation = payload.get("operation")
+    if type(operation) is not str:
+        raise EvidenceProjectionError("EVIDENCE_PROJECTION_EVENT_OPERATION_INVALID")
+    return operation
+
+
+def _require_token(value: object, code: str) -> str:
+    if type(value) is not str or _TOKEN.fullmatch(value) is None:
+        raise EvidenceProjectionError(code)
+    return value
+
+
+def _require_digest(value: object, code: str) -> str:
+    if type(value) is not str or _DIGEST.fullmatch(value) is None:
+        raise EvidenceProjectionError(code)
+    return value
+
+
+def _require_sorted_tokens(values: tuple[str, ...], code: str) -> None:
+    if type(values) is not tuple or values != tuple(sorted(values)):
+        raise EvidenceProjectionError(code)
+    if len(set(values)) != len(values):
+        raise EvidenceProjectionError(code)
+    for value in values:
+        _require_token(value, code)
+
+
+def _domain_digest(domain: str, value: object) -> str:
+    payload = (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(domain.encode("ascii") + b"\0" + payload).hexdigest()
