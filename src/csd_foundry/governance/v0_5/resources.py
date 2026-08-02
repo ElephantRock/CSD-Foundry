@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import sysconfig
-from functools import lru_cache
+from copy import deepcopy
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +24,8 @@ def resource_root() -> Path:
     raise GovernanceContractError("V0_5_RESOURCES_UNAVAILABLE")
 
 
-@lru_cache(maxsize=None)
-def load_json(relative_path: str) -> dict[str, Any]:
+@cache
+def _load_json_cached(relative_path: str) -> dict[str, Any]:
     if type(relative_path) is not str or not relative_path:
         raise GovernanceContractError("RESOURCE_PATH_INVALID")
     path = resource_root() / relative_path
@@ -35,6 +36,10 @@ def load_json(relative_path: str) -> dict[str, Any]:
     if type(value) is not dict:
         raise GovernanceContractError("RESOURCE_ROOT_NOT_OBJECT", relative_path)
     return value
+
+
+def load_json(relative_path: str) -> dict[str, Any]:
+    return deepcopy(_load_json_cached(relative_path))
 
 
 def contract_catalog() -> dict[str, Any]:
