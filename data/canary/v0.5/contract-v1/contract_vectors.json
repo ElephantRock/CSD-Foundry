@@ -1,0 +1,166 @@
+{
+  "schema_version": "contract-vectors/0.5",
+  "evidence_version": 1,
+  "canonicalization_policy_path": "specs/v0.5/canonicalization_policy_v1.json",
+  "contract_catalog_path": "specs/v0.5/contract_catalog_v1.json",
+  "canonicalization_vectors": [
+    {
+      "vector_id": "schema-version-first",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "a": {
+            "type": "integer"
+          },
+          "z": {
+            "type": "integer"
+          }
+        }
+      },
+      "value": {
+        "z": 2,
+        "schema_version": "example/1",
+        "a": 1
+      },
+      "expected_canonical_utf8_base64": "eyJzY2hlbWFfdmVyc2lvbiI6ImV4YW1wbGUvMSIsImEiOjEsInoiOjJ9Cg=="
+    },
+    {
+      "vector_id": "set-sorted",
+      "schema": {
+        "type": "array",
+        "x-csd-collection-kind": "SET",
+        "items": {
+          "type": "string"
+        }
+      },
+      "value": [
+        "z",
+        "a",
+        "é"
+      ],
+      "expected_canonical_utf8_base64": "WyJhIiwieiIsIsOpIl0K"
+    },
+    {
+      "vector_id": "multiset-multiplicity",
+      "schema": {
+        "type": "array",
+        "x-csd-collection-kind": "MULTISET",
+        "items": {
+          "type": "integer"
+        }
+      },
+      "value": [
+        2,
+        1,
+        2
+      ],
+      "expected_canonical_utf8_base64": "WzEsMiwyXQo="
+    },
+    {
+      "vector_id": "ordered-sequence",
+      "schema": {
+        "type": "array",
+        "x-csd-collection-kind": "ORDERED_SEQUENCE",
+        "items": {
+          "type": "integer"
+        }
+      },
+      "value": [
+        3,
+        1,
+        2
+      ],
+      "expected_canonical_utf8_base64": "WzMsMSwyXQo="
+    }
+  ],
+  "contract_fixture_digests": {
+    "raw-event": "sha256:3b92134795c20c740b35909e450d3081a08432e9ef643ab2e84530f09233fd29",
+    "signature-set": "sha256:df859b19eea73b4a5afe70f00ae64bbb32ae6dc077be60d139bf261899397ee6",
+    "validation-policy": "sha256:1d906078a06c5f0f5b948330c053cda12c591581d1db02517672a40da3d0663b",
+    "validated-event": "sha256:afc14f210bdb472fec13806cc8dc3dbe4c8e1a0dd171a1040e17ecb9586b7446",
+    "event-validation-failure": "sha256:6b59acebabf7d6a28bf18270fb9e6f1fe4d872b06664bd5b5d953138ee432a93",
+    "clock-claim": "sha256:4afe328a55f6c21fa952fe39fbb551b47d45c2202fe3203fa35a4487e39125d5",
+    "clock-projection-failure": "sha256:61871140aa647c2b2e709933593b54c0ab61d5ad319d69e70586b2b4861ad29d",
+    "semantic-projection-receipt": "sha256:9b394ba044e091612db5c525bf5dab5c672eeb7d0de55529a920af76ca8cabc9",
+    "registry-event": "sha256:6042caf472f0bd7cebd419403d96f33475506632b864d9e69788fee1722522aa",
+    "disposition-receipt": "sha256:3e7ec49f6b86ded96c37727a9299d5fe4a8cda4d18e25d2e67807c89623ab94f",
+    "invalidation-event": "sha256:c086c42ed268ce0dd9ef3105c3624eb1b630235b600f99ae518e8232a381b586",
+    "quarantine-marker": "sha256:dd4f39e7067120adfe1307b65ab5d2873c349fdff4efcd5386631ff3b60e48bd",
+    "clock-completion-receipt": "sha256:e12f846535ddff0d39a9d570a06acc693cc0c9c84b05bbe0b7a0e24abf1dd29b",
+    "release-request": "sha256:0ae18f2fa76aa8732eb6b087982bd676b1542437f2883beac12886e18aa612ea",
+    "promotion-request": "sha256:f50529b7cc9f23e3b687293dd1faf61903fa83fc281a5157cc3b10e283140f7e",
+    "release-manifest": "sha256:a3cb7df8d2a638544de16bc17a5835072b2ee70557ab08e7e28f16ec49f1c409"
+  },
+  "invalid_vectors": [
+    {
+      "vector_id": "float-prohibited",
+      "kind": "canonicalization",
+      "value": {
+        "schema_version": "x/1",
+        "x": 1.5
+      },
+      "schema": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          }
+        }
+      },
+      "expected_error": "FLOAT_PROHIBITED"
+    },
+    {
+      "vector_id": "duplicate-set-member",
+      "kind": "canonicalization",
+      "value": [
+        "a",
+        "a"
+      ],
+      "schema": {
+        "type": "array",
+        "x-csd-collection-kind": "SET",
+        "items": {
+          "type": "string"
+        }
+      },
+      "expected_error": "DUPLICATE_SET_MEMBER"
+    },
+    {
+      "vector_id": "clock-claim-non-successor",
+      "kind": "semantic",
+      "contract_name": "clock-claim",
+      "mutations": {
+        "previous_committed_sequence": 7,
+        "proposed_sequence": 9
+      },
+      "expected_error": "CLOCK_SEQUENCE_NOT_SUCCESSOR"
+    },
+    {
+      "vector_id": "validated-event-rejected",
+      "kind": "schema",
+      "contract_name": "validated-event",
+      "mutations": {
+        "validation_result": "REJECTED"
+      },
+      "expected_error": "SCHEMA_REJECTED"
+    },
+    {
+      "vector_id": "release-reuse-below-class",
+      "kind": "semantic",
+      "contract_name": "release-manifest",
+      "mutations": {
+        "release_class": "D3",
+        "maximum_reuse_class": "D1"
+      },
+      "expected_error": "REUSE_CLASS_BELOW_RELEASE_CLASS"
+    }
+  ],
+  "claim_boundary": "These vectors freeze canonical bytes, generated accepted-fixture digests, and selected rejection behavior. They do not validate signatures, external truth, or storage atomicity.",
+  "catalog_digest": "sha256:3a6ef446fde0181d8cae9fe70f0f484e183ae50dc2c6ee1914b9809a52da3069"
+}

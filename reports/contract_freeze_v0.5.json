@@ -1,0 +1,29 @@
+{
+  "canonicalization_vector_count": 4,
+  "catalog_digest": "sha256:fe9607cd5af6c9623410f7bef0a5624bbfff8323d72c09c1537dd3fa0078b351",
+  "charter_invariants": [
+    "RAP-INV-01",
+    "RAP-INV-02",
+    "RAP-SAFE-01",
+    "REL-ARCH-01",
+    "TEMP-SAFE-01",
+    "VAL-SAFE-01"
+  ],
+  "claim_boundary": "This report establishes schema, canonical-byte, digest-domain, selected cross-field, and frozen-policy consistency. It does not establish production storage atomicity, cryptographic key validity, external truth, or production safety.",
+  "contract_count": 16,
+  "contract_vector_count": 16,
+  "errors": [],
+  "invalid_vector_count": 5,
+  "projection_phases": [
+    "SEMANTIC",
+    "EVIDENCE_REGISTRY",
+    "ASSUMPTION_REGISTRY",
+    "ALTERNATIVE_MODEL_REGISTRY",
+    "DISPOSITION",
+    "QUARANTINE_COMMIT"
+  ],
+  "release_compilation_event_triggered": true,
+  "schema_version": "contract-freeze-validation-report/0.5",
+  "status": "valid",
+  "vector_catalog_digest": "sha256:3a6ef446fde0181d8cae9fe70f0f484e183ae50dc2c6ee1914b9809a52da3069"
+}
