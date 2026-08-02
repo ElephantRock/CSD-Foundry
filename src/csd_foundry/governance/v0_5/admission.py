@@ -8,6 +8,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar, cast
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+
 from csd_foundry.governance.v0_5.canonicalization import GovernanceContractError
 from csd_foundry.governance.v0_5.contracts import (
     ContractObject,
@@ -181,6 +184,10 @@ class CommittedContextResolver(Protocol):
     def resolve(self, tick: int) -> CommittedValidationContext | None: ...
 
 
+class PayloadSchemaResolver(Protocol):
+    def resolve(self, schema_version: str) -> dict[str, Any] | None: ...
+
+
 class SignatureVerifier(Protocol):
     def verify(self, signature: SignatureRecord, *, raw_event_digest: str) -> bool: ...
 
@@ -250,12 +257,14 @@ class EventAdmissionEngine:
         self,
         *,
         context_resolver: CommittedContextResolver,
+        payload_schema_resolver: PayloadSchemaResolver,
         signature_verifier: SignatureVerifier,
         authority_resolver: SignerAuthorityResolver,
         policy_registry: ValidationPolicyRegistry,
         store: EventAdmissionStore,
     ) -> None:
         self._context_resolver = context_resolver
+        self._payload_schema_resolver = payload_schema_resolver
         self._signature_verifier = signature_verifier
         self._authority_resolver = authority_resolver
         self._policy_registry = policy_registry
@@ -357,10 +366,7 @@ class EventAdmissionEngine:
             if cast(int, raw_value["submitted_against_tick"]) > context.tick:
                 failure_codes.add("VALIDATION_CONTEXT_NOT_COMMITTED")
             if validation_policy is not None:
-                policy_value = validation_policy.to_json_value()
-                accepted_schemas = cast(list[str], policy_value["accepted_raw_event_schemas"])
-                if cast(str, raw_value["payload_schema_version"]) not in accepted_schemas:
-                    failure_codes.add("RAW_SCHEMA_REJECTED")
+                self._validate_payload(raw_value, validation_policy, failure_codes)
 
         valid_signer_ids: set[str] = set()
         if signature_set is not None and validation_policy is not None and raw_event is not None:
@@ -459,6 +465,31 @@ class EventAdmissionEngine:
         )
         self._store.put_contract(accepted)
         return AdmissionOutcome(accepted=accepted, failure=None)
+
+    def _validate_payload(
+        self,
+        raw_value: dict[str, Any],
+        validation_policy: ValidationPolicy,
+        failure_codes: set[str],
+    ) -> None:
+        schema_version = cast(str, raw_value["payload_schema_version"])
+        policy_value = validation_policy.to_json_value()
+        accepted_schemas = cast(list[str], policy_value["accepted_raw_event_schemas"])
+        if schema_version not in accepted_schemas:
+            failure_codes.add("RAW_SCHEMA_REJECTED")
+            return
+        try:
+            payload_schema = self._payload_schema_resolver.resolve(schema_version)
+        except Exception:
+            payload_schema = None
+        if payload_schema is None:
+            failure_codes.add("RAW_SCHEMA_REJECTED")
+            return
+        try:
+            Draft202012Validator.check_schema(payload_schema)
+            Draft202012Validator(payload_schema).validate(raw_value["payload"])
+        except (SchemaError, ValidationError):
+            failure_codes.add("RAW_SCHEMA_REJECTED")
 
     def _persist_available_inputs(
         self,
