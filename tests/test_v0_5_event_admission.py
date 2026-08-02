@@ -226,8 +226,12 @@ def test_filesystem_store_reconstructs_after_restart(tmp_path: Path) -> None:
     assert second.accepted.canonical_bytes == first.accepted.canonical_bytes
     bundle = reconstruct_accepted(second.accepted, second_store)
     assert bundle.raw_event.canonical_bytes == second_fixture.raw_event.canonical_bytes
-    assert bundle.validation_policy.canonical_bytes == second_fixture.threshold_policy.canonical_bytes
-    assert bundle.signature_set.canonical_bytes == second_fixture.threshold_signatures.canonical_bytes
+    assert (
+        bundle.validation_policy.canonical_bytes == second_fixture.threshold_policy.canonical_bytes
+    )
+    assert (
+        bundle.signature_set.canonical_bytes == second_fixture.threshold_signatures.canonical_bytes
+    )
     assert bundle.context.tick == 41
 
 
