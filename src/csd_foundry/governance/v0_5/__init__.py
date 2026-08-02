@@ -1,4 +1,4 @@
-"""Executable v0.5 governance contract and event-admission substrate."""
+"""Executable v0.5 governance, admission, and temporal substrate."""
 
 from csd_foundry.governance.v0_5.admission import (
     AdmissionEvidenceBundle,
@@ -53,6 +53,29 @@ from csd_foundry.governance.v0_5.contracts import (
     build_contract,
     parse_contract,
 )
+from csd_foundry.governance.v0_5.temporal import (
+    ClaimInstallResult,
+    OrderedProjectionAdapter,
+    ProjectionArtifacts,
+    SemanticProjector,
+    TemporalAttemptOutcome,
+    TemporalClaimRejected,
+    TemporalHead,
+    TemporalProjectionCoordinator,
+    TemporalProjectionError,
+    TemporalProtocolError,
+    TemporalStore,
+)
+from csd_foundry.governance.v0_5.temporal_store import (
+    FilesystemTemporalStore,
+    InMemoryTemporalStore,
+    TemporalStoreConflictError,
+    TemporalStoreError,
+)
+from csd_foundry.governance.v0_5.temporal_validation import (
+    AtomicTemporalValidationReport,
+    validate_atomic_temporal,
+)
 from csd_foundry.governance.v0_5.validation import (
     GovernanceContractValidationReport,
     validate_governance_contracts,
@@ -65,6 +88,8 @@ __all__ = [
     "AdmissionStoreConflictError",
     "AdmissionStoreError",
     "AdmissionValidationReport",
+    "AtomicTemporalValidationReport",
+    "ClaimInstallResult",
     "ClockClaim",
     "ClockCompletionReceipt",
     "ClockProjectionFailure",
@@ -76,11 +101,15 @@ __all__ = [
     "EventAdmissionStore",
     "EventValidationFailure",
     "FilesystemEventAdmissionStore",
+    "FilesystemTemporalStore",
     "GovernanceContractError",
     "GovernanceContractValidationReport",
     "InMemoryEventAdmissionStore",
+    "InMemoryTemporalStore",
     "InvalidationEvent",
+    "OrderedProjectionAdapter",
     "PayloadSchemaResolver",
+    "ProjectionArtifacts",
     "PromotionRequest",
     "QuarantineMarker",
     "RawEvent",
@@ -89,10 +118,20 @@ __all__ = [
     "ReleaseManifest",
     "ReleaseRequest",
     "SemanticProjectionReceipt",
+    "SemanticProjector",
     "SignatureRecord",
     "SignatureSet",
     "SignatureVerifier",
     "SignerAuthorityResolver",
+    "TemporalAttemptOutcome",
+    "TemporalClaimRejected",
+    "TemporalHead",
+    "TemporalProjectionCoordinator",
+    "TemporalProjectionError",
+    "TemporalProtocolError",
+    "TemporalStore",
+    "TemporalStoreConflictError",
+    "TemporalStoreError",
     "ValidatedEvent",
     "ValidationPolicy",
     "ValidationPolicyRegistry",
@@ -102,6 +141,7 @@ __all__ = [
     "parse_contract",
     "reconstruct_accepted",
     "require_validated_event",
+    "validate_atomic_temporal",
     "validate_event_admission",
     "validate_governance_contracts",
 ]
