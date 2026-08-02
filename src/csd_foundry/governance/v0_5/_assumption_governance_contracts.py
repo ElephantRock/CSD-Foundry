@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, TypeVar, cast
+from typing import TypeVar, cast
 
 AUTHORITY_GRANT_SCHEMA_VERSION = "assumption-authority-grant/1"
 SEPARATION_DUTY_RULE_SCHEMA_VERSION = "assumption-separation-duty-rule/1"
@@ -1146,9 +1147,8 @@ def _require_materialities(value: object, code: str, *, allow_empty: bool) -> No
 def _require_interval(start: object, end: object, code: str) -> None:
     if type(start) is not int or start < 0:
         raise AssumptionGovernanceContractError(code)
-    if end is not None:
-        if type(end) is not int or end <= start:
-            raise AssumptionGovernanceContractError(code)
+    if end is not None and (type(end) is not int or end <= start):
+        raise AssumptionGovernanceContractError(code)
 
 
 def _require_objects(
