@@ -321,16 +321,19 @@ class EventAdmissionEngine:
         except Exception:
             latest_tick = None
             context = None
+        context_admissible = (
+            context is not None
+            and context.committed
+            and context.tick == validated_at_tick
+            and latest_tick == validated_at_tick
+        )
         if context is None:
             failure_codes.add("VALIDATION_CONTEXT_UNAVAILABLE")
-        elif (
-            not context.committed
-            or context.tick != validated_at_tick
-            or latest_tick != validated_at_tick
-        ):
+        elif not context_admissible:
             failure_codes.add("VALIDATION_CONTEXT_NOT_COMMITTED")
 
         registered_policy: ValidationPolicy | None = None
+        policy_admissible = False
         if validation_policy is not None:
             try:
                 registered_policy = self._policy_registry.resolve(validation_policy.digest)
@@ -341,11 +344,13 @@ class EventAdmissionEngine:
                 or registered_policy.canonical_bytes != validation_policy.canonical_bytes
             ):
                 failure_codes.add("VALIDATION_POLICY_NOT_ALLOWED")
-            elif context is not None and not self._policy_registry.is_allowed(
-                registered_policy,
-                context=context,
-            ):
-                failure_codes.add("VALIDATION_POLICY_NOT_ALLOWED")
+            elif context_admissible and context is not None:
+                policy_admissible = self._policy_registry.is_allowed(
+                    registered_policy,
+                    context=context,
+                )
+                if not policy_admissible:
+                    failure_codes.add("VALIDATION_POLICY_NOT_ALLOWED")
 
         if raw_event is not None and context is not None:
             raw_value = raw_event.to_json_value()
@@ -382,7 +387,7 @@ class EventAdmissionEngine:
                 ):
                     failure_codes.add("SIGNATURE_INVALID")
                     signature_valid = False
-                if context is not None and registered_policy is not None:
+                if policy_admissible and context is not None and registered_policy is not None:
                     if not self._authority_resolver.is_authorized(
                         signature,
                         policy=registered_policy,
@@ -395,9 +400,10 @@ class EventAdmissionEngine:
                 if signature_valid:
                     valid_signer_ids.add(signature.signer_id)
 
-            minimum_count = cast(int, policy_value["minimum_signature_count"])
-            if len(valid_signer_ids) < minimum_count:
-                failure_codes.add("SIGNATURE_THRESHOLD_NOT_MET")
+            if policy_admissible and context_admissible:
+                minimum_count = cast(int, policy_value["minimum_signature_count"])
+                if len(valid_signer_ids) < minimum_count:
+                    failure_codes.add("SIGNATURE_THRESHOLD_NOT_MET")
 
         if failure_codes:
             failure = cast(
