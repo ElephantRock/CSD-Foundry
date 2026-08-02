@@ -103,10 +103,7 @@ class StreamingReconciler:
 
     def _streams(self) -> tuple[Iterable[SourcedShardEntry], ...]:
         return tuple(
-            (
-                SourcedShardEntry(entry, shard.manifest.digest)
-                for entry in shard.index.entries
-            )
+            (SourcedShardEntry(entry, shard.manifest.digest) for entry in shard.index.entries)
             for shard in self.shards
         )
 
@@ -143,6 +140,10 @@ class StreamingReconciler:
                 raise ReconciliationError("replay attestor returned a derived value")
             if replayed.publication != publication:
                 raise ReconciliationError("replay attestor returned another publication")
+            self.store.publish_bytes(
+                replayed.attestation.canonical_bytes,
+                expected_digest=replayed.attestation.digest,
+            )
             attested.append(replayed)
             source_manifests.add(sourced.source_manifest_digest)
 
@@ -185,9 +186,7 @@ class StreamingReconciler:
             global_ordinal=global_ordinal,
             sample_key=sample_key,
             source_manifest_digests=tuple(sorted(source_manifests)),
-            completion_envelope_digests=tuple(
-                item.publication.envelope.digest for item in ordered
-            ),
+            completion_envelope_digests=tuple(item.publication.envelope.digest for item in ordered),
             completion_digests=tuple(item.completion.completion_digest for item in ordered),
             replay_attestation_digests=tuple(item.attestation.digest for item in ordered),
             resolution_status=status,

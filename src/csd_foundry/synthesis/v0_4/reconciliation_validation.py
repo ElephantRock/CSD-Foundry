@@ -1,4 +1,5 @@
 """Validation and frozen evidence for v0.4 streaming reconciliation."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -91,18 +92,14 @@ class ReconciliationValidationReport:
 
 def _inventory(shards: int) -> ExecutionInventory:
     retry = OperationalRetryPolicy(2)
-    producer = canonical_sha256(
-        {"producer_contract_id": "reconciliation-fixture", "version": 1}
-    )
+    producer = canonical_sha256({"producer_contract_id": "reconciliation-fixture", "version": 1})
     return ExecutionInventory(
         release="v0.4",
         generation_namespace=_namespace(),
         root_seed_commitment=_seed().commitment,
         sample_key_encoding_id=SAMPLE_KEY_ENCODING_ID,
         sample_key_encoding_version=SAMPLE_KEY_ENCODING_VERSION,
-        sample_key_encoding_policy_digest=canonical_sha256(
-            sample_key_encoding_policy_document()
-        ),
+        sample_key_encoding_policy_digest=canonical_sha256(sample_key_encoding_policy_document()),
         shard_policy_id=SHARD_POLICY_ID,
         shard_policy_version=SHARD_POLICY_VERSION,
         shard_policy_digest=canonical_sha256(shard_policy_document()),
@@ -244,9 +241,7 @@ def _merge_checks() -> tuple[bool, bool]:
         shard = coordinator.publish_shard(inventory, 0, (publication,))
         entry = shard.index.entries[0]
         sourced = SourcedShardEntry(entry, shard.manifest.digest)
-        duplicate = tuple(
-            merge_sorted_entry_streams(((sourced,), (sourced,)))
-        ) == (sourced,)
+        duplicate = tuple(merge_sorted_entry_streams(((sourced,), (sourced,)))) == (sourced,)
         try:
             conflict = replace(entry, completion_envelope_digest="0" * 64)
             tuple(
@@ -264,9 +259,7 @@ def _merge_checks() -> tuple[bool, bool]:
     return duplicate, rejected
 
 
-def generate_reconciliation_digests() -> tuple[
-    dict[str, str], tuple[dict[str, object], ...]
-]:
+def generate_reconciliation_digests() -> tuple[dict[str, str], tuple[dict[str, object], ...]]:
     runs = tuple(_run(count) for count in (1, 2, 7))
     if len({run["semantic"] for run in runs}) != 1:
         raise RuntimeError("semantic manifest changed across shard topologies")
@@ -324,13 +317,9 @@ def validate_reconciliation(release: str = "v0.4") -> ReconciliationValidationRe
     duplicate, conflict = _merge_checks()
     semantic = bool(runs) and len({run["semantic"] for run in runs}) == 1
     run_specific = bool(runs) and len({run["run"] for run in runs}) == 3
-    bounded = bool(runs) and all(
-        int(run["peak"]) <= int(run["shards"]) + 3 for run in runs
-    )
+    bounded = bool(runs) and all(int(run["peak"]) <= int(run["shards"]) + 3 for run in runs)
     replay = bool(runs) and all(run["replays"] == 11 for run in runs)
-    lowest = bool(runs) and all(
-        run["accepted"] == 4 and run["samples"] == 5 for run in runs
-    )
+    lowest = bool(runs) and all(run["accepted"] == 4 and run["samples"] == 5 for run in runs)
     exhaustion = bool(runs) and all(run["exhausted"] == 1 for run in runs)
     atomic = bool(runs) and all(bool(run["atomic"]) for run in runs)
     for condition, message in (

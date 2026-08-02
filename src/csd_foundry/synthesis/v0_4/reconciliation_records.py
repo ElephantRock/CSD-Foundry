@@ -64,9 +64,7 @@ class SemanticCorpusRecord:
             "accepted_attempt_index": self.accepted_attempt_index,
             "accepted_completion_digest": self.accepted_completion_digest,
             "global_ordinal": self.global_ordinal,
-            "rejected_prefix_completion_digests": list(
-                self.rejected_prefix_completion_digests
-            ),
+            "rejected_prefix_completion_digests": list(self.rejected_prefix_completion_digests),
             "replay_attestation_digests": list(self.replay_attestation_digests),
             "result": self.result.to_json_value(),
             "sample_key": _sample_key_value(self.sample_key),
