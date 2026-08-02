@@ -212,7 +212,7 @@ def test_expiry_is_terminal_and_distinct_from_supersession() -> None:
             {
                 "replacement_assumption_id": "assumption:2",
                 "superseding_authority_id": "authority:reviewer",
-                "supersession_receipt_digest": _digest("s"),
+                "supersession_receipt_digest": _digest("c"),
                 "reason_code": "reason:replacement",
             },
         )
