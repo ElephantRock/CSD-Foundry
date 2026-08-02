@@ -7,7 +7,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 from csd_foundry.governance.v0_5.canonicalization import (
@@ -76,7 +75,8 @@ class GovernanceContractValidationReport:
             "claim_boundary": (
                 "This report establishes schema, canonical-byte, digest-domain, selected "
                 "cross-field, and frozen-policy consistency. It does not establish production "
-                "storage atomicity, cryptographic key validity, external truth, or production safety."
+                "storage atomicity, cryptographic key validity, external truth, or production "
+                "safety."
             ),
             "contract_count": self.contract_count,
             "contract_vector_count": self.contract_vector_count,
