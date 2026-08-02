@@ -194,20 +194,23 @@ def test_verified_evidence_is_admissible_with_stable_receipt() -> None:
 
 
 @pytest.mark.parametrize(
-    ("request", "code"),
+    ("use_request", "code"),
     [
         (_request("evidence:1", scope_ids=("control:18",)), "EVIDENCE_SCOPE_INSUFFICIENT"),
         (_request("evidence:1", reuse_class="D3"), "EVIDENCE_REUSE_CLASS_INSUFFICIENT"),
         (_request("evidence:1", clock_sequence=20), "EVIDENCE_EXPIRED_BY_TIME"),
     ],
 )
-def test_scope_reuse_and_time_fail_closed(request: EvidenceUseRequest, code: str) -> None:
+def test_scope_reuse_and_time_fail_closed(
+    use_request: EvidenceUseRequest,
+    code: str,
+) -> None:
     store = InMemoryRegistryStore()
     governed = GovernedEvidenceRegistry(store, _policy())
     governed.apply(_register("evidence:1", clock_sequence=1))
     _verify(governed, "evidence:1", 2)
     receipt = EvidenceAdmissibilityEvaluator(store, _policy(), _challenge_policy()).evaluate(
-        request
+        use_request
     )
     assert not receipt.allowed
     assert receipt.code == code
