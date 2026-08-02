@@ -25,6 +25,7 @@ dev = [
 csd-foundry = "csd_foundry.cli:main"
 csd-foundry-admission = "csd_foundry.governance.v0_5.admission_cli:main"
 csd-foundry-governance = "csd_foundry.governance.v0_5.cli:main"
+csd-foundry-temporal-v0-5 = "csd_foundry.governance.v0_5.temporal_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -34,6 +35,7 @@ where = ["src"]
 "share/csd-foundry/schemas/v0.5" = ["schemas/v0.5/*.json"]
 "share/csd-foundry/data/canary/v0.5/contract-v1" = ["data/canary/v0.5/contract-v1/*.json"]
 "share/csd-foundry/data/canary/v0.5/admission-v1" = ["data/canary/v0.5/admission-v1/*.json"]
+"share/csd-foundry/data/canary/v0.5/temporal-v1" = ["data/canary/v0.5/temporal-v1/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

@@ -1,0 +1,29 @@
+{
+  "schema_version": "atomic-temporal-validation-report/0.5",
+  "status": "valid",
+  "successful_claim_digest": "sha256:f647dc86aadc44e342a1197f8558950f18ca054fe03f614eff66d049abd9764f",
+  "semantic_receipt_digest": "sha256:12563a6bc64352dd46c6183921c1847260245ef232d36ac38c45d66ebd8c1c1d",
+  "completion_receipt_digest": "sha256:772bebb50bced2c51cb59cf0015fae0c19376df6f2857059976cfa4cef924683",
+  "concurrent_claimants": 12,
+  "concurrent_winners": 1,
+  "concurrent_losers": 11,
+  "failed_phase_receipt_digests": {
+    "ALTERNATIVE_MODEL_REGISTRY": "sha256:da90621e9cafe6b280bbfc24ff7e1e6b7276d90f6b3e37b06fbcc506121b3075",
+    "ASSUMPTION_REGISTRY": "sha256:7f5b4ff149d089c8ae59827a8c60877a8f7b4902580f6fc31f18513d29a49dcd",
+    "DISPOSITION": "sha256:e677e7d0976f8f79ce28ddcfc7875846cb80df94094c46225a783976f8a85f33",
+    "EVIDENCE_REGISTRY": "sha256:4fbca51085ec5c690f854e8564cc6edc267428ccd77a8d217837ded38688f3ec",
+    "QUARANTINE_COMMIT": "sha256:4e1dc41b9ca08eea87bceb26e5e86487154b880b654f4f239f973e4cd7f0729f",
+    "SEMANTIC": "sha256:601ff02a5eb29848eea980202c3add54269a2e7d89a5cde67ffbe0f22a0250b8"
+  },
+  "failure_sequences_unchanged": true,
+  "retry_reused_sequence": true,
+  "stale_head_rejected": true,
+  "partial_visibility_blocked": true,
+  "prepared_completion_recovered": true,
+  "incomplete_claim_failed_on_recovery": true,
+  "restart_deterministic": true,
+  "chain_length": 2,
+  "release_compilation_invocations": 0,
+  "errors": [],
+  "claim_boundary": "Establishes deterministic single-host temporal serialization and atomic visibility for the POSIX reference store and supplied projection artifacts. It does not establish distributed consensus, substantive registry or disposition correctness, external truth, or production safety."
+}
