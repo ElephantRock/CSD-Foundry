@@ -432,9 +432,7 @@ class AssumptionAuthorityPolicy:
         if self.separation_duty_rule_set_digest != expected_rules:
             raise AssumptionGovernanceContractError("ASSUMPTION_DUTY_RULE_SET_DIGEST_MISMATCH")
         if self.exception_set_digest != expected_exceptions:
-            raise AssumptionGovernanceContractError(
-                "ASSUMPTION_DUTY_EXCEPTION_SET_DIGEST_MISMATCH"
-            )
+            raise AssumptionGovernanceContractError("ASSUMPTION_DUTY_EXCEPTION_SET_DIGEST_MISMATCH")
         self._validate_exceptions()
         _require_self_digest(
             "ASSUMPTION_AUTHORITY_POLICY",
@@ -914,9 +912,7 @@ class AssumptionResolutionAuthorityBinding:
     def __post_init__(self) -> None:
         _require_token(self.assumption_id, "ASSUMPTION_RESOLUTION_BINDING_ID_INVALID")
         if self.action not in RESOLUTION_AUTHORITY_ACTIONS:
-            raise AssumptionGovernanceContractError(
-                "ASSUMPTION_RESOLUTION_BINDING_ACTION_INVALID"
-            )
+            raise AssumptionGovernanceContractError("ASSUMPTION_RESOLUTION_BINDING_ACTION_INVALID")
         _require_token(
             self.resolver_authority_id,
             "ASSUMPTION_RESOLUTION_BINDING_AUTHORITY_INVALID",
