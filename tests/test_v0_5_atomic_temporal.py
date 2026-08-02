@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -14,6 +16,7 @@ from csd_foundry.governance.v0_5.contracts import (
     SemanticProjectionReceipt,
     ValidatedEvent,
 )
+from csd_foundry.governance.v0_5.resources import temporal_vectors
 from csd_foundry.governance.v0_5.temporal import TemporalHead
 from csd_foundry.governance.v0_5.temporal_store import (
     InMemoryTemporalStore,
@@ -24,6 +27,8 @@ from csd_foundry.governance.v0_5.temporal_validation import (
     build_reference_validated_event,
     validate_atomic_temporal,
 )
+
+_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_atomic_temporal_validation_report_passes() -> None:
@@ -40,6 +45,25 @@ def test_atomic_temporal_validation_report_passes() -> None:
     assert report.restart_deterministic
     assert report.chain_length == 2
     assert report.release_compilation_invocations == 0
+
+    rendered = report.to_dict()
+    vectors = temporal_vectors()
+    committed_report = json.loads(
+        (_ROOT / "reports/atomic_temporal_v0.5.json").read_text(encoding="utf-8")
+    )
+    assert rendered == committed_report
+    for field_name in (
+        "successful_claim_digest",
+        "semantic_receipt_digest",
+        "completion_receipt_digest",
+        "failed_phase_receipt_digests",
+        "concurrent_claimants",
+        "concurrent_winners",
+        "concurrent_losers",
+        "chain_length",
+        "release_compilation_invocations",
+    ):
+        assert rendered[field_name] == vectors[field_name]
 
 
 def test_temporal_boundary_rejects_non_validated_events() -> None:
