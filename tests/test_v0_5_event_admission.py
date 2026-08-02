@@ -56,9 +56,7 @@ def test_admission_emits_exactly_one_outcome() -> None:
     )
     assert rejected.accepted is None
     assert rejected.failure is not None
-    assert rejected.failure.to_json_value()["failure_codes"] == [
-        "VALIDATION_CONTEXT_UNAVAILABLE"
-    ]
+    assert rejected.failure.to_json_value()["failure_codes"] == ["VALIDATION_CONTEXT_UNAVAILABLE"]
 
 
 def test_reducer_boundary_accepts_only_validated_event() -> None:
