@@ -336,7 +336,7 @@ def build_signature_set(
 
 
 def deterministic_test_signature(*, key_id: str, algorithm: str, signed_digest: str) -> str:
-    payload = f"{key_id}\0{algorithm}\0{signed_digest}".encode("utf-8")
+    payload = f"{key_id}\0{algorithm}\0{signed_digest}".encode()
     digest = hashlib.sha256(b"CSD_TEST_SIGNATURE\0" + payload).digest()
     return base64.b64encode(digest).decode("ascii")
 
