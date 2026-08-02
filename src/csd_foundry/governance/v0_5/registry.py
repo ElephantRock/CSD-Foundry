@@ -97,9 +97,7 @@ class RegistryStore(Protocol):
         self, registry_type: str, entity_id: str
     ) -> tuple[RegistryEvent, ...]: ...
 
-    def reconstruct_snapshot(
-        self, registry_type: str
-    ) -> tuple[tuple[RegistryEvent, ...], ...]: ...
+    def reconstruct_snapshot(self, registry_type: str) -> tuple[tuple[RegistryEvent, ...], ...]: ...
 
 
 class InMemoryRegistryStore:
@@ -121,14 +119,10 @@ class InMemoryRegistryStore:
     def snapshot(self, registry_type: str) -> RegistrySnapshot:
         return self._store.snapshot(registry_type)
 
-    def reconstruct_entity(
-        self, registry_type: str, entity_id: str
-    ) -> tuple[RegistryEvent, ...]:
+    def reconstruct_entity(self, registry_type: str, entity_id: str) -> tuple[RegistryEvent, ...]:
         return self._store.reconstruct_entity(registry_type, entity_id)
 
-    def reconstruct_snapshot(
-        self, registry_type: str
-    ) -> tuple[tuple[RegistryEvent, ...], ...]:
+    def reconstruct_snapshot(self, registry_type: str) -> tuple[tuple[RegistryEvent, ...], ...]:
         return self._store.reconstruct_snapshot(registry_type)
 
 
@@ -224,9 +218,7 @@ class FilesystemRegistryStore:
                 _verify_head_event(head, event)
             return RegistrySnapshot(registry_type, heads, _snapshot_root(registry_type, heads))
 
-    def reconstruct_entity(
-        self, registry_type: str, entity_id: str
-    ) -> tuple[RegistryEvent, ...]:
+    def reconstruct_entity(self, registry_type: str, entity_id: str) -> tuple[RegistryEvent, ...]:
         head = self.entity_head(registry_type, entity_id)
         if head is None:
             return ()
@@ -253,9 +245,7 @@ class FilesystemRegistryStore:
             raise RegistryStoreConflictError("REGISTRY_CHAIN_NOT_GENESIS_LINKED")
         return tuple(reversed(result))
 
-    def reconstruct_snapshot(
-        self, registry_type: str
-    ) -> tuple[tuple[RegistryEvent, ...], ...]:
+    def reconstruct_snapshot(self, registry_type: str) -> tuple[tuple[RegistryEvent, ...], ...]:
         snapshot = self.snapshot(registry_type)
         return tuple(
             self.reconstruct_entity(registry_type, head.entity_id) for head in snapshot.heads
@@ -400,9 +390,7 @@ def _head_bytes(head: RegistryEntityHead) -> bytes:
         "event_digest": head.event_digest,
     }
     unsigned = _json_bytes(value)
-    value["head_digest"] = "sha256:" + hashlib.sha256(
-        b"REGISTRY_HEAD\0" + unsigned
-    ).hexdigest()
+    value["head_digest"] = "sha256:" + hashlib.sha256(b"REGISTRY_HEAD\0" + unsigned).hexdigest()
     return _json_bytes(value)
 
 
@@ -424,9 +412,7 @@ def _parse_head(payload: bytes) -> RegistryEntityHead:
         raise RegistryStoreConflictError("REGISTRY_HEAD_VERSION_INVALID")
     expected = dict(value)
     actual_digest = expected.pop("head_digest")
-    calculated = "sha256:" + hashlib.sha256(
-        b"REGISTRY_HEAD\0" + _json_bytes(expected)
-    ).hexdigest()
+    calculated = "sha256:" + hashlib.sha256(b"REGISTRY_HEAD\0" + _json_bytes(expected)).hexdigest()
     if actual_digest != calculated or payload != _json_bytes(value):
         raise RegistryStoreConflictError("REGISTRY_HEAD_DIGEST_INVALID")
     try:
