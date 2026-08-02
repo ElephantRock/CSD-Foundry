@@ -49,7 +49,7 @@ def _normalize(value: Any, schema: dict[str, Any]) -> Any:
         items = [_normalize(item, item_schema) for item in value]
         kind = schema.get("x-csd-collection-kind", "ORDERED_SEQUENCE")
         if kind in {"SET", "MULTISET"}:
-            keyed = sorted(
+            keyed = [
                 (
                     json.dumps(
                         item,
@@ -60,7 +60,8 @@ def _normalize(value: Any, schema: dict[str, Any]) -> Any:
                     item,
                 )
                 for item in items
-            )
+            ]
+            keyed.sort(key=lambda pair: pair[0])
             if kind == "SET" and any(
                 previous[0] == current[0]
                 for previous, current in zip(keyed, keyed[1:], strict=False)
