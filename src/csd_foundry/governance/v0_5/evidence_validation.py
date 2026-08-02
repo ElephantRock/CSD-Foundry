@@ -322,7 +322,7 @@ def _reduce_independent(
             verifier_authority_id=None,
             issued_at_sequence=issued,
             valid_from_sequence=valid_from,
-            expires_at_sequence=cast(int | None, expires),
+            expires_at_sequence=expires,
             dependency_ids=dependency_ids,
             limitations=_token_tuple(payload, "limitations"),
             maximum_reuse_class=reuse,
