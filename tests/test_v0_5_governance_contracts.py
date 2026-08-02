@@ -14,6 +14,7 @@ from csd_foundry.governance.v0_5 import (
     parse_contract,
     validate_governance_contracts,
 )
+from csd_foundry.governance.v0_5.contracts import FrozenObject, RawEvent, contract_schema
 from csd_foundry.governance.v0_5.resources import contract_vectors
 from csd_foundry.governance.v0_5.validation import generated_contract_fixture
 
@@ -48,6 +49,44 @@ def test_contract_values_are_immutable() -> None:
     contract = generated_contract_fixture("raw-event")
     with pytest.raises(FrozenInstanceError):
         contract.value = contract.value  # type: ignore[misc]
+
+
+def test_direct_typed_construction_is_still_validated() -> None:
+    with pytest.raises(GovernanceContractError) as rejected:
+        RawEvent(FrozenObject((("schema_version", "raw-event/1"),)))
+    assert rejected.value.code == "SCHEMA_REJECTED"
+
+
+def test_schema_results_are_isolated_from_callers() -> None:
+    mutated = contract_schema("raw-event")
+    mutated["additionalProperties"] = True
+    assert contract_schema("raw-event")["additionalProperties"] is False
+
+
+def test_composite_collection_members_compare_only_by_canonical_bytes() -> None:
+    item_schema = {
+        "type": "object",
+        "properties": {"a": {"type": "integer"}},
+        "additionalProperties": False,
+    }
+    with pytest.raises(GovernanceContractError) as duplicate:
+        canonical_bytes(
+            [{"a": 1}, {"a": 1}],
+            {
+                "type": "array",
+                "x-csd-collection-kind": "SET",
+                "items": item_schema,
+            },
+        )
+    assert duplicate.value.code == "DUPLICATE_SET_MEMBER"
+    assert canonical_bytes(
+        [{"a": 1}, {"a": 1}],
+        {
+            "type": "array",
+            "x-csd-collection-kind": "MULTISET",
+            "items": item_schema,
+        },
+    ) == b'[{"a":1},{"a":1}]\n'
 
 
 def test_duplicate_set_and_float_fail_with_stable_codes() -> None:
