@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:semantic-projection-receipt:1",
+  "title": "Semantic Projection Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "decisionClass": {
+      "type": "string",
+      "enum": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "BENCHMARK"
+      ]
+    },
+    "registryType": {
+      "type": "string",
+      "enum": [
+        "EVIDENCE_UNIT",
+        "ASSUMPTION",
+        "ALTERNATIVE_MODEL"
+      ]
+    },
+    "projectionPhase": {
+      "type": "string",
+      "enum": [
+        "SEMANTIC",
+        "EVIDENCE_REGISTRY",
+        "ASSUMPTION_REGISTRY",
+        "ALTERNATIVE_MODEL_REGISTRY",
+        "DISPOSITION",
+        "QUARANTINE_COMMIT"
+      ]
+    },
+    "dispositionAction": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT_AND_PROCEED",
+        "FLAG_AND_PROCEED",
+        "ESCALATE_AND_HOLD",
+        "BLOCK",
+        "EXCLUDE_FROM_RELEASE"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "semantic-projection-receipt/1"
+    },
+    "clock_claim_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "validated_event_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "projection_sequence": {
+      "$ref": "#/$defs/positiveInteger"
+    },
+    "pre_state_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "post_state_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "semantic_trace_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "semantic_policy_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "projection_result": {
+      "const": "COMPLETED"
+    },
+    "semantic_projection_receipt_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "clock_claim_digest",
+    "validated_event_digest",
+    "projection_sequence",
+    "pre_state_digest",
+    "post_state_digest",
+    "semantic_trace_digest",
+    "semantic_policy_digest",
+    "projection_result",
+    "semantic_projection_receipt_digest"
+  ]
+}

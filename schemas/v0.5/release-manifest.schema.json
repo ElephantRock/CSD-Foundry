@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:release-manifest:1",
+  "title": "Immutable Release Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "decisionClass": {
+      "type": "string",
+      "enum": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "BENCHMARK"
+      ]
+    },
+    "registryType": {
+      "type": "string",
+      "enum": [
+        "EVIDENCE_UNIT",
+        "ASSUMPTION",
+        "ALTERNATIVE_MODEL"
+      ]
+    },
+    "projectionPhase": {
+      "type": "string",
+      "enum": [
+        "SEMANTIC",
+        "EVIDENCE_REGISTRY",
+        "ASSUMPTION_REGISTRY",
+        "ALTERNATIVE_MODEL_REGISTRY",
+        "DISPOSITION",
+        "QUARANTINE_COMMIT"
+      ]
+    },
+    "dispositionAction": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT_AND_PROCEED",
+        "FLAG_AND_PROCEED",
+        "ESCALATE_AND_HOLD",
+        "BLOCK",
+        "EXCLUDE_FROM_RELEASE"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "release-manifest/1"
+    },
+    "release_id": {
+      "$ref": "#/$defs/token"
+    },
+    "release_class": {
+      "$ref": "#/$defs/decisionClass"
+    },
+    "request_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "source_clock_sequence": {
+      "$ref": "#/$defs/positiveInteger"
+    },
+    "quarantine_epoch": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "semantic_root_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "disposition_root_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "registry_root_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence_unit": {
+          "$ref": "#/$defs/digest"
+        },
+        "assumption": {
+          "$ref": "#/$defs/digest"
+        },
+        "alternative_model": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "evidence_unit",
+        "assumption",
+        "alternative_model"
+      ]
+    },
+    "member_asset_digests": {
+      "type": "array",
+      "minItems": 1,
+      "x-csd-collection-kind": "SET",
+      "items": {
+        "$ref": "#/$defs/digest"
+      }
+    },
+    "maximum_reuse_class": {
+      "$ref": "#/$defs/decisionClass"
+    },
+    "eligibility_report_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "compiler_policy_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "prior_release_manifest_digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "release_manifest_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "release_id",
+    "release_class",
+    "request_digest",
+    "source_clock_sequence",
+    "quarantine_epoch",
+    "semantic_root_digest",
+    "disposition_root_digest",
+    "registry_root_digests",
+    "member_asset_digests",
+    "maximum_reuse_class",
+    "eligibility_report_digest",
+    "compiler_policy_digest",
+    "prior_release_manifest_digest",
+    "release_manifest_digest"
+  ]
+}

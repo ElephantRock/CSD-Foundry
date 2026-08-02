@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:release-request:1",
+  "title": "Post-Snapshot Release Request",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "decisionClass": {
+      "type": "string",
+      "enum": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "BENCHMARK"
+      ]
+    },
+    "registryType": {
+      "type": "string",
+      "enum": [
+        "EVIDENCE_UNIT",
+        "ASSUMPTION",
+        "ALTERNATIVE_MODEL"
+      ]
+    },
+    "projectionPhase": {
+      "type": "string",
+      "enum": [
+        "SEMANTIC",
+        "EVIDENCE_REGISTRY",
+        "ASSUMPTION_REGISTRY",
+        "ALTERNATIVE_MODEL_REGISTRY",
+        "DISPOSITION",
+        "QUARANTINE_COMMIT"
+      ]
+    },
+    "dispositionAction": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT_AND_PROCEED",
+        "FLAG_AND_PROCEED",
+        "ESCALATE_AND_HOLD",
+        "BLOCK",
+        "EXCLUDE_FROM_RELEASE"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "release-request/1"
+    },
+    "request_id": {
+      "$ref": "#/$defs/token"
+    },
+    "request_type": {
+      "type": "string",
+      "enum": [
+        "RELEASE",
+        "BENCHMARK_BUILD",
+        "TRAINING_MIXTURE_BUILD"
+      ]
+    },
+    "target_release_class": {
+      "$ref": "#/$defs/decisionClass"
+    },
+    "source_clock_sequence": {
+      "$ref": "#/$defs/positiveInteger"
+    },
+    "quarantine_epoch": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "semantic_root_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "disposition_root_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "registry_root_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence_unit": {
+          "$ref": "#/$defs/digest"
+        },
+        "assumption": {
+          "$ref": "#/$defs/digest"
+        },
+        "alternative_model": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "evidence_unit",
+        "assumption",
+        "alternative_model"
+      ]
+    },
+    "requested_by": {
+      "$ref": "#/$defs/token"
+    },
+    "release_policy_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "release_request_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "request_type",
+    "target_release_class",
+    "source_clock_sequence",
+    "quarantine_epoch",
+    "semantic_root_digest",
+    "disposition_root_digest",
+    "registry_root_digests",
+    "requested_by",
+    "release_policy_digest",
+    "release_request_digest"
+  ]
+}
