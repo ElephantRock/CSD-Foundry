@@ -79,14 +79,17 @@ def test_composite_collection_members_compare_only_by_canonical_bytes() -> None:
             },
         )
     assert duplicate.value.code == "DUPLICATE_SET_MEMBER"
-    assert canonical_bytes(
-        [{"a": 1}, {"a": 1}],
-        {
-            "type": "array",
-            "x-csd-collection-kind": "MULTISET",
-            "items": item_schema,
-        },
-    ) == b'[{"a":1},{"a":1}]\n'
+    assert (
+        canonical_bytes(
+            [{"a": 1}, {"a": 1}],
+            {
+                "type": "array",
+                "x-csd-collection-kind": "MULTISET",
+                "items": item_schema,
+            },
+        )
+        == b'[{"a":1},{"a":1}]\n'
+    )
 
 
 def test_duplicate_set_and_float_fail_with_stable_codes() -> None:
