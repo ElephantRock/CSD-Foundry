@@ -155,8 +155,7 @@ def validate_evidence_registry(
             _compare_projections(vector, result.projections)
             expected_decisions = _array(vector, "expected_authority_decision_digests")
             observed_decisions = [
-                cast(str, decision["decision_digest"])
-                for decision in result.authority_decisions
+                cast(str, decision["decision_digest"]) for decision in result.authority_decisions
             ]
             if observed_decisions != expected_decisions:
                 raise EvidenceConformanceError("EVIDENCE_AUTHORITY_DECISIONS_MISMATCH")
@@ -257,7 +256,10 @@ def _validate_history(events: list[object], policy: dict[str, Any]) -> _HistoryR
         expected_previous = None if previous is None else previous.current_event_digest
         if value.get("previous_entity_event_digest") != expected_previous:
             raise EvidenceConformanceError("EVIDENCE_PREDECESSOR_MISMATCH")
-        if previous is not None and cast(int, value["clock_sequence"]) <= previous.last_clock_sequence:
+        if (
+            previous is not None
+            and cast(int, value["clock_sequence"]) <= previous.last_clock_sequence
+        ):
             raise EvidenceConformanceError("EVIDENCE_CLOCK_NOT_ADVANCING")
         payload = _object(value, "payload")
         decision = _authority_decision(value, payload, previous, policy)
@@ -562,7 +564,9 @@ def _evaluate_node(
     visiting.add(evidence_id)
     evidence = projections.get(evidence_id)
     if evidence is None:
-        raise EvidenceConformanceError("EVIDENCE_MISSING" if root else "EVIDENCE_DEPENDENCY_MISSING")
+        raise EvidenceConformanceError(
+            "EVIDENCE_MISSING" if root else "EVIDENCE_DEPENDENCY_MISSING"
+        )
     if root and evidence.proposition_id != request["proposition_id"]:
         raise EvidenceConformanceError("EVIDENCE_PROPOSITION_MISMATCH")
     if not set(cast(list[str], request["scope_ids"])).issubset(evidence.scope_ids):
@@ -656,9 +660,10 @@ def _parse_authority_policy(value: dict[str, Any]) -> dict[str, Any]:
         raise EvidenceConformanceError("EVIDENCE_AUTHORITY_POLICY_SCHEMA_INVALID")
     _required_token(value, "policy_id")
     _required_digest(value, "authority_root_digest")
-    if type(value.get("committed_at_sequence")) is not int or cast(
-        int, value["committed_at_sequence"]
-    ) < 0:
+    if (
+        type(value.get("committed_at_sequence")) is not int
+        or cast(int, value["committed_at_sequence"]) < 0
+    ):
         raise EvidenceConformanceError("EVIDENCE_AUTHORITY_POLICY_SEQUENCE_INVALID")
     grants = _array(value, "grants")
     canonical: list[tuple[str, str, tuple[str, ...]]] = []
@@ -754,9 +759,7 @@ def _compare_projections(
     expected_statuses = _object(vector, "expected_statuses")
     expected_digests = _object(vector, "expected_current_event_digests")
     observed_statuses = {key: projections[key].status for key in sorted(projections)}
-    observed_digests = {
-        key: projections[key].current_event_digest for key in sorted(projections)
-    }
+    observed_digests = {key: projections[key].current_event_digest for key in sorted(projections)}
     if observed_statuses != expected_statuses or observed_digests != expected_digests:
         raise EvidenceConformanceError("EVIDENCE_PROJECTION_MISMATCH")
 
@@ -778,9 +781,10 @@ def _snapshot_root(projections: dict[str, IndependentEvidenceProjection]) -> str
 
 
 def _domain_digest(domain: str, value: object) -> str:
-    return "sha256:" + hashlib.sha256(
-        domain.encode("ascii") + b"\0" + _json_bytes(value)
-    ).hexdigest()
+    return (
+        "sha256:"
+        + hashlib.sha256(domain.encode("ascii") + b"\0" + _json_bytes(value)).hexdigest()
+    )
 
 
 def _json_bytes(value: object) -> bytes:
