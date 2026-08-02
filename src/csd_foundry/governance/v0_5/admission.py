@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar, cast
 
@@ -223,6 +224,29 @@ class EventAdmissionStore(Protocol):
     def get_context(self, tick: int) -> CommittedValidationContext | None: ...
 
 
+class ReferencePayloadSchemaResolver:
+    """Reference resolver for the executable vertical-slice payload schemas."""
+
+    _SCHEMAS: dict[str, dict[str, Any]] = {
+        "advance-clock/1": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "delta_ticks": {
+                    "type": "integer",
+                    "minimum": 1,
+                }
+            },
+            "required": ["delta_ticks"],
+        }
+    }
+
+    def resolve(self, schema_version: str) -> dict[str, Any] | None:
+        schema = self._SCHEMAS.get(schema_version)
+        return None if schema is None else deepcopy(schema)
+
+
 @dataclass(frozen=True, slots=True)
 class AdmissionOutcome:
     accepted: ValidatedEvent | None
@@ -257,14 +281,14 @@ class EventAdmissionEngine:
         self,
         *,
         context_resolver: CommittedContextResolver,
-        payload_schema_resolver: PayloadSchemaResolver,
         signature_verifier: SignatureVerifier,
         authority_resolver: SignerAuthorityResolver,
         policy_registry: ValidationPolicyRegistry,
         store: EventAdmissionStore,
+        payload_schema_resolver: PayloadSchemaResolver | None = None,
     ) -> None:
         self._context_resolver = context_resolver
-        self._payload_schema_resolver = payload_schema_resolver
+        self._payload_schema_resolver = payload_schema_resolver or ReferencePayloadSchemaResolver()
         self._signature_verifier = signature_verifier
         self._authority_resolver = authority_resolver
         self._policy_registry = policy_registry
