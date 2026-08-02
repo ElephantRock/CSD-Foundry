@@ -279,9 +279,7 @@ def test_cycle_witness_rejects_open_or_repeated_paths() -> None:
         AssumptionGovernanceContractError,
         match="ASSUMPTION_CYCLE_WITNESS_REPEATED_NODE",
     ):
-        canonical_cycle_witness(
-            ("assumption:a", "assumption:b", "assumption:b", "assumption:a")
-        )
+        canonical_cycle_witness(("assumption:a", "assumption:b", "assumption:b", "assumption:a"))
 
 
 def test_resolution_binding_preserves_unresolved_challenge_set() -> None:
