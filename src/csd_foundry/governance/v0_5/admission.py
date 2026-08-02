@@ -513,7 +513,7 @@ def require_validated_event(value: object) -> ValidatedEvent:
 
     if type(value) is not ValidatedEvent:
         raise GovernanceContractError("VALIDATION_RESULT_NOT_ACCEPTED")
-    return cast(ValidatedEvent, value)
+    return value
 
 
 def _coerce_contract(
@@ -521,7 +521,7 @@ def _coerce_contract(
     value: ContractT | dict[str, Any],
 ) -> ContractT:
     if type(value) is contract_type:
-        return cast(ContractT, value)
+        return value
     if type(value) is dict:
         return cast(ContractT, contract_type.from_json(value))
     raise GovernanceContractError("SCHEMA_REJECTED")
