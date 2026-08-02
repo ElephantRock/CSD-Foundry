@@ -167,7 +167,8 @@ class FilesystemTemporalStore:
         _require_token(artifact_name)
         self.put_contract(contract)
         self._install(
-            self.attempts / attempt_id / f"{artifact_name}.json", contract.canonical_bytes
+            self._attempt_directory(attempt_id) / f"{artifact_name}.json",
+            contract.canonical_bytes,
         )
 
     def record_projection_artifacts(
@@ -177,7 +178,7 @@ class FilesystemTemporalStore:
         artifacts: ProjectionArtifacts,
     ) -> None:
         self._install(
-            self.attempts / _attempt_id(claim) / "projection-bundle.json",
+            self._attempt_directory(_attempt_id(claim)) / "projection-bundle.json",
             _projection_bundle_bytes(claim, semantic_receipt, artifacts),
         )
 
@@ -193,8 +194,9 @@ class FilesystemTemporalStore:
     def prepare_completion(self, claim: ClockClaim, completion: ClockCompletionReceipt) -> None:
         _verify_completion(claim, completion)
         attempt_id = _attempt_id(claim)
-        bundle_path = self.attempts / attempt_id / "projection-bundle.json"
-        semantic_path = self.attempts / attempt_id / "semantic.json"
+        attempt = self._attempt_directory(attempt_id)
+        bundle_path = attempt / "projection-bundle.json"
+        semantic_path = attempt / "semantic.json"
         if not bundle_path.is_file() or not semantic_path.is_file():
             raise TemporalStoreConflictError("completion dependencies are incomplete")
         _verify_projection_bundle(bundle_path.read_bytes(), claim, completion)
@@ -251,7 +253,7 @@ class FilesystemTemporalStore:
             active = self._read_active()
             if active is None:
                 return "NO_ACTIVE_CLAIM"
-            completion_path = self.attempts / _attempt_id(active) / "completion.json"
+            completion_path = self._attempt_directory(_attempt_id(active)) / "completion.json"
             if completion_path.is_file():
                 completion = _parse_contract(
                     "clock-completion-receipt", completion_path.read_bytes()
@@ -272,7 +274,7 @@ class FilesystemTemporalStore:
 
     def _verify_prepared(self, claim: ClockClaim, completion: ClockCompletionReceipt) -> None:
         _verify_completion(claim, completion)
-        attempt = self.attempts / _attempt_id(claim)
+        attempt = self._attempt_directory(_attempt_id(claim))
         _verify_projection_bundle(
             (attempt / "projection-bundle.json").read_bytes(), claim, completion
         )
@@ -330,6 +332,13 @@ class FilesystemTemporalStore:
             raise TemporalStoreError("unknown contract name")
         hex_digest = _digest_hex(digest)
         return self.objects / contract_name / hex_digest[:2] / f"{hex_digest[2:]}.json"
+
+    def _attempt_directory(self, attempt_id: str) -> Path:
+        _require_token(attempt_id)
+        encoded = hashlib.sha256(
+            b"TEMPORAL_ATTEMPT_PATH\0" + attempt_id.encode("utf-8")
+        ).hexdigest()
+        return self.attempts / encoded[:2] / encoded[2:]
 
     def _install(self, final_path: Path, payload: bytes) -> None:
         final_path.parent.mkdir(parents=True, exist_ok=True)
