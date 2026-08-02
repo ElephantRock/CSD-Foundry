@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 from csd_foundry.governance.v0_5.contracts import (
     ClockClaim,
