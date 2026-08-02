@@ -525,9 +525,7 @@ def _apply_staged_events(
 ) -> None:
     for event in events:
         evidence_id = _event_entity_id(event)
-        previous = project_evidence_history(
-            staged.reconstruct_entity("EVIDENCE_UNIT", evidence_id)
-        )
+        previous = project_evidence_history(staged.reconstruct_entity("EVIDENCE_UNIT", evidence_id))
         decision = authority.require(event, previous)
         current = reduce_evidence(previous, event)
         staged.append(event)
