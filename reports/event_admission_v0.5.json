@@ -1,0 +1,12 @@
+{
+  "schema_version": "event-admission-validation-report/0.5",
+  "status": "valid",
+  "accepted_receipts": 2,
+  "rejected_receipts": 12,
+  "reconstructed_acceptance_count": 2,
+  "reducer_boundary_enforced": true,
+  "restart_deterministic": true,
+  "vector_path": "data/canary/v0.5/admission-v1/admission_vectors.json",
+  "errors": [],
+  "claim_boundary": "Establishes deterministic admission relative to pinned policies, committed contexts, authority resolution, and the reference signature-verifier test double. It does not establish external truth, semantic validity, production key validity, or production safety."
+}

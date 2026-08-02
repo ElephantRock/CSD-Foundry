@@ -37,6 +37,7 @@ jobs:
       - run: csd-foundry synthesize reconciliation --release v0.4
       - run: python scripts/validate_contract_freeze_v0_5.py
       - run: csd-foundry-governance --release v0.5
+      - run: csd-foundry-admission --release v0.5
       - run: csd-foundry demo > /tmp/csd-foundry-demo.json && test -s /tmp/csd-foundry-demo.json
       - run: pip wheel . --no-deps --wheel-dir /tmp/csd-wheelhouse
       - name: Validate installed wheel outside the repository
@@ -55,6 +56,7 @@ jobs:
           /tmp/csd-installed/bin/csd-foundry synthesize publication --release v0.4 > publication-report.json
           /tmp/csd-installed/bin/csd-foundry synthesize reconciliation --release v0.4 > reconciliation-report.json
           /tmp/csd-installed/bin/csd-foundry-governance --release v0.5 > governance-report.json
+          /tmp/csd-installed/bin/csd-foundry-admission --release v0.5 > admission-report.json
           test -s scenario-report.json
           test -s temporal-report.json
           test -s mutation-report.json
@@ -66,3 +68,4 @@ jobs:
           test -s publication-report.json
           test -s reconciliation-report.json
           test -s governance-report.json
+          test -s admission-report.json
