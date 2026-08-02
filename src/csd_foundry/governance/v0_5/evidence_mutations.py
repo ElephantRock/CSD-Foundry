@@ -205,12 +205,8 @@ def evaluate_evidence_mutations(
     baseline_digest = baseline.get("catalog_digest")
     mutation_digest = campaign.get("catalog_digest")
     return EvidenceMutationReport(
-        baseline_vector_catalog_digest=(
-            baseline_digest if type(baseline_digest) is str else None
-        ),
-        mutation_catalog_digest=(
-            mutation_digest if type(mutation_digest) is str else None
-        ),
+        baseline_vector_catalog_digest=(baseline_digest if type(baseline_digest) is str else None),
+        mutation_catalog_digest=(mutation_digest if type(mutation_digest) is str else None),
         results=tuple(results),
         errors=tuple(errors),
     )
