@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 
 from csd_foundry.synthesis.v0_4.choice_paths import AttemptRange, SampleKey
 from csd_foundry.synthesis.v0_4.execution_protocol import (
@@ -318,7 +319,7 @@ def validate_reconciliation(release: str = "v0.4") -> ReconciliationValidationRe
     semantic = bool(runs) and len({run["semantic"] for run in runs}) == 1
     run_specific = bool(runs) and len({run["run"] for run in runs}) == 3
     bounded = bool(runs) and all(
-        int(run["peak"]) <= int(run["shards"]) + 3 for run in runs  # type: ignore[call-overload]
+        cast(int, run["peak"]) <= cast(int, run["shards"]) + 3 for run in runs
     )
     replay = bool(runs) and all(run["replays"] == 11 for run in runs)
     lowest = bool(runs) and all(run["accepted"] == 4 and run["samples"] == 5 for run in runs)
