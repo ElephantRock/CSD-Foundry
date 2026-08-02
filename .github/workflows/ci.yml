@@ -34,6 +34,7 @@ jobs:
       - run: csd-foundry synthesize replay --release v0.4
       - run: csd-foundry synthesize execution --release v0.4
       - run: csd-foundry synthesize publication --release v0.4
+      - run: python scripts/validate_contract_freeze_v0_5.py
       - run: csd-foundry demo > /tmp/csd-foundry-demo.json && test -s /tmp/csd-foundry-demo.json
       - run: pip wheel . --no-deps --wheel-dir /tmp/csd-wheelhouse
       - name: Validate installed wheel outside the repository
