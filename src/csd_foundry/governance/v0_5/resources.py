@@ -68,3 +68,7 @@ def api_contracts() -> dict[str, Any]:
 
 def contract_vectors() -> dict[str, Any]:
     return load_json("data/canary/v0.5/contract-v1/contract_vectors.json")
+
+
+def admission_vectors() -> dict[str, Any]:
+    return load_json("data/canary/v0.5/admission-v1/admission_vectors.json")
