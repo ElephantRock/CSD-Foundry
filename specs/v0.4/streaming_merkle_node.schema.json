@@ -1,0 +1,15 @@
+{
+  "$id": "urn:csd-foundry:streaming-merkle-node:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "domain": {"minLength": 1, "type": "string"},
+    "leaf_count": {"maximum": 4294967295, "minimum": 2, "type": "integer"},
+    "left_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "level": {"maximum": 4294967295, "minimum": 1, "type": "integer"},
+    "right_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": "csd-streaming-merkle-node/0.4"}
+  },
+  "required": ["domain", "leaf_count", "left_digest", "level", "right_digest", "schema_version"],
+  "type": "object"
+}

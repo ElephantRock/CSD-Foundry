@@ -1,0 +1,27 @@
+{
+  "$id": "urn:csd-foundry:replay-attestation:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "attempt_key": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_index": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+        "release": {"const": "v0.4"},
+        "sample_index": {"minimum": 0, "type": "integer"},
+        "target_id": {"minLength": 1, "type": "string"}
+      },
+      "required": ["attempt_index", "release", "sample_index", "target_id"],
+      "type": "object"
+    },
+    "attestor_id": {"minLength": 1, "type": "string"},
+    "attestor_version": {"maximum": 4294967295, "minimum": 1, "type": "integer"},
+    "completion_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "completion_envelope_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "replay_evidence_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": "csd-replay-attestation/0.4"},
+    "validation_mode": {"const": "FULL_REPLAY"}
+  },
+  "required": ["attempt_key", "attestor_id", "attestor_version", "completion_digest", "completion_envelope_digest", "replay_evidence_digest", "schema_version", "validation_mode"],
+  "type": "object"
+}

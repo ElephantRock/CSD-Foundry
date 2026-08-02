@@ -1,0 +1,15 @@
+{
+  "$id": "urn:csd-foundry:canonical-merge-seal:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "inventory_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "run_evidence_manifest_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "schema_version": {"const": "csd-canonical-merge-seal/0.4"},
+    "sealed": {"const": true},
+    "semantic_corpus_manifest_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "source_manifest_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "minItems": 1, "type": "array", "uniqueItems": true}
+  },
+  "required": ["inventory_digest", "run_evidence_manifest_digest", "schema_version", "sealed", "semantic_corpus_manifest_digest", "source_manifest_digests"],
+  "type": "object"
+}

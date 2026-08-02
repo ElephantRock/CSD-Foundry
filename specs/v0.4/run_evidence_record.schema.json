@@ -1,0 +1,29 @@
+{
+  "$id": "urn:csd-foundry:run-evidence-record:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "completion_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "minItems": 1, "type": "array"},
+    "completion_envelope_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "minItems": 1, "type": "array"},
+    "global_ordinal": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "inventory_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "replay_attestation_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "minItems": 1, "type": "array"},
+    "resolution_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "resolution_status": {"enum": ["accepted", "exhausted"]},
+    "sample_key": {
+      "additionalProperties": false,
+      "properties": {
+        "release": {"const": "v0.4"},
+        "sample_index": {"minimum": 0, "type": "integer"},
+        "target_id": {"minLength": 1, "type": "string"}
+      },
+      "required": ["release", "sample_index", "target_id"],
+      "type": "object"
+    },
+    "schema_version": {"const": "csd-run-evidence-record/0.4"},
+    "selected_attempt_index": {"anyOf": [{"maximum": 4294967295, "minimum": 0, "type": "integer"}, {"type": "null"}]},
+    "source_manifest_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "minItems": 1, "type": "array"}
+  },
+  "required": ["completion_digests", "completion_envelope_digests", "global_ordinal", "inventory_digest", "replay_attestation_digests", "resolution_digest", "resolution_status", "sample_key", "schema_version", "selected_attempt_index", "source_manifest_digests"],
+  "type": "object"
+}

@@ -1,0 +1,15 @@
+{
+  "$id": "urn:csd-foundry:semantic-corpus-manifest:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "generation_namespace_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "merkle_root_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "peak_count": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "record_count": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "schema_version": {"const": "csd-semantic-corpus-manifest/0.4"},
+    "validation_mode": {"const": "FULL_REPLAY"}
+  },
+  "required": ["generation_namespace_digest", "merkle_root_digest", "peak_count", "record_count", "schema_version", "validation_mode"],
+  "type": "object"
+}

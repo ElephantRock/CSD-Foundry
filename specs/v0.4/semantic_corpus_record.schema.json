@@ -1,0 +1,26 @@
+{
+  "$id": "urn:csd-foundry:semantic-corpus-record:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "accepted_attempt_index": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "accepted_completion_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "global_ordinal": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "rejected_prefix_completion_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "type": "array"},
+    "replay_attestation_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "minItems": 1, "type": "array"},
+    "result": {"type": "object"},
+    "sample_key": {
+      "additionalProperties": false,
+      "properties": {
+        "release": {"const": "v0.4"},
+        "sample_index": {"minimum": 0, "type": "integer"},
+        "target_id": {"minLength": 1, "type": "string"}
+      },
+      "required": ["release", "sample_index", "target_id"],
+      "type": "object"
+    },
+    "schema_version": {"const": "csd-semantic-corpus-record/0.4"}
+  },
+  "required": ["accepted_attempt_index", "accepted_completion_digest", "global_ordinal", "rejected_prefix_completion_digests", "replay_attestation_digests", "result", "sample_key", "schema_version"],
+  "type": "object"
+}

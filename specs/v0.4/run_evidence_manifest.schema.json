@@ -1,0 +1,20 @@
+{
+  "$id": "urn:csd-foundry:run-evidence-manifest:v0.4",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "conflict_count": {"const": 0},
+    "inventory_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "merkle_root_digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "peak_count": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "reconciliation_policy_id": {"const": "csd-streaming-reconciliation"},
+    "reconciliation_policy_version": {"const": 1},
+    "record_count": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "replay_attestation_count": {"maximum": 4294967295, "minimum": 0, "type": "integer"},
+    "schema_version": {"const": "csd-run-evidence-manifest/0.4"},
+    "shard_count": {"maximum": 4294967295, "minimum": 1, "type": "integer"},
+    "source_manifest_digests": {"items": {"pattern": "^[0-9a-f]{64}$", "type": "string"}, "minItems": 1, "type": "array", "uniqueItems": true}
+  },
+  "required": ["conflict_count", "inventory_digest", "merkle_root_digest", "peak_count", "reconciliation_policy_id", "reconciliation_policy_version", "record_count", "replay_attestation_count", "schema_version", "shard_count", "source_manifest_digests"],
+  "type": "object"
+}
