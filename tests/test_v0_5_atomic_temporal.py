@@ -19,6 +19,7 @@ from csd_foundry.governance.v0_5.contracts import (
 from csd_foundry.governance.v0_5.resources import temporal_vectors
 from csd_foundry.governance.v0_5.temporal import TemporalHead
 from csd_foundry.governance.v0_5.temporal_store import (
+    FilesystemTemporalStore,
     InMemoryTemporalStore,
     TemporalStoreConflictError,
 )
@@ -83,6 +84,24 @@ def test_temporal_boundary_rejects_non_validated_events() -> None:
                 claimant_id="validator",
             )
         assert exc.value.code == "VALIDATION_RESULT_NOT_ACCEPTED"
+
+
+def test_attempt_ids_cannot_escape_the_store_root(tmp_path: Path) -> None:
+    event = build_reference_validated_event()
+    store = FilesystemTemporalStore(tmp_path)
+    coordinator = build_reference_coordinator(store)
+    attempt_id = "a/../../../../csd-temporal-path-escape-sentinel"
+    _, result = coordinator.claim(
+        event,
+        attempt_id=attempt_id,
+        claimant_id="validator",
+    )
+    assert result.acquired
+    unsafe_path = store.attempts / attempt_id / "claim.json"
+    assert not unsafe_path.exists()
+    claim_paths = list(store.attempts.rglob("claim.json"))
+    assert len(claim_paths) == 1
+    assert claim_paths[0].resolve().is_relative_to(store.attempts.resolve())
 
 
 def test_conflicting_completion_cannot_rebind_committed_sequence() -> None:
