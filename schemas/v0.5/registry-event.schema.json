@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:registry-event:1",
+  "title": "Registry Event Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "decisionClass": {
+      "type": "string",
+      "enum": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "BENCHMARK"
+      ]
+    },
+    "registryType": {
+      "type": "string",
+      "enum": [
+        "EVIDENCE_UNIT",
+        "ASSUMPTION",
+        "ALTERNATIVE_MODEL"
+      ]
+    },
+    "projectionPhase": {
+      "type": "string",
+      "enum": [
+        "SEMANTIC",
+        "EVIDENCE_REGISTRY",
+        "ASSUMPTION_REGISTRY",
+        "ALTERNATIVE_MODEL_REGISTRY",
+        "DISPOSITION",
+        "QUARANTINE_COMMIT"
+      ]
+    },
+    "dispositionAction": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT_AND_PROCEED",
+        "FLAG_AND_PROCEED",
+        "ESCALATE_AND_HOLD",
+        "BLOCK",
+        "EXCLUDE_FROM_RELEASE"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "registry-event/1"
+    },
+    "registry_type": {
+      "$ref": "#/$defs/registryType"
+    },
+    "entity_id": {
+      "$ref": "#/$defs/token"
+    },
+    "entity_sequence": {
+      "$ref": "#/$defs/positiveInteger"
+    },
+    "previous_entity_event_digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "clock_sequence": {
+      "$ref": "#/$defs/positiveInteger"
+    },
+    "projection_phase": {
+      "$ref": "#/$defs/projectionPhase"
+    },
+    "source_receipt_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "payload_schema_version": {
+      "$ref": "#/$defs/token"
+    },
+    "payload": {
+      "type": "object"
+    },
+    "registry_event_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "registry_type",
+    "entity_id",
+    "entity_sequence",
+    "previous_entity_event_digest",
+    "clock_sequence",
+    "projection_phase",
+    "source_receipt_digest",
+    "payload_schema_version",
+    "payload",
+    "registry_event_digest"
+  ]
+}

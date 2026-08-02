@@ -1,0 +1,54 @@
+{
+  "schema_version": "charter-invariant-registry/0.5",
+  "registry_version": 1,
+  "status": "FROZEN_FOR_IMPLEMENTATION",
+  "invariants": [
+    {
+      "invariant_id": "TEMP-SAFE-01",
+      "statement": "Temporal progress requires an atomic no-clobber completion protocol.",
+      "mandatory_consequences": [
+        "At most one successor claim may complete for a committed temporal head.",
+        "A failed projection attempt does not advance the committed sequence.",
+        "Every committed sequence has exactly one complete projection bundle.",
+        "Every failed claimed attempt produces a ClockProjectionFailure receipt.",
+        "No consumer may observe a new sequence before mandatory projections and quarantine effects commit."
+      ]
+    },
+    {
+      "invariant_id": "RAP-SAFE-01",
+      "statement": "Every primary/shadow graph difference requires full replay until irrelevance is mechanically certified.",
+      "mandatory_consequences": [
+        "Added, removed, relabeled, rescoped, temporal, authority, and evidence-admission differences trigger full replay.",
+        "No cut-set or dependency-cone optimization is trusted without a mechanically verified relevance certificate.",
+        "The default replay policy is FULL_REPLAY."
+      ]
+    },
+    {
+      "invariant_id": "REL-ARCH-01",
+      "statement": "Release compilation is event-triggered after a completed snapshot and is not part of every clock tick.",
+      "mandatory_consequences": [
+        "Release compilation is absent from the mandatory clock projection phase order.",
+        "Release and promotion requests pin a completed snapshot and quarantine epoch.",
+        "Promotion creates a new release identity and manifest."
+      ]
+    },
+    {
+      "invariant_id": "VAL-SAFE-01",
+      "statement": "Reducers consume only committed ValidatedEvent receipts.",
+      "mandatory_consequences": [
+        "Raw and rejected events cannot enter reducers.",
+        "Signature and validation-policy interpretation occurs before reduction.",
+        "Historical validation is bound to the original policy digest and committed context tick."
+      ]
+    },
+    {
+      "invariant_id": "RAP-INV-01",
+      "statement": "Disposition may govern operational use but may not establish or replace a substantive CSD verdict."
+    },
+    {
+      "invariant_id": "RAP-INV-02",
+      "statement": "Reality Assurance may expose ignorance, evidence absence, expiry, challenge, disagreement, or required action, but may not assert external truth or world-model completeness."
+    }
+  ],
+  "change_rule": "Changing an invariant statement or mandatory consequence requires a new registry version and an explicit migration review."
+}

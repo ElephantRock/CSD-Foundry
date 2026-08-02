@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:promotion-request:1",
+  "title": "Promotion Request",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {"type": "string","pattern": "^sha256:[0-9a-f]{64}$"},
+    "nonNegativeInteger": {"type": "integer","minimum": 0},
+    "positiveInteger": {"type": "integer","minimum": 1},
+    "token": {"type": "string","pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
+    "decisionClass": {"type": "string","enum": ["D0","D1","D2","D3","BENCHMARK"]},
+    "registryType": {"type": "string","enum": ["EVIDENCE_UNIT","ASSUMPTION","ALTERNATIVE_MODEL"]},
+    "projectionPhase": {"type": "string","enum": ["SEMANTIC","EVIDENCE_REGISTRY","ASSUMPTION_REGISTRY","ALTERNATIVE_MODEL_REGISTRY","DISPOSITION","QUARANTINE_COMMIT"]},
+    "dispositionAction": {"type": "string","enum": ["DOCUMENT_AND_PROCEED","FLAG_AND_PROCEED","ESCALATE_AND_HOLD","BLOCK","EXCLUDE_FROM_RELEASE"]}
+  },
+  "properties": {
+    "schema_version": {"const": "promotion-request/1"},
+    "request_id": {"$ref": "#/$defs/token"},
+    "source_release_id": {"$ref": "#/$defs/token"},
+    "source_release_manifest_digest": {"$ref": "#/$defs/digest"},
+    "target_release_class": {"$ref": "#/$defs/decisionClass"},
+    "requested_at_tick": {"$ref": "#/$defs/positiveInteger"},
+    "quarantine_epoch": {"$ref": "#/$defs/nonNegativeInteger"},
+    "current_semantic_root_digest": {"$ref": "#/$defs/digest"},
+    "current_disposition_root_digest": {"$ref": "#/$defs/digest"},
+    "current_registry_root_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence_unit": {"$ref": "#/$defs/digest"},
+        "assumption": {"$ref": "#/$defs/digest"},
+        "alternative_model": {"$ref": "#/$defs/digest"}
+      },
+      "required": ["evidence_unit","assumption","alternative_model"]
+    },
+    "requested_by": {"$ref": "#/$defs/token"},
+    "promotion_policy_digest": {"$ref": "#/$defs/digest"},
+    "promotion_request_digest": {"$ref": "#/$defs/digest"}
+  },
+  "required": ["schema_version","request_id","source_release_id","source_release_manifest_digest","target_release_class","requested_at_tick","quarantine_epoch","current_semantic_root_digest","current_disposition_root_digest","current_registry_root_digests","requested_by","promotion_policy_digest","promotion_request_digest"]
+}

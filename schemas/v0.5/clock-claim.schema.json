@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:clock-claim:1",
+  "title": "Atomic Clock Successor Claim",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "decisionClass": {
+      "type": "string",
+      "enum": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "BENCHMARK"
+      ]
+    },
+    "registryType": {
+      "type": "string",
+      "enum": [
+        "EVIDENCE_UNIT",
+        "ASSUMPTION",
+        "ALTERNATIVE_MODEL"
+      ]
+    },
+    "projectionPhase": {
+      "type": "string",
+      "enum": [
+        "SEMANTIC",
+        "EVIDENCE_REGISTRY",
+        "ASSUMPTION_REGISTRY",
+        "ALTERNATIVE_MODEL_REGISTRY",
+        "DISPOSITION",
+        "QUARANTINE_COMMIT"
+      ]
+    },
+    "dispositionAction": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT_AND_PROCEED",
+        "FLAG_AND_PROCEED",
+        "ESCALATE_AND_HOLD",
+        "BLOCK",
+        "EXCLUDE_FROM_RELEASE"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "clock-claim/1"
+    },
+    "attempt_id": {
+      "$ref": "#/$defs/token"
+    },
+    "previous_committed_sequence": {
+      "$ref": "#/$defs/nonNegativeInteger"
+    },
+    "previous_completion_digest": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/digest"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "proposed_sequence": {
+      "$ref": "#/$defs/positiveInteger"
+    },
+    "validated_event_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "claimant_id": {
+      "$ref": "#/$defs/token"
+    },
+    "claim_policy_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "clock_claim_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "attempt_id",
+    "previous_committed_sequence",
+    "previous_completion_digest",
+    "proposed_sequence",
+    "validated_event_digest",
+    "claimant_id",
+    "claim_policy_digest",
+    "clock_claim_digest"
+  ]
+}

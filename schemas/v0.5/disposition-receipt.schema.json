@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:disposition-receipt:1",
+  "title": "Disposition Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {"type": "string","pattern": "^sha256:[0-9a-f]{64}$"},
+    "nonNegativeInteger": {"type": "integer","minimum": 0},
+    "positiveInteger": {"type": "integer","minimum": 1},
+    "token": {"type": "string","pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
+    "decisionClass": {"type": "string","enum": ["D0","D1","D2","D3","BENCHMARK"]},
+    "registryType": {"type": "string","enum": ["EVIDENCE_UNIT","ASSUMPTION","ALTERNATIVE_MODEL"]},
+    "projectionPhase": {"type": "string","enum": ["SEMANTIC","EVIDENCE_REGISTRY","ASSUMPTION_REGISTRY","ALTERNATIVE_MODEL_REGISTRY","DISPOSITION","QUARANTINE_COMMIT"]},
+    "dispositionAction": {"type": "string","enum": ["DOCUMENT_AND_PROCEED","FLAG_AND_PROCEED","ESCALATE_AND_HOLD","BLOCK","EXCLUDE_FROM_RELEASE"]}
+  },
+  "properties": {
+    "schema_version": {"const": "disposition-receipt/1"},
+    "semantic_projection_receipt_digest": {"$ref": "#/$defs/digest"},
+    "clock_sequence": {"$ref": "#/$defs/positiveInteger"},
+    "decision_id": {"$ref": "#/$defs/token"},
+    "decision_class": {"$ref": "#/$defs/decisionClass"},
+    "registry_root_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence_unit": {"$ref": "#/$defs/digest"},
+        "assumption": {"$ref": "#/$defs/digest"},
+        "alternative_model": {"$ref": "#/$defs/digest"}
+      },
+      "required": ["evidence_unit","assumption","alternative_model"]
+    },
+    "assurance_status": {"type": "string","enum": ["UNASSESSED","ASSESSED_INVARIANT","ASSESSED_DIVERGENT","EVIDENCE_REQUIRED","CONTESTED"]},
+    "model_envelope_classification": {"type": "string","enum": ["NOT_APPLICABLE","INVARIANT","DIVERGENT","UNBOUNDED"]},
+    "disposition_action": {"$ref": "#/$defs/dispositionAction"},
+    "required_follow_up": {"type": "string"},
+    "disposition_policy_digest": {"$ref": "#/$defs/digest"},
+    "disposition_receipt_digest": {"$ref": "#/$defs/digest"}
+  },
+  "required": ["schema_version","semantic_projection_receipt_digest","clock_sequence","decision_id","decision_class","registry_root_digests","assurance_status","model_envelope_classification","disposition_action","required_follow_up","disposition_policy_digest","disposition_receipt_digest"]
+}

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:signature-set:1",
+  "title": "Signature Set",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "decisionClass": {
+      "type": "string",
+      "enum": [
+        "D0",
+        "D1",
+        "D2",
+        "D3",
+        "BENCHMARK"
+      ]
+    },
+    "registryType": {
+      "type": "string",
+      "enum": [
+        "EVIDENCE_UNIT",
+        "ASSUMPTION",
+        "ALTERNATIVE_MODEL"
+      ]
+    },
+    "projectionPhase": {
+      "type": "string",
+      "enum": [
+        "SEMANTIC",
+        "EVIDENCE_REGISTRY",
+        "ASSUMPTION_REGISTRY",
+        "ALTERNATIVE_MODEL_REGISTRY",
+        "DISPOSITION",
+        "QUARANTINE_COMMIT"
+      ]
+    },
+    "dispositionAction": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT_AND_PROCEED",
+        "FLAG_AND_PROCEED",
+        "ESCALATE_AND_HOLD",
+        "BLOCK",
+        "EXCLUDE_FROM_RELEASE"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "signature-set/1"
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "x-csd-collection-kind": "SET",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "signer_id": {
+            "$ref": "#/$defs/token"
+          },
+          "key_id": {
+            "$ref": "#/$defs/token"
+          },
+          "algorithm": {
+            "type": "string",
+            "enum": [
+              "ed25519",
+              "ecdsa-p256-sha256",
+              "rsa-pss-sha256"
+            ]
+          },
+          "signed_digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "signature_base64": {
+            "type": "string",
+            "minLength": 4
+          },
+          "authority_scope": {
+            "$ref": "#/$defs/token"
+          }
+        },
+        "required": [
+          "signer_id",
+          "key_id",
+          "algorithm",
+          "signed_digest",
+          "signature_base64",
+          "authority_scope"
+        ]
+      }
+    },
+    "signature_set_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "signatures",
+    "signature_set_digest"
+  ]
+}

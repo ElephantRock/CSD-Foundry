@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:csd-foundry:invalidation-event:1",
+  "title": "Invalidation Event",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {"type": "string","pattern": "^sha256:[0-9a-f]{64}$"},
+    "nonNegativeInteger": {"type": "integer","minimum": 0},
+    "positiveInteger": {"type": "integer","minimum": 1},
+    "token": {"type": "string","pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
+    "decisionClass": {"type": "string","enum": ["D0","D1","D2","D3","BENCHMARK"]},
+    "registryType": {"type": "string","enum": ["EVIDENCE_UNIT","ASSUMPTION","ALTERNATIVE_MODEL"]},
+    "projectionPhase": {"type": "string","enum": ["SEMANTIC","EVIDENCE_REGISTRY","ASSUMPTION_REGISTRY","ALTERNATIVE_MODEL_REGISTRY","DISPOSITION","QUARANTINE_COMMIT"]},
+    "dispositionAction": {"type": "string","enum": ["DOCUMENT_AND_PROCEED","FLAG_AND_PROCEED","ESCALATE_AND_HOLD","BLOCK","EXCLUDE_FROM_RELEASE"]}
+  },
+  "properties": {
+    "schema_version": {"const": "invalidation-event/1"},
+    "invalidation_id": {"$ref": "#/$defs/token"},
+    "cause_type": {"type": "string","enum": ["EVIDENCE_EXPIRED","EVIDENCE_CHALLENGED","ASSUMPTION_EXPIRED","ASSUMPTION_FALSIFICATION_TRIGGERED","ALTERNATIVE_MODEL_ADMITTED","VALIDATION_POLICY_SUPERSEDED","SEMANTIC_DEFECT","DISPOSITION_DEFECT","RELEASE_DEFECT"]},
+    "cause_digest": {"$ref": "#/$defs/digest"},
+    "source_clock_sequence": {"$ref": "#/$defs/positiveInteger"},
+    "affected_asset_index_digest": {"$ref": "#/$defs/digest"},
+    "invalidation_policy_digest": {"$ref": "#/$defs/digest"},
+    "invalidation_event_digest": {"$ref": "#/$defs/digest"}
+  },
+  "required": ["schema_version","invalidation_id","cause_type","cause_digest","source_clock_sequence","affected_asset_index_digest","invalidation_policy_digest","invalidation_event_digest"]
+}
