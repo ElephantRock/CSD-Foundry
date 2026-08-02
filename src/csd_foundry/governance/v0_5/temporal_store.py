@@ -8,10 +8,11 @@ import json
 import os
 import re
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Iterator, cast
+from typing import Any, cast
 
 from csd_foundry.governance.v0_5.canonicalization import GovernanceContractError
 from csd_foundry.governance.v0_5.contracts import (
