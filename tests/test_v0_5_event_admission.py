@@ -9,6 +9,7 @@ import pytest
 from csd_foundry.governance.v0_5.admission import (
     CommittedValidationContext,
     EventAdmissionEngine,
+    SignatureRecord,
     reconstruct_accepted,
     require_validated_event,
 )
@@ -18,6 +19,7 @@ from csd_foundry.governance.v0_5.admission_store import (
     InMemoryEventAdmissionStore,
 )
 from csd_foundry.governance.v0_5.admission_validation import (
+    DeterministicTestSignatureVerifier,
     ReferenceCommittedContextResolver,
     build_reference_admission_fixture,
     build_signature_set,
@@ -59,6 +61,52 @@ def test_runtime_admission_matches_frozen_evidence() -> None:
     assert report["reducer_boundary_enforced"] == committed_report["reducer_boundary_enforced"]
     assert report["restart_deterministic"] == committed_report["restart_deterministic"]
     assert report["status"] == committed_report["status"]
+
+
+def test_fixed_signature_vectors_are_verified_independently() -> None:
+    verifier = DeterministicTestSignatureVerifier()
+    records = admission_vectors()["signature_records"]
+    for value in records.values():
+        signature = SignatureRecord.from_json(value)
+        assert verifier.verify(signature, raw_event_digest=signature.signed_digest)
+
+
+def test_allowlisted_payload_must_match_declared_schema() -> None:
+    fixture = build_reference_admission_fixture()
+    malformed = cast(
+        RawEvent,
+        RawEvent.build(
+            {
+                "schema_version": "raw-event/1",
+                "event_id": "evt-malformed-advance-clock",
+                "event_type": "AdvanceClock",
+                "payload_schema_version": "advance-clock/1",
+                "payload": {"delta_ticks": "one"},
+                "submitted_against_tick": 41,
+            }
+        ),
+    )
+    signatures = build_signature_set(
+        malformed.digest,
+        (
+            make_signature(
+                signer_id="alice",
+                key_id="key-alice-1",
+                algorithm="ed25519",
+                signed_digest=malformed.digest,
+                authority_scope="csd.events",
+            ),
+        ),
+    )
+    outcome = fixture.engine.admit(
+        malformed,
+        signatures,
+        fixture.single_policy,
+        validated_at_tick=41,
+    )
+    assert outcome.accepted is None
+    assert outcome.failure is not None
+    assert "RAW_SCHEMA_REJECTED" in outcome.failure.to_json_value()["failure_codes"]
 
 
 def test_admission_emits_exactly_one_outcome() -> None:
