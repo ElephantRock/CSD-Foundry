@@ -782,8 +782,7 @@ def _snapshot_root(projections: dict[str, IndependentEvidenceProjection]) -> str
 
 def _domain_digest(domain: str, value: object) -> str:
     return (
-        "sha256:"
-        + hashlib.sha256(domain.encode("ascii") + b"\0" + _json_bytes(value)).hexdigest()
+        "sha256:" + hashlib.sha256(domain.encode("ascii") + b"\0" + _json_bytes(value)).hexdigest()
     )
 
 
