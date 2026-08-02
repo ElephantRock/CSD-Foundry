@@ -367,9 +367,9 @@ def validate_event_admission(release: str = "v0.5") -> AdmissionValidationReport
         accepted_receipts.append(outcome.accepted)
         bundle = reconstruct_accepted(outcome.accepted, fixture.store)
         if (
-            bundle.raw_event != fixture.raw_event
+            bundle.raw_event.canonical_bytes != fixture.raw_event.canonical_bytes
             or bundle.context.tick != 41
-            or bundle.receipt != outcome.accepted
+            or bundle.receipt.digest != outcome.accepted.digest
         ):
             errors.append("accepted receipt reconstruction changed pinned evidence")
         else:
