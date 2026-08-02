@@ -200,7 +200,10 @@ def validate_governance_contracts(release: str = "v0.5") -> GovernanceContractVa
             generated[name] = contract
             if expected_digests.get(name) != contract.digest:
                 errors.append(f"{name}: frozen generated-fixture digest changed")
-            if parse_contract(name, contract.to_json_value()).canonical_bytes != contract.canonical_bytes:
+            if (
+                parse_contract(name, contract.to_json_value()).canonical_bytes
+                != contract.canonical_bytes
+            ):
                 errors.append(f"{name}: parse/build canonical bytes diverged")
         except Exception as exc:
             errors.append(f"{name}: generated accepted fixture rejected: {exc}")
