@@ -604,7 +604,7 @@ def test_sequential_stale_state_conflict() -> None:
     # predecessor (genesis), which conflicts with the non-empty head.
     with pytest.raises(AssumptionPolicyPublicationConflict) as f:
         pub.publish(prepared=pb, expected_state=state)
-    assert f.value.code == "ASSUMPTION_POLICY_CHAIN_V3_FORK"
+    assert f.value.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
 
 
 def test_no_clobber_state_preserved_on_conflict() -> None:
@@ -1069,7 +1069,7 @@ def test_initial_ledger_stale_state_conflicts() -> None:
 def test_initial_ledger_foreign_type_rejects() -> None:
     with pytest.raises(AssumptionPolicyPublicationConflict) as f:
         InMemoryAssumptionPolicyPublisher(initial_ledger="not-a-ledger")  # type: ignore[arg-type]
-    assert f.value.code == "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
+    assert f.value.code == "ASSUMPTION_POLICY_LEDGER_VERSION_NOT_ACTIVATABLE"
 
 
 # ===========================================================================
@@ -1108,3 +1108,213 @@ def test_conflict_leaves_state_unchanged_genesis_with_predecessor() -> None:
     with pytest.raises(AssumptionPolicyPublicationConflict):
         pub.publish(prepared=prepared, expected_state=state)
     assert pub.read_state() == state_before
+
+
+# ===========================================================================
+# Correction 1: pure-function competing-genesis conflict
+# ===========================================================================
+
+
+def test_competing_genesis_pure_function_state_mismatch() -> None:
+    """Two distinct genesis candidates, same empty expected state. The first
+    commits; the second sees a STATE_MISMATCH (not FORK) because it was a
+    valid genesis candidate against the now-advanced ledger."""
+
+    pa = _entry(seq=10)
+    pb = _entry(seq=20)  # different genesis (no predecessor, different seq)
+    ledger = AssumptionPolicyLedgerV3.build(())
+    state = ExpectedPolicyLedgerStateV3.from_ledger(ledger)
+
+    # First candidate commits.
+    updated, result_a = compare_and_append_policy_entry_v3(
+        ledger=ledger,
+        expected_state=state,
+        candidate=pa,
+    )
+    assert result_a.append_result == "COMMITTED"
+
+    # Second candidate with the same stale empty state gets STATE_MISMATCH.
+    with pytest.raises(AssumptionPolicyPublicationConflict) as f:
+        compare_and_append_policy_entry_v3(
+            ledger=updated,
+            expected_state=state,
+            candidate=pb,
+        )
+    assert f.value.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
+
+
+# ===========================================================================
+# Correction 2: exact concurrent loser code + winner identification
+# ===========================================================================
+
+
+def _run_distinct_candidate_race(
+    *,
+    publisher,
+    prepared_a,
+    prepared_b,
+    expected_state,
+):
+    """Run two threads racing to publish distinct candidates. Return (winner, loser)."""
+
+    import queue
+    import threading
+
+    barrier = threading.Barrier(2)
+    results_q: queue.Queue = queue.Queue()  # type: ignore[type-arg]
+
+    def worker(prepared):
+        barrier.wait()
+        try:
+            r = publisher.publish(prepared=prepared, expected_state=expected_state)
+            results_q.put(("OK", prepared, r))
+        except Exception as exc:
+            results_q.put(("EXC", prepared, exc))
+
+    t1 = threading.Thread(target=worker, args=(prepared_a,))
+    t2 = threading.Thread(target=worker, args=(prepared_b,))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+    assert not t1.is_alive(), "thread 1 hung"
+    assert not t2.is_alive(), "thread 2 hung"
+
+    outcomes = []
+    while not results_q.empty():
+        outcomes.append(results_q.get_nowait())
+    assert len(outcomes) == 2
+    successes = [(p, r) for tag, p, r in outcomes if tag == "OK"]
+    failures = [exc for tag, _, exc in outcomes if tag == "EXC"]
+    assert len(successes) == 1, f"expected 1 success, got {successes}"
+    assert len(failures) == 1, f"expected 1 failure, got {failures}"
+    return successes[0], failures[0]
+
+
+def test_concurrent_distinct_candidates_exact_loser_code() -> None:
+    pub = InMemoryAssumptionPolicyPublisher()
+    pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
+    pb = _prepared_activation(("authority:a", "authority:b"), seq=20)
+    state = pub.read_state()
+
+    (winner_prepared, winner_result), loser_exc = _run_distinct_candidate_race(
+        publisher=pub,
+        prepared_a=pa,
+        prepared_b=pb,
+        expected_state=state,
+    )
+
+    assert winner_result.append_result == "COMMITTED"
+    assert type(loser_exc) is AssumptionPolicyPublicationConflict
+    assert loser_exc.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
+
+    ledger = pub.read_ledger()
+    assert len(ledger.entries) == 1
+    assert ledger.entries[0].ledger_entry_digest == winner_prepared.ledger_entry.ledger_entry_digest
+    assert pub.read_state().ledger_root_digest == winner_result.resulting_ledger_root
+
+    loser_digest = (
+        pb.ledger_entry.ledger_entry_digest
+        if winner_prepared is pa
+        else pa.ledger_entry.ledger_entry_digest
+    )
+    assert ledger.entries[0].ledger_entry_digest != loser_digest
+
+
+# ===========================================================================
+# Correction 3: genuinely concurrent repeated contention
+# ===========================================================================
+
+
+def test_repeated_concurrent_contention_25_rounds() -> None:
+    for _round in range(25):
+        pub = InMemoryAssumptionPolicyPublisher()
+        pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
+        pb = _prepared_activation(("authority:a", "authority:b"), seq=20)
+        state = pub.read_state()
+
+        (winner_prepared, winner_result), loser_exc = _run_distinct_candidate_race(
+            publisher=pub,
+            prepared_a=pa,
+            prepared_b=pb,
+            expected_state=state,
+        )
+        assert winner_result.append_result == "COMMITTED"
+        assert loser_exc.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
+
+        ledger = pub.read_ledger()
+        assert len(ledger.entries) == 1
+        assert pub.read_state().ledger_root_digest == winner_result.resulting_ledger_root
+
+
+# ===========================================================================
+# Correction 4: strengthened concurrent exact-retry test
+# ===========================================================================
+
+
+def test_concurrent_exact_retry_multiset_and_shared_digests() -> None:
+    import queue
+    import threading
+
+    pub = InMemoryAssumptionPolicyPublisher()
+    pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
+    state = pub.read_state()
+
+    barrier = threading.Barrier(2)
+    results_q: queue.Queue = queue.Queue()  # type: ignore[type-arg]
+
+    def worker(prepared):
+        barrier.wait()
+        try:
+            r = pub.publish(prepared=prepared, expected_state=state)
+            results_q.put(("OK", r))
+        except Exception as exc:
+            results_q.put(("EXC", exc))
+
+    t1 = threading.Thread(target=worker, args=(pa,))
+    t2 = threading.Thread(target=worker, args=(pa,))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+    assert not t1.is_alive()
+    assert not t2.is_alive()
+
+    outcomes = []
+    while not results_q.empty():
+        outcomes.append(results_q.get_nowait())
+    assert len(outcomes) == 2
+    assert all(tag == "OK" for tag, _ in outcomes), "unexpected exception"
+    results = [r for _, r in outcomes]
+    assert sorted(r.append_result for r in results) == ["COMMITTED", "IDEMPOTENT_APPEND"]
+    # Both name the same entry digest and root.
+    assert results[0].ledger_entry_digest == results[1].ledger_entry_digest
+    assert results[0].resulting_ledger_root == results[1].resulting_ledger_root
+    # Final publisher root equals that root.
+    ledger = pub.read_ledger()
+    assert len(ledger.entries) == 1
+    assert pub.read_state().ledger_root_digest == results[0].resulting_ledger_root
+
+
+# ===========================================================================
+# Correction 5: V3 protocol conformance
+# ===========================================================================
+
+
+def test_service_conforms_to_v3_protocol() -> None:
+    """Strict mypy verifies this at compile time; the runtime check confirms
+    the concrete service is an instance of the protocol class."""
+    from csd_foundry.governance.v0_5.assumption_policy_activation_publication import (
+        AssumptionPolicyActivationServiceV3,
+    )
+
+    prep = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=_SKR((_vkey("key:a", b"pk-a"),)),
+        authority_resolver=_SAR((_auth("authority:a", "key:a"),)),
+        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    )
+    pub = InMemoryAssumptionPolicyPublisher()
+    service = ReferenceAssumptionPolicyActivationService(preparer=prep, publisher=pub)
+    # mypy verifies structural conformance at compile time; the concrete class
+    # explicitly inherits from the protocol, so issubclass confirms the link.
+    assert issubclass(type(service), AssumptionPolicyActivationServiceV3)

@@ -43,7 +43,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from threading import RLock
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     AssumptionChallengeClassificationPolicy,
@@ -198,6 +198,17 @@ def compare_and_append_policy_entry_v3(
     # 2. Expected root/head comparison.
     actual_state = ExpectedPolicyLedgerStateV3.from_ledger(ledger)
     if expected_state != actual_state:
+        expected_empty = (
+            expected_state.head_entry_digest is None
+            and expected_state.ledger_root_digest
+            == AssumptionPolicyLedgerV3.build(()).ledger_root_digest
+        )
+        candidate_is_genesis = (
+            candidate.signing_payload.predecessor_policy_digest is None
+            and candidate.signing_payload.predecessor_commit_receipt_digest is None
+        )
+        if expected_empty and candidate_is_genesis:
+            raise AssumptionPolicyPublicationConflict("ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH")
         if ledger.entries:
             current_head = ledger.entries[-1]
             candidate_predecessor_policy = candidate.signing_payload.predecessor_policy_digest
@@ -240,6 +251,7 @@ def compare_and_append_policy_entry_v3(
 # --- 4. V3 service protocol ------------------------------------------------
 
 
+@runtime_checkable
 class AssumptionPolicyActivationServiceV3(Protocol):
     """V3 success-only prepare/publish API for the executable A1 implementation."""
 
@@ -303,7 +315,7 @@ class InMemoryAssumptionPolicyPublisher:
         if initial_ledger is not None:
             if type(initial_ledger) is not AssumptionPolicyLedgerV3:
                 raise AssumptionPolicyPublicationConflict(
-                    "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
+                    "ASSUMPTION_POLICY_LEDGER_VERSION_NOT_ACTIVATABLE"
                 )
             self._ledger = initial_ledger
         else:
@@ -347,7 +359,9 @@ class InMemoryAssumptionPolicyPublisher:
 
 
 @dataclass(frozen=True, slots=True)
-class ReferenceAssumptionPolicyActivationService:
+class ReferenceAssumptionPolicyActivationService(
+    AssumptionPolicyActivationServiceV3,
+):
     """Composes the V3 preparer with a V3 publisher.
 
     Implements the full ``prepare`` + ``publish`` activation path. The
