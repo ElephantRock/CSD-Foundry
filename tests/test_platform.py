@@ -74,9 +74,9 @@ def test_advisory_lock_serializes_independent_processes(tmp_path: Path) -> None:
     """
 
     lock_path = tmp_path / "serialize.lock"
-    queue: mp.Queue = mp.Queue()  # type: ignore[type-arg]
-
     ctx = mp.get_context("spawn")
+    queue: mp.Queue = ctx.Queue()  # type: ignore[type-arg]
+
     # A holds long enough that B's spawn latency cannot let it sneak in.
     proc_a = ctx.Process(
         target=_lock_worker,
