@@ -1155,7 +1155,10 @@ def _run_distinct_candidate_race(
     prepared_b,
     expected_state,
 ):
-    """Run two threads racing to publish distinct candidates. Return (winner, loser)."""
+    """Run two threads racing to publish distinct candidates.
+
+    Returns ((winner_prepared, winner_result), (loser_prepared, loser_exception)).
+    """
 
     import queue
     import threading
@@ -1185,7 +1188,7 @@ def _run_distinct_candidate_race(
         outcomes.append(results_q.get_nowait())
     assert len(outcomes) == 2
     successes = [(p, r) for tag, p, r in outcomes if tag == "OK"]
-    failures = [exc for tag, _, exc in outcomes if tag == "EXC"]
+    failures = [(p, exc) for tag, p, exc in outcomes if tag == "EXC"]
     assert len(successes) == 1, f"expected 1 success, got {successes}"
     assert len(failures) == 1, f"expected 1 failure, got {failures}"
     return successes[0], failures[0]
@@ -1197,7 +1200,13 @@ def test_concurrent_distinct_candidates_exact_loser_code() -> None:
     pb = _prepared_activation(("authority:a", "authority:b"), seq=20)
     state = pub.read_state()
 
-    (winner_prepared, winner_result), loser_exc = _run_distinct_candidate_race(
+    (
+        (winner_prepared, winner_result),
+        (
+            loser_prepared,
+            loser_exception,
+        ),
+    ) = _run_distinct_candidate_race(
         publisher=pub,
         prepared_a=pa,
         prepared_b=pb,
@@ -1205,20 +1214,18 @@ def test_concurrent_distinct_candidates_exact_loser_code() -> None:
     )
 
     assert winner_result.append_result == "COMMITTED"
-    assert type(loser_exc) is AssumptionPolicyPublicationConflict
-    assert loser_exc.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
+    assert type(loser_exception) is AssumptionPolicyPublicationConflict
+    assert loser_exception.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
 
     ledger = pub.read_ledger()
+    state_after = pub.read_state()
     assert len(ledger.entries) == 1
-    assert ledger.entries[0].ledger_entry_digest == winner_prepared.ledger_entry.ledger_entry_digest
-    assert pub.read_state().ledger_root_digest == winner_result.resulting_ledger_root
-
-    loser_digest = (
-        pb.ledger_entry.ledger_entry_digest
-        if winner_prepared is pa
-        else pa.ledger_entry.ledger_entry_digest
+    assert state_after.head_entry_digest == winner_prepared.ledger_entry.ledger_entry_digest
+    assert state_after.ledger_root_digest == winner_result.resulting_ledger_root
+    assert all(
+        entry.ledger_entry_digest != loser_prepared.ledger_entry.ledger_entry_digest
+        for entry in ledger.entries
     )
-    assert ledger.entries[0].ledger_entry_digest != loser_digest
 
 
 # ===========================================================================
@@ -1233,18 +1240,31 @@ def test_repeated_concurrent_contention_25_rounds() -> None:
         pb = _prepared_activation(("authority:a", "authority:b"), seq=20)
         state = pub.read_state()
 
-        (winner_prepared, winner_result), loser_exc = _run_distinct_candidate_race(
+        (
+            (winner_prepared, winner_result),
+            (
+                loser_prepared,
+                loser_exception,
+            ),
+        ) = _run_distinct_candidate_race(
             publisher=pub,
             prepared_a=pa,
             prepared_b=pb,
             expected_state=state,
         )
         assert winner_result.append_result == "COMMITTED"
-        assert loser_exc.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
+        assert type(loser_exception) is AssumptionPolicyPublicationConflict
+        assert loser_exception.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
 
         ledger = pub.read_ledger()
+        state_after = pub.read_state()
         assert len(ledger.entries) == 1
-        assert pub.read_state().ledger_root_digest == winner_result.resulting_ledger_root
+        assert state_after.head_entry_digest == winner_prepared.ledger_entry.ledger_entry_digest
+        assert state_after.ledger_root_digest == winner_result.resulting_ledger_root
+        assert all(
+            entry.ledger_entry_digest != loser_prepared.ledger_entry.ledger_entry_digest
+            for entry in ledger.entries
+        )
 
 
 # ===========================================================================
