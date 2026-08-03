@@ -134,9 +134,7 @@ class AssumptionAuthorityPolicyCommitV2:
             "approval_class": approval_class,
             "approval_policy_digest": approval_policy_digest,
             "authority_root_digest": policy.authority_root_digest,
-            "challenge_classification_policy_digest": (
-                challenge_classification_policy_digest
-            ),
+            "challenge_classification_policy_digest": (challenge_classification_policy_digest),
             "effective_from_sequence": effective_from_sequence,
             "exception_count": len(policy.duty_exceptions),
             "exception_set_digest": policy.exception_set_digest,
@@ -163,13 +161,9 @@ class AssumptionAuthorityPolicyCommitV2:
             effective_from_sequence=effective_from_sequence,
             approval_policy_digest=approval_policy_digest,
             signature_profile_digest=signature_profile_digest,
-            challenge_classification_policy_digest=(
-                challenge_classification_policy_digest
-            ),
+            challenge_classification_policy_digest=(challenge_classification_policy_digest),
             signature_set_digest=signature_set_digest,
-            commit_receipt_digest=domain_digest(
-                "ASSUMPTION_AUTHORITY_POLICY_COMMIT_V2", unsigned
-            ),
+            commit_receipt_digest=domain_digest("ASSUMPTION_AUTHORITY_POLICY_COMMIT_V2", unsigned),
         )
 
     def _unsigned_value(self) -> dict[str, object]:
@@ -178,18 +172,14 @@ class AssumptionAuthorityPolicyCommitV2:
             "approval_class": self.approval_class,
             "approval_policy_digest": self.approval_policy_digest,
             "authority_root_digest": self.authority_root_digest,
-            "challenge_classification_policy_digest": (
-                self.challenge_classification_policy_digest
-            ),
+            "challenge_classification_policy_digest": (self.challenge_classification_policy_digest),
             "effective_from_sequence": self.effective_from_sequence,
             "exception_count": self.exception_count,
             "exception_set_digest": self.exception_set_digest,
             "grant_set_digest": self.grant_set_digest,
             "policy_digest": self.policy_digest,
             "policy_id": self.policy_id,
-            "predecessor_commit_receipt_digest": (
-                self.predecessor_commit_receipt_digest
-            ),
+            "predecessor_commit_receipt_digest": (self.predecessor_commit_receipt_digest),
             "predecessor_policy_digest": self.predecessor_policy_digest,
             "separation_duty_rule_set_digest": (self.separation_duty_rule_set_digest),
             "signature_profile_digest": self.signature_profile_digest,
@@ -284,9 +274,7 @@ class AssumptionPolicyActivationProof:
             "approval_policy_digest": approval_policy_digest,
             "approval_rule_digest": approval_rule_digest,
             "authority_root_digest": authority_root_digest,
-            "challenge_classification_policy_digest": (
-                challenge_classification_policy_digest
-            ),
+            "challenge_classification_policy_digest": (challenge_classification_policy_digest),
             "policy_commit_receipt_digest": policy_commit_receipt_digest,
             "rejected_signer_codes": list(rejected),
             "signature_profile_digest": signature_profile_digest,
@@ -298,16 +286,12 @@ class AssumptionPolicyActivationProof:
             approval_policy_digest=approval_policy_digest,
             approval_rule_digest=approval_rule_digest,
             signature_profile_digest=signature_profile_digest,
-            challenge_classification_policy_digest=(
-                challenge_classification_policy_digest
-            ),
+            challenge_classification_policy_digest=(challenge_classification_policy_digest),
             authority_root_digest=authority_root_digest,
             signature_set_digest=signature_set_digest,
             valid_signer_ids=signers,
             rejected_signer_codes=rejected,
-            activation_proof_digest=domain_digest(
-                "ASSUMPTION_POLICY_ACTIVATION_PROOF", unsigned
-            ),
+            activation_proof_digest=domain_digest("ASSUMPTION_POLICY_ACTIVATION_PROOF", unsigned),
         )
 
     def _unsigned_value(self) -> dict[str, object]:
@@ -316,9 +300,7 @@ class AssumptionPolicyActivationProof:
             "approval_policy_digest": self.approval_policy_digest,
             "approval_rule_digest": self.approval_rule_digest,
             "authority_root_digest": self.authority_root_digest,
-            "challenge_classification_policy_digest": (
-                self.challenge_classification_policy_digest
-            ),
+            "challenge_classification_policy_digest": (self.challenge_classification_policy_digest),
             "policy_commit_receipt_digest": self.policy_commit_receipt_digest,
             "rejected_signer_codes": list(self.rejected_signer_codes),
             "signature_profile_digest": self.signature_profile_digest,
@@ -411,9 +393,7 @@ class AssumptionPolicyLedgerEntryV2:
             signature_profile=signature_profile,
             challenge_classification_policy=challenge_classification_policy,
             activation_proof=activation_proof,
-            ledger_entry_digest=domain_digest(
-                "ASSUMPTION_POLICY_LEDGER_ENTRY_V2", unsigned
-            ),
+            ledger_entry_digest=domain_digest("ASSUMPTION_POLICY_LEDGER_ENTRY_V2", unsigned),
         )
 
     def _unsigned_value(self) -> dict[str, object]:
@@ -459,9 +439,7 @@ class AssumptionPolicyLedgerV2:
         )
 
     @classmethod
-    def build(
-        cls, entries: tuple[AssumptionPolicyLedgerEntryV2, ...]
-    ) -> AssumptionPolicyLedgerV2:
+    def build(cls, entries: tuple[AssumptionPolicyLedgerEntryV2, ...]) -> AssumptionPolicyLedgerV2:
         ordered = order_policy_entries(entries)
         unsigned = {
             "schema_version": POLICY_LEDGER_V2_SCHEMA_VERSION,
@@ -547,9 +525,7 @@ class AssumptionPolicyActivationResult:
             ledger_entry_digest=ledger_entry_digest,
             predecessor_ledger_root=predecessor_ledger_root,
             resulting_ledger_root=resulting_ledger_root,
-            result_digest=domain_digest(
-                "ASSUMPTION_POLICY_ACTIVATION_RESULT", unsigned
-            ),
+            result_digest=domain_digest("ASSUMPTION_POLICY_ACTIVATION_RESULT", unsigned),
         )
 
     def _unsigned_value(self) -> dict[str, object]:
