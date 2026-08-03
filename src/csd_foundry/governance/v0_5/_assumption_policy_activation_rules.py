@@ -18,6 +18,7 @@ from csd_foundry.governance.v0_5.assumption_governance_contracts import (
     RESOLUTION_AUTHORITY_ACTIONS,
     AssumptionAuthorityGrant,
     AssumptionAuthorityPolicy,
+    AssumptionDutyException,
 )
 from csd_foundry.governance.v0_5.contracts import RegistryEvent
 
@@ -37,6 +38,14 @@ def validate_policy_overlap(policy: AssumptionAuthorityPolicy) -> None:
                 pair = ",".join(sorted((left.grant_id, right.grant_id)))
                 raise AssumptionPolicyActivationContractError(
                     "ASSUMPTION_AUTHORITY_GRANT_OVERLAP",
+                    pair,
+                )
+    for index, left in enumerate(policy.duty_exceptions):
+        for right in policy.duty_exceptions[index + 1 :]:
+            if duty_exceptions_overlap(left, right):
+                pair = ",".join(sorted((left.exception_id, right.exception_id)))
+                raise AssumptionPolicyActivationContractError(
+                    "ASSUMPTION_DUTY_EXCEPTION_OVERLAP",
                     pair,
                 )
 
@@ -67,6 +76,34 @@ def grants_overlap(
     return bool(challenge_materialities.intersection(right.challenge_materialities))
 
 
+def duty_exceptions_overlap(
+    left: AssumptionDutyException,
+    right: AssumptionDutyException,
+) -> bool:
+    if left.rule_id != right.rule_id:
+        return False
+    if left.action != right.action or left.authority_id != right.authority_id:
+        return False
+    if not _intervals_overlap(
+        left.effective_from_sequence,
+        left.effective_until_sequence,
+        right.effective_from_sequence,
+        right.effective_until_sequence,
+    ):
+        return False
+    if not _scopes_intersect(left.scope_ids, right.scope_ids):
+        return False
+    if not set(left.assumption_materialities).intersection(
+        right.assumption_materialities
+    ):
+        return False
+    if not set(left.conflicting_roles).intersection(right.conflicting_roles):
+        return False
+    if not left.assumption_ids or not right.assumption_ids:
+        return True
+    return bool(set(left.assumption_ids).intersection(right.assumption_ids))
+
+
 def derive_resolution_challenge_materialities(
     assumption: Assumption,
     candidate_event: RegistryEvent,
@@ -74,20 +111,33 @@ def derive_resolution_challenge_materialities(
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     value = candidate_event.to_json_value()
     if value.get("entity_id") != assumption.assumption_id:
-        raise AssumptionPolicyActivationContractError("ASSUMPTION_RESOLUTION_IDENTITY_MISMATCH")
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_RESOLUTION_IDENTITY_MISMATCH"
+        )
     predecessor = value.get("previous_entity_event_digest")
     if predecessor != assumption.current_event_digest:
-        raise AssumptionPolicyActivationContractError("ASSUMPTION_RESOLUTION_HEAD_MISMATCH")
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_RESOLUTION_HEAD_MISMATCH"
+        )
     payload = cast(dict[str, Any], value.get("payload"))
     if payload.get("operation") != "RESOLVE_CHALLENGES":
-        raise AssumptionPolicyActivationContractError("ASSUMPTION_RESOLUTION_OPERATION_INVALID")
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_RESOLUTION_OPERATION_INVALID"
+        )
     raw_ids = payload.get("resolved_challenge_ids")
     if type(raw_ids) is not list or not raw_ids:
-        raise AssumptionPolicyActivationContractError("ASSUMPTION_RESOLVED_CHALLENGES_INVALID")
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_RESOLVED_CHALLENGES_INVALID"
+        )
     resolved_ids = tuple(sorted(cast(list[str], raw_ids)))
     if len(set(resolved_ids)) != len(resolved_ids):
-        raise AssumptionPolicyActivationContractError("ASSUMPTION_RESOLVED_CHALLENGES_INVALID")
-    current = {challenge.challenge_id: challenge for challenge in assumption.active_challenges}
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_RESOLVED_CHALLENGES_INVALID"
+        )
+    current = {
+        challenge.challenge_id: challenge
+        for challenge in assumption.active_challenges
+    }
     unknown = sorted(set(resolved_ids).difference(current))
     if unknown:
         raise AssumptionPolicyActivationContractError(
@@ -95,7 +145,10 @@ def derive_resolution_challenge_materialities(
             unknown[0],
         )
     materialities = tuple(
-        sorted(classification_policy.classify(current[item].reason_code) for item in resolved_ids)
+        sorted(
+            classification_policy.classify(current[item].reason_code)
+            for item in resolved_ids
+        )
     )
     return resolved_ids, materialities
 
@@ -105,12 +158,15 @@ def validate_entry_position_sequence(
     candidate: AssumptionPolicyLedgerEntryV2,
 ) -> None:
     predecessor_matches = (
-        candidate.policy_commit.predecessor_policy_digest == head.policy.policy_digest
+        candidate.policy_commit.predecessor_policy_digest
+        == head.policy.policy_digest
         and candidate.policy_commit.predecessor_commit_receipt_digest
         == head.policy_commit.commit_receipt_digest
     )
     if not predecessor_matches:
-        raise AssumptionPolicyActivationContractError("ASSUMPTION_POLICY_CHAIN_FORK")
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_POLICY_CHAIN_FORK"
+        )
     if (
         candidate.policy_commit.effective_from_sequence
         <= head.policy_commit.effective_from_sequence
