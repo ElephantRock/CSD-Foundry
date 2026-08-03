@@ -31,7 +31,6 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     AssumptionChallengeClassificationPolicy,
     AssumptionPolicyActivationContractError,
     AssumptionPolicySignatureProfile,
-    domain_digest,
     require_digest,
     require_token,
 )
@@ -51,6 +50,7 @@ from csd_foundry.governance.v0_5.assumption_governance_contracts import (
     AssumptionAuthorityPolicy,
 )
 from csd_foundry.governance.v0_5.assumption_governance_execution_contracts import (
+    AssumptionGovernanceExecutionContractError,
     AssumptionPolicyApprovalPolicy,
     AssumptionPolicyApprovalRule,
 )
@@ -355,28 +355,40 @@ class ReferenceAssumptionPolicyActivationPreparer:
         )
 
         # Stage: ACTIVATION_PROOF_AND_ENTRY
-        proof = AssumptionPolicyActivationProofV2.build(
-            signing_payload_digest=signing_payload.signing_payload_digest,
-            policy_commit_receipt_digest=commit.commit_receipt_digest,
-            approval_policy_digest=approval_policy.approval_policy_digest,
-            approval_rule_digest=approval_rule.rule_digest,
-            signature_profile_digest=signature_profile.profile_digest,
-            challenge_classification_policy_digest=challenge_policy.policy_digest,
-            authority_root_digest=policy.authority_root_digest,
-            signature_set_digest=commit.signature_set_digest,
-            valid_signer_ids=valid_signer_ids,
-            rejected_signer_codes=rejected_signer_codes,
-        )
-        entry = AssumptionPolicyLedgerEntryV3.build(
-            policy=policy,
-            signing_payload=signing_payload,
-            policy_commit=commit,
-            approval_policy=approval_policy,
-            signature_profile=signature_profile,
-            challenge_classification_policy=challenge_policy,
-            activation_proof=proof,
-        )
-        return _build_prepared_activation(entry)
+        try:
+            proof = AssumptionPolicyActivationProofV2.build(
+                signing_payload_digest=signing_payload.signing_payload_digest,
+                policy_commit_receipt_digest=commit.commit_receipt_digest,
+                approval_policy_digest=approval_policy.approval_policy_digest,
+                approval_rule_digest=approval_rule.rule_digest,
+                signature_profile_digest=signature_profile.profile_digest,
+                challenge_classification_policy_digest=challenge_policy.policy_digest,
+                authority_root_digest=policy.authority_root_digest,
+                signature_set_digest=commit.signature_set_digest,
+                valid_signer_ids=valid_signer_ids,
+                rejected_signer_codes=rejected_signer_codes,
+            )
+            entry = AssumptionPolicyLedgerEntryV3.build(
+                policy=policy,
+                signing_payload=signing_payload,
+                policy_commit=commit,
+                approval_policy=approval_policy,
+                signature_profile=signature_profile,
+                challenge_classification_policy=challenge_policy,
+                activation_proof=proof,
+            )
+            return PreparedPolicyActivation.build(entry)
+        except AssumptionPolicyActivationDenied:
+            raise
+        except (
+            AssumptionPolicyActivationContractError,
+            AssumptionGovernanceExecutionContractError,
+        ) as exc:
+            raise AssumptionPolicyActivationDenied(
+                code=exc.code,
+                stage="ACTIVATION_PROOF_AND_ENTRY",
+                detail=exc.detail,
+            ) from exc
 
 
 # --- stage helpers ---------------------------------------------------------
@@ -467,7 +479,10 @@ def _resolve_approval_rule(
 ) -> AssumptionPolicyApprovalRule:
     try:
         return approval_policy.rule_for(signing_payload.approval_class)
-    except AssumptionPolicyActivationContractError as exc:  # pragma: no cover
+    except (
+        AssumptionPolicyActivationContractError,
+        AssumptionGovernanceExecutionContractError,
+    ) as exc:
         raise AssumptionPolicyActivationDenied(
             code=exc.code,
             stage="RESOLVE_APPROVAL_PROFILE_CLASSIFICATION_AND_SIGNATURE_SET",
@@ -670,21 +685,33 @@ def _verify_one_record(
     authority_resolver: AssumptionPolicySignerAuthorityResolver,
     signature_verifier: AssumptionPolicySignatureVerifier,
 ) -> str | None:
-    # CRYPTOGRAPHIC_VERIFICATION: resolve key material, then verify signature.
-    resolved_key = key_resolver.resolve(
-        key_id=record.key_id,
-        algorithm=record.algorithm,
-        key_authority_root_digest=signature_profile.key_authority_root_digest,
-    )
+    # CRYPTOGRAPHIC_VERIFICATION: resolve key material, revalidate, then verify.
+    try:
+        resolved_key = key_resolver.resolve(
+            key_id=record.key_id,
+            algorithm=record.algorithm,
+            key_authority_root_digest=signature_profile.key_authority_root_digest,
+        )
+    except Exception:
+        return "ASSUMPTION_POLICY_SIGNER_UNKNOWN"
     if resolved_key is None:
         return "ASSUMPTION_POLICY_SIGNER_UNKNOWN"
+    # Revalidate resolver output against the request parameters.
+    if resolved_key.key_id != record.key_id:
+        return "ASSUMPTION_POLICY_KEY_ID_MISMATCH"
     if resolved_key.algorithm != record.algorithm:
         return "ASSUMPTION_POLICY_KEY_ALGORITHM_INCOMPATIBLE"
+    if resolved_key.key_authority_root_digest != signature_profile.key_authority_root_digest:
+        return "ASSUMPTION_POLICY_KEY_AUTHORITY_ROOT_MISMATCH"
 
-    if not signature_verifier.supports(
-        algorithm=record.algorithm,
-        verification_profile=record.verification_profile,
-    ):
+    try:
+        supported = signature_verifier.supports(
+            algorithm=record.algorithm,
+            verification_profile=record.verification_profile,
+        )
+    except Exception:
+        return "ASSUMPTION_POLICY_SIGNATURE_PROFILE_UNSUPPORTED"
+    if not supported:
         return "ASSUMPTION_POLICY_SIGNATURE_PROFILE_UNSUPPORTED"
     try:
         verified = signature_verifier.verify(
@@ -699,16 +726,22 @@ def _verify_one_record(
     if not verified:
         return "ASSUMPTION_POLICY_SIGNATURE_INVALID"
 
-    # SIGNER_AUTHORITY: resolve authority, check scope/algorithm/validity/revocation.
-    authority = authority_resolver.resolve(
-        signer_id=record.signer_id,
-        key_id=record.key_id,
-        authority_root_digest=signing_payload.authority_root_digest,
-    )
+    # SIGNER_AUTHORITY: resolve authority, revalidate, check scope/algorithm/validity/revocation.
+    try:
+        authority = authority_resolver.resolve(
+            signer_id=record.signer_id,
+            key_id=record.key_id,
+            authority_root_digest=signing_payload.authority_root_digest,
+        )
+    except Exception:
+        return "ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED"
     if authority is None:
         return "ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED"
+    # Revalidate resolver output against the request parameters.
     if authority.signer_id != record.signer_id or authority.key_id != record.key_id:
         return "ASSUMPTION_POLICY_SIGNER_KEY_MISMATCH"
+    if authority.authority_root_digest != signing_payload.authority_root_digest:
+        return "ASSUMPTION_POLICY_SIGNER_AUTHORITY_ROOT_MISMATCH"
     if record.algorithm not in authority.algorithms:
         return "ASSUMPTION_POLICY_SIGNER_ALGORITHM_UNAUTHORIZED"
     if signature_profile.required_authority_scope not in authority.authority_scopes:
@@ -729,52 +762,34 @@ def _validate_approval_threshold(
     signing_payload: AssumptionPolicySigningPayload,
     valid_signer_ids: tuple[str, ...],
 ) -> None:
-    rule = approval_policy.rule_for(signing_payload.approval_class)
+    try:
+        rule = approval_policy.rule_for(signing_payload.approval_class)
+    except AssumptionGovernanceExecutionContractError as exc:
+        raise AssumptionPolicyActivationDenied(
+            code=exc.code,
+            stage="THRESHOLD_AND_REQUIRED_SIGNERS",
+            detail=exc.detail,
+        ) from exc
     signers = set(valid_signer_ids)
     ineligible = sorted(signers.difference(rule.eligible_signer_ids))
     if ineligible:
         raise AssumptionPolicyActivationDenied(
-            code="ASSUMPTION_POLICY_APPROVAL_SIGNER_INELIGIBLE",
+            code="ASSUMPTION_APPROVAL_SIGNER_INELIGIBLE",
             stage="THRESHOLD_AND_REQUIRED_SIGNERS",
             detail=ineligible[0],
         )
     if len(signers) < rule.required_signature_count:
         raise AssumptionPolicyActivationDenied(
-            code="ASSUMPTION_POLICY_APPROVAL_THRESHOLD_NOT_MET",
+            code="ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET",
             stage="THRESHOLD_AND_REQUIRED_SIGNERS",
         )
     missing_required = sorted(set(rule.required_signer_ids).difference(signers))
     if missing_required:
         raise AssumptionPolicyActivationDenied(
-            code="ASSUMPTION_POLICY_APPROVAL_REQUIRED_SIGNER_MISSING",
+            code="ASSUMPTION_APPROVAL_REQUIRED_SIGNER_MISSING",
             stage="THRESHOLD_AND_REQUIRED_SIGNERS",
             detail=missing_required[0],
         )
-
-
-def _build_prepared_activation(
-    entry: AssumptionPolicyLedgerEntryV3,
-) -> PreparedPolicyActivation:
-    """Build a PreparedPolicyActivation carrying a V3 entry.
-
-    ``PreparedPolicyActivation.build`` in hardening.py is typed for V2 entries;
-    the V3 entry has the same ``ledger_entry_digest`` and ``canonical_bytes``
-    surface. We construct the dataclass directly to avoid weakening the V2 type
-    annotation in the frozen hardening module.
-    """
-
-    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
-        PREPARED_POLICY_ACTIVATION_SCHEMA_VERSION,
-    )
-
-    unsigned = {
-        "schema_version": PREPARED_POLICY_ACTIVATION_SCHEMA_VERSION,
-        "ledger_entry_digest": entry.ledger_entry_digest,
-    }
-    return PreparedPolicyActivation(
-        ledger_entry=entry,  # type: ignore[arg-type]
-        prepared_digest=domain_digest("PREPARED_ASSUMPTION_POLICY_ACTIVATION", unsigned),
-    )
 
 
 def _require_nonempty_token(value: object, code: str) -> None:

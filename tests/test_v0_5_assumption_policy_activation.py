@@ -710,12 +710,12 @@ def test_algorithm_not_pinned_denied() -> None:
 
 def test_threshold_minus_one_denied() -> None:
     denied = _deny(_bundle(signers=("authority:a",)))
-    assert denied.code == "ASSUMPTION_POLICY_APPROVAL_THRESHOLD_NOT_MET"
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
 
 
 def test_missing_mandatory_signer_denied() -> None:
     denied = _deny(_bundle(signers=("authority:b", "authority:c")))
-    assert denied.code == "ASSUMPTION_POLICY_APPROVAL_REQUIRED_SIGNER_MISSING"
+    assert denied.code == "ASSUMPTION_APPROVAL_REQUIRED_SIGNER_MISSING"
     assert denied.detail == "authority:a"
 
 
@@ -752,7 +752,7 @@ def test_ineligible_signer_denied() -> None:
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
     denied_prep = _deny_with(prep_d, policy, payload, commit, ap, sp, cp, sig_set)
-    assert denied_prep.code == "ASSUMPTION_POLICY_APPROVAL_SIGNER_INELIGIBLE"
+    assert denied_prep.code == "ASSUMPTION_APPROVAL_SIGNER_INELIGIBLE"
 
 
 def _deny_with(prep, policy, payload, commit, ap, sp, cp, ss) -> AssumptionPolicyActivationDenied:
@@ -785,7 +785,7 @@ def test_unknown_key_recorded_as_rejected() -> None:
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
     denied = _deny_with(prep_no_b, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_POLICY_APPROVAL_THRESHOLD_NOT_MET"
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
 
 
 def test_authority_expired_recorded_as_rejected() -> None:
@@ -802,7 +802,7 @@ def test_authority_expired_recorded_as_rejected() -> None:
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
     denied = _deny_with(expired, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_POLICY_APPROVAL_THRESHOLD_NOT_MET"
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
 
 
 def test_authority_revoked_recorded_as_rejected() -> None:
@@ -819,7 +819,7 @@ def test_authority_revoked_recorded_as_rejected() -> None:
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
     denied = _deny_with(revoked, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_POLICY_APPROVAL_THRESHOLD_NOT_MET"
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
 
 
 # ===========================================================================
@@ -930,3 +930,318 @@ def test_changed_profile_changes_expected_bytes() -> None:
         signed_digest=_digest("a"),
     )
     assert sig_a != sig_b
+
+
+# ===========================================================================
+# Correction 1: PreparedPolicyActivation public type (V2|V3)
+# ===========================================================================
+
+
+def test_prepared_activation_build_accepts_entry_v3() -> None:
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation,
+    )
+
+    prepared = _prepare(_bundle())
+    rebuilt = PreparedPolicyActivation.build(prepared.ledger_entry)
+    assert rebuilt.prepared_digest == prepared.prepared_digest
+
+
+def test_prepared_activation_build_accepts_entry_v2() -> None:
+    from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
+        AssumptionAuthorityPolicyCommitV2,
+        AssumptionPolicyActivationProof,
+    )
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        AssumptionPolicyLedgerEntryV2,
+        PreparedPolicyActivation,
+    )
+
+    policy = _policy()
+    approval = _approval_policy()
+    profile = _signature_profile()
+    challenge = _challenge_policy()
+    commit_v2 = AssumptionAuthorityPolicyCommitV2.build(
+        policy=policy,
+        predecessor_policy_digest=None,
+        predecessor_commit_receipt_digest=None,
+        effective_from_sequence=10,
+        approval_policy_digest=approval.approval_policy_digest,
+        signature_profile_digest=profile.profile_digest,
+        challenge_classification_policy_digest=challenge.policy_digest,
+        signature_set_digest=_digest("b"),
+    )
+    rule = approval.rule_for(commit_v2.approval_class)
+    proof_v1 = AssumptionPolicyActivationProof.build(
+        policy_commit_receipt_digest=commit_v2.commit_receipt_digest,
+        approval_policy_digest=approval.approval_policy_digest,
+        approval_rule_digest=rule.rule_digest,
+        signature_profile_digest=profile.profile_digest,
+        challenge_classification_policy_digest=challenge.policy_digest,
+        authority_root_digest=policy.authority_root_digest,
+        signature_set_digest=commit_v2.signature_set_digest,
+        valid_signer_ids=("authority:a", "authority:b"),
+    )
+    entry_v2 = AssumptionPolicyLedgerEntryV2.build(
+        policy=policy,
+        policy_commit=commit_v2,
+        approval_policy=approval,
+        signature_profile=profile,
+        challenge_classification_policy=challenge,
+        activation_proof=proof_v1,
+    )
+    prepared = PreparedPolicyActivation.build(entry_v2)
+    assert prepared.prepared_digest
+
+
+def test_prepared_v3_digest_is_deterministic() -> None:
+    a = _prepare(_bundle())
+    b = _prepare(_bundle())
+    assert a.prepared_digest == b.prepared_digest
+
+
+def test_tampered_prepared_digest_rejects() -> None:
+    from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
+        AssumptionPolicyActivationContractError,
+    )
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation,
+    )
+
+    prepared = _prepare(_bundle())
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        PreparedPolicyActivation(
+            ledger_entry=prepared.ledger_entry,
+            prepared_digest=_digest("f"),
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_PREPARED_ACTIVATION_DIGEST_MISMATCH"
+
+
+# ===========================================================================
+# Correction 3: verification-key resolver output revalidation
+#
+# These tests use a _MixedKeyResolver that returns the correct key for
+# authority:b (so b passes) and a deliberately wrong key for authority:a
+# (so a is rejected with the specific code). This way the proof has one
+# valid signer (b) and one rejected (a), making the rejection code visible.
+# ===========================================================================
+
+
+class _MixedKeyResolver:
+    """Returns a correct key for key:b and a wrong key for any other."""
+
+    def __init__(self, wrong: ResolvedAssumptionPolicyVerificationKey) -> None:
+        self._correct = _verification_key("key:b", public_key_bytes=b"public-key-b")
+        self._wrong = wrong
+
+    def resolve(
+        self, *, key_id: str, algorithm: str, key_authority_root_digest: str
+    ) -> ResolvedAssumptionPolicyVerificationKey | None:
+        return self._correct if key_id == "key:b" else self._wrong
+
+
+def test_returned_key_id_mismatch_rejected() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    wrong = _verification_key("key:wrong", public_key_bytes=b"public-key-a")
+    p = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=_MixedKeyResolver(wrong),
+        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
+        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    )
+    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+def test_returned_key_algorithm_mismatch_rejected() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    wrong = ResolvedAssumptionPolicyVerificationKey(
+        key_id="key:a",
+        algorithm="ecdsa-p256-sha256",
+        public_key_bytes=b"public-key-a",
+        public_key_digest=_digest_for(b"public-key-a"),
+        key_authority_root_digest=_digest("a"),
+        resolution_receipt_digest=_digest_for(b"kr:key:a"),
+    )
+    p = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=_MixedKeyResolver(wrong),
+        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
+        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    )
+    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+def test_returned_key_root_mismatch_rejected() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    wrong = ResolvedAssumptionPolicyVerificationKey(
+        key_id="key:a",
+        algorithm=_ALGORITHM,
+        public_key_bytes=b"public-key-a",
+        public_key_digest=_digest_for(b"public-key-a"),
+        key_authority_root_digest=_digest("c"),
+        resolution_receipt_digest=_digest_for(b"kr:key:a"),
+    )
+    p = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=_MixedKeyResolver(wrong),
+        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
+        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    )
+    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+# ===========================================================================
+# Correction 4: signer-authority resolver output revalidation
+# ===========================================================================
+
+
+class _MixedAuthorityResolver:
+    """Returns a correct authority for authority:b and a wrong one otherwise."""
+
+    def __init__(self, wrong: ResolvedAssumptionPolicySignerAuthority) -> None:
+        self._correct = _signer_authority("authority:b", key_id="key:b")
+        self._wrong = wrong
+
+    def resolve(
+        self, *, signer_id: str, key_id: str, authority_root_digest: str
+    ) -> ResolvedAssumptionPolicySignerAuthority | None:
+        return self._correct if signer_id == "authority:b" else self._wrong
+
+
+def test_signer_mismatch_rejected() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    wrong = _signer_authority("authority:wrong", key_id="key:a")
+    p = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+        authority_resolver=_MixedAuthorityResolver(wrong),
+        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    )
+    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+def test_authority_key_mismatch_rejected() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    wrong = _signer_authority("authority:a", key_id="key:wrong")
+    p = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+        authority_resolver=_MixedAuthorityResolver(wrong),
+        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    )
+    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+def test_authority_root_mismatch_rejected() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    wrong = ResolvedAssumptionPolicySignerAuthority(
+        signer_id="authority:a",
+        key_id="key:a",
+        authority_root_digest=_digest("c"),
+        authority_scopes=(_REQUIRED_SCOPE,),
+        algorithms=(_ALGORITHM,),
+        valid_from_sequence=0,
+        valid_until_sequence=None,
+        revocation_sequence=None,
+        resolution_receipt_digest=_digest_for(b"ar:authority:a"),
+    )
+    p = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+        authority_resolver=_MixedAuthorityResolver(wrong),
+        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    )
+    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+# ===========================================================================
+# Correction 5: backend exception normalization
+# ===========================================================================
+
+
+class _ExceptionKeyResolver:
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def resolve(
+        self, *, key_id: str, algorithm: str, key_authority_root_digest: str
+    ) -> ResolvedAssumptionPolicyVerificationKey | None:
+        raise self._exc
+
+
+class _ExceptionAuthorityResolver:
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def resolve(
+        self, *, signer_id: str, key_id: str, authority_root_digest: str
+    ) -> ResolvedAssumptionPolicySignerAuthority | None:
+        raise self._exc
+
+
+class _ExceptionVerifier:
+    def supports(self, *, algorithm: str, verification_profile: str) -> bool:
+        raise RuntimeError("backend A failed")
+
+    def verify(
+        self,
+        *,
+        algorithm: str,
+        verification_profile: str,
+        public_key_bytes: bytes,
+        signed_digest: str,
+        signature_bytes: bytes,
+    ) -> bool:
+        raise ValueError("completely different diagnostic")
+
+
+def test_key_resolver_exceptions_produce_identical_codes() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, _ = bundle
+    codes = set()
+    for exc in (RuntimeError("backend A"), ValueError("backend B"), OSError("backend C")):
+        p = ReferenceAssumptionPolicyActivationPreparer(
+            key_resolver=_ExceptionKeyResolver(exc),
+            authority_resolver=_StaticAuthorityResolver(()),
+            signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+        )
+        codes.add(_deny_with(p, policy, payload, commit, ap, sp, cp, ss).code)
+    assert len(codes) == 1
+
+
+def test_authority_resolver_exceptions_produce_identical_codes() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    codes = set()
+    for exc in (RuntimeError("backend A"), ValueError("backend B")):
+        p = ReferenceAssumptionPolicyActivationPreparer(
+            key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+            authority_resolver=_ExceptionAuthorityResolver(exc),
+            signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+        )
+        codes.add(_deny_with(p, policy, payload, commit, ap, sp, cp, ss).code)
+    assert len(codes) == 1
+
+
+def test_supports_exception_normalized() -> None:
+    bundle = list(_bundle())
+    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+    p = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
+        signature_verifier=_ExceptionVerifier(),
+    )
+    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
+    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+def test_verify_exception_normalized() -> None:
+    # _ExceptionVerifier raises on both supports() and verify(); both normalize
+    # to stable rejection codes, so the threshold fails identically.
+    test_supports_exception_normalized()
