@@ -11,6 +11,8 @@ from csd_foundry.governance.v0_5.assumption import (
 from csd_foundry.governance.v0_5.assumption_governance_contracts import (
     AssumptionAuthorityGrant,
     AssumptionAuthorityPolicy,
+    AssumptionDutyException,
+    AssumptionSeparationDutyRule,
 )
 from csd_foundry.governance.v0_5.assumption_governance_execution_contracts import (
     AssumptionPolicyApprovalPolicy,
@@ -85,6 +87,7 @@ def _grant(
     *,
     action: str = "ADMIT",
     assumption_materialities: tuple[str, ...] = ("MATERIAL",),
+    challenge_materialities: tuple[str, ...] = (),
 ) -> AssumptionAuthorityGrant:
     return AssumptionAuthorityGrant.build(
         grant_id=grant_id,
@@ -92,6 +95,7 @@ def _grant(
         authority_id="authority:operator",
         scope_ids=("scope:control",),
         assumption_materialities=assumption_materialities,
+        challenge_materialities=challenge_materialities,
         effective_from_sequence=1,
     )
 
@@ -102,6 +106,49 @@ def _policy(*grants: AssumptionAuthorityGrant) -> AssumptionAuthorityPolicy:
         policy_id="policy:assumptions:1",
         authority_root_digest=_digest("a"),
         grants=selected,
+    )
+
+
+def _duty_exception(
+    exception_id: str,
+    assumption_ids: tuple[str, ...],
+) -> AssumptionDutyException:
+    return AssumptionDutyException.build(
+        exception_id=exception_id,
+        rule_id="rule:resolver-challenger",
+        action="RESOLVE_TO_ADMITTED",
+        authority_id="authority:operator",
+        conflicting_roles=("CHALLENGER",),
+        scope_ids=("scope:control",),
+        assumption_ids=assumption_ids,
+        assumption_materialities=("MATERIAL",),
+        reason_code="EMERGENCY_SINGLE_AUTHORITY",
+        effective_from_sequence=1,
+        effective_until_sequence=50,
+    )
+
+
+def _policy_with_exceptions(
+    *exceptions: AssumptionDutyException,
+) -> AssumptionAuthorityPolicy:
+    grant = _grant(
+        "grant:resolve",
+        action="RESOLVE_TO_ADMITTED",
+        challenge_materialities=("ADVISORY", "MATERIAL", "CRITICAL"),
+    )
+    rule = AssumptionSeparationDutyRule.build(
+        rule_id="rule:resolver-challenger",
+        action="RESOLVE_TO_ADMITTED",
+        conflicting_roles=("CHALLENGER",),
+        scope_ids=("scope:control",),
+        assumption_materialities=("MATERIAL",),
+    )
+    return AssumptionAuthorityPolicy.build(
+        policy_id="policy:assumptions:exceptions",
+        authority_root_digest=_digest("a"),
+        grants=(grant,),
+        separation_duty_rules=(rule,),
+        duty_exceptions=exceptions,
     )
 
 
@@ -132,6 +179,11 @@ def _entry(
         signature_set_digest=_digest("b"),
     )
     rule = approval_policy.rule_for(commit.approval_class)
+    valid_signers = (
+        ("authority:a", "authority:b", "authority:c")
+        if commit.approval_class == "DUTY_EXCEPTION"
+        else ("authority:a", "authority:b")
+    )
     proof = AssumptionPolicyActivationProof.build(
         policy_commit_receipt_digest=commit.commit_receipt_digest,
         approval_policy_digest=approval_policy.approval_policy_digest,
@@ -140,7 +192,7 @@ def _entry(
         challenge_classification_policy_digest=challenge_policy.policy_digest,
         authority_root_digest=selected_policy.authority_root_digest,
         signature_set_digest=commit.signature_set_digest,
-        valid_signer_ids=("authority:a", "authority:b"),
+        valid_signer_ids=valid_signers,
         rejected_signer_codes=rejected_signer_codes,
     )
     return AssumptionPolicyLedgerEntryV2.build(
@@ -222,7 +274,9 @@ def test_signature_profile_pins_schema_algorithm_and_semantics() -> None:
     profile = _signature_profile()
     assert profile.signature_set_schema_version == "signature-set/1"
     assert profile.signature_record_semantics_version == "signature-record/1"
-    assert profile.verification_profile_for("ed25519") == ("ed25519-rfc8032-strict/1")
+    assert profile.verification_profile_for("ed25519") == (
+        "ed25519-rfc8032-strict/1"
+    )
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         profile.verification_profile_for("rsa-pss-sha256")
     assert failure.value.code == "ASSUMPTION_SIGNATURE_ALGORITHM_NOT_PINNED"
@@ -232,12 +286,18 @@ def test_legacy_commit_is_not_activatable() -> None:
     legacy = {"schema_version": "assumption-authority-policy-commit/1"}
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         validate_activatable_commit_version(legacy)
-    assert failure.value.code == ("ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE")
+    assert failure.value.code == (
+        "ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE"
+    )
 
 
 def test_fail_fast_order_places_overlap_before_crypto() -> None:
-    overlap_index = ACTIVATION_VALIDATION_ORDER.index("POLICY_STRUCTURE_AND_OVERLAP")
-    crypto_index = ACTIVATION_VALIDATION_ORDER.index("CRYPTOGRAPHIC_VERIFICATION")
+    overlap_index = ACTIVATION_VALIDATION_ORDER.index(
+        "POLICY_STRUCTURE_AND_OVERLAP"
+    )
+    crypto_index = ACTIVATION_VALIDATION_ORDER.index(
+        "CRYPTOGRAPHIC_VERIFICATION"
+    )
     assert overlap_index < crypto_index
     assert POLICY_APPEND_PRECEDENCE == (
         "EXACT_IDEMPOTENCE",
@@ -263,6 +323,22 @@ def test_disjoint_materiality_grants_are_accepted() -> None:
     validate_policy_overlap(_policy(advisory, material))
 
 
+def test_overlapping_duty_exceptions_are_rejected() -> None:
+    exception_a = _duty_exception("exception:a", ())
+    exception_b = _duty_exception("exception:b", ("assumption:1",))
+    policy = _policy_with_exceptions(exception_a, exception_b)
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        validate_policy_overlap(policy)
+    assert failure.value.code == "ASSUMPTION_DUTY_EXCEPTION_OVERLAP"
+    assert failure.value.detail == "exception:a,exception:b"
+
+
+def test_disjoint_assumption_specific_exceptions_are_accepted() -> None:
+    exception_a = _duty_exception("exception:a", ("assumption:a",))
+    exception_b = _duty_exception("exception:b", ("assumption:b",))
+    validate_policy_overlap(_policy_with_exceptions(exception_a, exception_b))
+
+
 def test_full_chain_root_commits_to_complete_ordered_entries() -> None:
     first = _entry(effective_from_sequence=10)
     second = _entry(predecessor=first, effective_from_sequence=20)
@@ -286,7 +362,9 @@ def test_position_precedence_distinguishes_fork_and_equal_sequence() -> None:
     equal = _entry(predecessor=head, effective_from_sequence=10)
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         validate_successor_position(head, equal)
-    assert failure.value.code == ("ASSUMPTION_POLICY_EFFECTIVE_SEQUENCE_NOT_INCREASING")
+    assert failure.value.code == (
+        "ASSUMPTION_POLICY_EFFECTIVE_SEQUENCE_NOT_INCREASING"
+    )
 
     wrong_predecessor = _entry(effective_from_sequence=20)
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
