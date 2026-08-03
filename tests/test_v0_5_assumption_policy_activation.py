@@ -1,9 +1,10 @@
 """Tests for v0.5-D3.2-A1.2 assumption policy activation preparation (V3 envelope).
 
-Validates the corrected preparation path against the non-circular V3 signing
-envelope: signatures target ``signing_payload_digest``, the commit binds the
-pre-signing payload to the post-signature signature set, and there is no
-self-referential dependency.
+Uses a 3-signer pattern: authority:a and authority:b are always valid and
+satisfy the STANDARD threshold (2). authority:c is mutated or failing, so
+preparation succeeds and the exact rejection code for c is visible in:
+
+    prepared.ledger_entry.activation_proof.rejected_signer_codes
 
 The deterministic verifier is a conformance test double; these tests make no
 production cryptographic claim.
@@ -20,11 +21,13 @@ import pytest
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     AssumptionChallengeClassificationPolicy,
     AssumptionChallengeClassificationRule,
+    AssumptionPolicyActivationContractError,
     AssumptionPolicyAlgorithmProfile,
     AssumptionPolicySignatureProfile,
 )
 from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
     AssumptionAuthorityPolicyCommitV3,
+    AssumptionPolicyActivationProofV2,
     AssumptionPolicyLedgerEntryV3,
     AssumptionPolicySigningPayload,
     deterministic_policy_signature_bytes,
@@ -52,69 +55,66 @@ from csd_foundry.governance.v0_5.assumption_policy_activation_contracts import (
 )
 from csd_foundry.governance.v0_5.contracts import SignatureSet
 
-_ALGORITHM = "ed25519"
-_VERIFICATION_PROFILE = "ed25519-rfc8032-strict/1"
-_REQUIRED_SCOPE = "ASSUMPTION_POLICY_APPROVAL"
+_ALGO = "ed25519"
+_VP = "ed25519-rfc8032-strict/1"
+_SCOPE = "ASSUMPTION_POLICY_APPROVAL"
+_SIGNERS = ("authority:a", "authority:b", "authority:c")
 
 
-def _digest(character: str) -> str:
-    return "sha256:" + character * 64
+def _digest(c: str) -> str:
+    return "sha256:" + c * 64
 
 
-def _digest_for(payload: bytes) -> str:
-    return "sha256:" + hashlib.sha256(b"pkd\0" + payload).hexdigest()
+def _digest_for(b: bytes) -> str:
+    return "sha256:" + hashlib.sha256(b"pkd\0" + b).hexdigest()
 
 
-# --- reusable frozen inputs ------------------------------------------------
+# --- frozen inputs ---------------------------------------------------------
 
 
 def _approval_policy() -> AssumptionPolicyApprovalPolicy:
-    standard = AssumptionPolicyApprovalRule.build(
+    s = AssumptionPolicyApprovalRule.build(
         approval_class="STANDARD",
         eligible_signer_ids=("authority:a", "authority:b", "authority:c"),
         required_signature_count=2,
         required_signer_ids=("authority:a",),
     )
-    duty = AssumptionPolicyApprovalRule.build(
+    d = AssumptionPolicyApprovalRule.build(
         approval_class="DUTY_EXCEPTION",
         eligible_signer_ids=("authority:a", "authority:b", "authority:c"),
         required_signature_count=3,
         required_signer_ids=("authority:a",),
     )
     return AssumptionPolicyApprovalPolicy.build(
-        approval_policy_id="approval:assumptions:1",
+        approval_policy_id="approval:1",
         authority_root_digest=_digest("a"),
-        rules=(standard, duty),
+        rules=(s, d),
     )
 
 
-def _signature_profile() -> AssumptionPolicySignatureProfile:
+def _sig_profile() -> AssumptionPolicySignatureProfile:
     return AssumptionPolicySignatureProfile.build(
         algorithm_profiles=(
-            AssumptionPolicyAlgorithmProfile(
-                algorithm=_ALGORITHM,
-                verification_profile=_VERIFICATION_PROFILE,
-            ),
+            AssumptionPolicyAlgorithmProfile(algorithm=_ALGO, verification_profile=_VP),
         ),
-        required_authority_scope=_REQUIRED_SCOPE,
+        required_authority_scope=_SCOPE,
         key_authority_root_digest=_digest("a"),
     )
 
 
-def _challenge_policy() -> AssumptionChallengeClassificationPolicy:
+def _chal_policy() -> AssumptionChallengeClassificationPolicy:
     return AssumptionChallengeClassificationPolicy.build(
         reason_rules=(
             AssumptionChallengeClassificationRule(
-                reason_code="PROVENANCE_CONFLICT",
-                materiality="MATERIAL",
+                reason_code="PROVENANCE_CONFLICT", materiality="MATERIAL"
             ),
         )
     )
 
 
-def _grant(grant_id: str = "grant:1") -> AssumptionAuthorityGrant:
+def _grant(gid: str = "grant:1") -> AssumptionAuthorityGrant:
     return AssumptionAuthorityGrant.build(
-        grant_id=grant_id,
+        grant_id=gid,
         action="ADMIT",
         authority_id="authority:operator",
         scope_ids=("scope:control",),
@@ -126,31 +126,31 @@ def _grant(grant_id: str = "grant:1") -> AssumptionAuthorityGrant:
 
 def _policy() -> AssumptionAuthorityPolicy:
     return AssumptionAuthorityPolicy.build(
-        policy_id="policy:assumptions:1",
+        policy_id="policy:1",
         authority_root_digest=_digest("a"),
         grants=(_grant(),),
     )
 
 
-def _duty_exception(exception_id: str) -> AssumptionDutyException:
+def _duty_exception(eid: str) -> AssumptionDutyException:
     return AssumptionDutyException.build(
-        exception_id=exception_id,
-        rule_id="rule:resolver-challenger",
+        exception_id=eid,
+        rule_id="rule:1",
         action="RESOLVE_TO_ADMITTED",
         authority_id="authority:operator",
         conflicting_roles=("CHALLENGER",),
         scope_ids=("scope:control",),
         assumption_ids=("assumption:1",),
         assumption_materialities=("MATERIAL",),
-        reason_code="EMERGENCY_SINGLE_AUTHORITY",
+        reason_code="EMERGENCY",
         effective_from_sequence=1,
         effective_until_sequence=50,
     )
 
 
 def _policy_with_exception() -> AssumptionAuthorityPolicy:
-    grant = AssumptionAuthorityGrant.build(
-        grant_id="grant:resolve",
+    g = AssumptionAuthorityGrant.build(
+        grant_id="grant:r",
         action="RESOLVE_TO_ADMITTED",
         authority_id="authority:operator",
         scope_ids=("scope:control",),
@@ -158,200 +158,152 @@ def _policy_with_exception() -> AssumptionAuthorityPolicy:
         challenge_materialities=("ADVISORY", "MATERIAL", "CRITICAL"),
         effective_from_sequence=1,
     )
-    rule = AssumptionSeparationDutyRule.build(
-        rule_id="rule:resolver-challenger",
+    r = AssumptionSeparationDutyRule.build(
+        rule_id="rule:1",
         action="RESOLVE_TO_ADMITTED",
         conflicting_roles=("CHALLENGER",),
         scope_ids=("scope:control",),
         assumption_materialities=("MATERIAL",),
     )
     return AssumptionAuthorityPolicy.build(
-        policy_id="policy:assumptions:exceptions",
+        policy_id="policy:exc",
         authority_root_digest=_digest("a"),
-        grants=(grant,),
-        separation_duty_rules=(rule,),
-        duty_exceptions=(_duty_exception("exception:1"),),
+        grants=(g,),
+        separation_duty_rules=(r,),
+        duty_exceptions=(_duty_exception("exc:1"),),
     )
 
 
-# --- V3 signing payload + commit ------------------------------------------
+# --- V3 payload + commit ---------------------------------------------------
 
 
-def _signing_payload(
-    *,
-    policy: AssumptionAuthorityPolicy | None = None,
-    effective_from_sequence: int = 10,
+def _payload(
+    policy: AssumptionAuthorityPolicy | None = None, seq: int = 10
 ) -> AssumptionPolicySigningPayload:
     return AssumptionPolicySigningPayload.build(
         policy=policy or _policy(),
         predecessor_policy_digest=None,
         predecessor_commit_receipt_digest=None,
-        effective_from_sequence=effective_from_sequence,
+        effective_from_sequence=seq,
         approval_policy=_approval_policy(),
-        signature_profile=_signature_profile(),
-        challenge_policy=_challenge_policy(),
+        signature_profile=_sig_profile(),
+        challenge_policy=_chal_policy(),
     )
 
 
-def _commit_v3(
-    *,
-    payload: AssumptionPolicySigningPayload,
-    signature_set_digest: str,
-) -> AssumptionAuthorityPolicyCommitV3:
+def _commit(payload: AssumptionPolicySigningPayload, ssd: str) -> AssumptionAuthorityPolicyCommitV3:
     return AssumptionAuthorityPolicyCommitV3.build(
         signing_payload_digest=payload.signing_payload_digest,
-        signature_set_digest=signature_set_digest,
+        signature_set_digest=ssd,
     )
 
 
-# --- resolver fixtures -----------------------------------------------------
+# --- key/authority fixtures ------------------------------------------------
 
 
-def _verification_key(
-    key_id: str = "key:a",
-    *,
-    public_key_bytes: bytes = b"public-key-a",
-) -> ResolvedAssumptionPolicyVerificationKey:
+def _vkey(kid: str = "key:a", pk: bytes = b"pk-a") -> ResolvedAssumptionPolicyVerificationKey:
     return ResolvedAssumptionPolicyVerificationKey(
-        key_id=key_id,
-        algorithm=_ALGORITHM,
-        public_key_bytes=public_key_bytes,
-        public_key_digest=_digest_for(public_key_bytes),
+        key_id=kid,
+        algorithm=_ALGO,
+        public_key_bytes=pk,
         key_authority_root_digest=_digest("a"),
-        resolution_receipt_digest=_digest_for(b"keyrect:" + key_id.encode()),
+        resolution_receipt_digest=_digest_for(b"kr:" + kid.encode()),
     )
 
 
-def _signer_authority(
-    signer_id: str = "authority:a",
-    *,
-    key_id: str = "key:a",
-    valid_from_sequence: int = 0,
-    valid_until_sequence: int | None = None,
-    revocation_sequence: int | None = None,
+def _auth(
+    sid: str = "authority:a", kid: str = "key:a", **kw
 ) -> ResolvedAssumptionPolicySignerAuthority:
-    return ResolvedAssumptionPolicySignerAuthority(
-        signer_id=signer_id,
-        key_id=key_id,
+    defaults = dict(
         authority_root_digest=_digest("a"),
-        authority_scopes=(_REQUIRED_SCOPE,),
-        algorithms=(_ALGORITHM,),
-        valid_from_sequence=valid_from_sequence,
-        valid_until_sequence=valid_until_sequence,
-        revocation_sequence=revocation_sequence,
-        resolution_receipt_digest=_digest_for(b"authrect:" + signer_id.encode()),
+        authority_scopes=(_SCOPE,),
+        algorithms=(_ALGO,),
+        valid_from_sequence=0,
+        valid_until_sequence=None,
+        revocation_sequence=None,
+        resolution_receipt_digest=_digest_for(b"ar:" + sid.encode()),
     )
+    defaults.update(kw)
+    return ResolvedAssumptionPolicySignerAuthority(signer_id=sid, key_id=kid, **defaults)
 
 
-class _StaticKeyResolver:
-    def __init__(self, keys: tuple[ResolvedAssumptionPolicyVerificationKey, ...]) -> None:
-        self._keys = {(k.key_id, k.algorithm): k for k in keys}
+class _SKR:
+    """Static key resolver."""
 
-    def resolve(
-        self, *, key_id: str, algorithm: str, key_authority_root_digest: str
-    ) -> ResolvedAssumptionPolicyVerificationKey | None:
-        return self._keys.get((key_id, algorithm))
+    def __init__(self, keys):
+        self._m = {(k.key_id, k.algorithm): k for k in keys}
 
-
-class _StaticAuthorityResolver:
-    def __init__(self, authorities: tuple[ResolvedAssumptionPolicySignerAuthority, ...]) -> None:
-        self._authorities = {(a.signer_id, a.key_id): a for a in authorities}
-
-    def resolve(
-        self, *, signer_id: str, key_id: str, authority_root_digest: str
-    ) -> ResolvedAssumptionPolicySignerAuthority | None:
-        return self._authorities.get((signer_id, key_id))
+    def resolve(self, *, key_id, algorithm, key_authority_root_digest):
+        return self._m.get((key_id, algorithm))
 
 
-# --- signature helpers -----------------------------------------------------
+class _SAR:
+    """Static authority resolver."""
+
+    def __init__(self, auths):
+        self._m = {(a.signer_id, a.key_id): a for a in auths}
+
+    def resolve(self, *, signer_id, key_id, authority_root_digest):
+        return self._m.get((signer_id, key_id))
 
 
-def _sig_record(
-    *,
-    signer_id: str,
-    key_id: str,
-    signing_payload_digest: str,
-    public_key_bytes: bytes,
-    authority_scope: str = _REQUIRED_SCOPE,
-    algorithm: str = _ALGORITHM,
-) -> dict[str, str]:
-    sig_bytes = make_deterministic_signature(
-        algorithm=algorithm,
-        verification_profile=_VERIFICATION_PROFILE,
-        public_key_bytes=public_key_bytes,
-        signed_digest=signing_payload_digest,
+# --- 3-signer bundle -------------------------------------------------------
+# a+b always valid; c is the mutation target. Threshold=2, so a+b satisfies it.
+
+
+def _sig_record(sid, kid, target, pk):
+    sb = make_deterministic_signature(
+        algorithm=_ALGO,
+        verification_profile=_VP,
+        public_key_bytes=pk,
+        signed_digest=target,
     )
     return {
-        "signer_id": signer_id,
-        "key_id": key_id,
-        "algorithm": algorithm,
-        "signed_digest": signing_payload_digest,
-        "signature_base64": base64.b64encode(sig_bytes).decode("ascii"),
-        "authority_scope": authority_scope,
+        "signer_id": sid,
+        "key_id": kid,
+        "algorithm": _ALGO,
+        "signed_digest": target,
+        "signature_base64": base64.b64encode(sb).decode("ascii"),
+        "authority_scope": _SCOPE,
     }
 
 
-def _signature_set(records: tuple[dict[str, str], ...]) -> SignatureSet:
+def _sig_set(records):
     return cast(
         SignatureSet,
         SignatureSet.build({"schema_version": "signature-set/1", "signatures": list(records)}),
     )
 
 
-# --- full fixture bundle ---------------------------------------------------
-# No fixpoint needed: the signing payload is built first, signatures target
-# its digest, and the commit binds both independently.
-
-
-def _bundle(
-    *,
-    signers: tuple[str, ...] = ("authority:a", "authority:b"),
+def _bundle3(
     policy: AssumptionAuthorityPolicy | None = None,
+    signers: tuple[str, ...] = _SIGNERS,
 ):
-    selected_policy = policy or _policy()
-    payload = _signing_payload(policy=selected_policy)
+    p = policy or _policy()
+    payload = _payload(policy=p)
+    pks = {s: f"pk-{s[-1]}".encode() for s in signers}
+    kids = {s: f"key:{s[-1]}" for s in signers}
     records = tuple(
-        _sig_record(
-            signer_id=s,
-            key_id=f"key:{s[-1]}",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=f"public-key-{s[-1]}".encode(),
-        )
-        for s in signers
+        _sig_record(s, kids[s], payload.signing_payload_digest, pks[s]) for s in signers
     )
-    sig_set = _signature_set(records)
-    commit = _commit_v3(payload=payload, signature_set_digest=sig_set.digest)
-    keys = tuple(
-        _verification_key(
-            key_id=f"key:{s[-1]}",
-            public_key_bytes=f"public-key-{s[-1]}".encode(),
-        )
-        for s in signers
-    )
-    authorities = tuple(_signer_authority(signer_id=s, key_id=f"key:{s[-1]}") for s in signers)
-    preparer = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_StaticKeyResolver(keys),
-        authority_resolver=_StaticAuthorityResolver(authorities),
+    ss = _sig_set(records)
+    commit = _commit(payload, ss.digest)
+    keys = tuple(_vkey(kids[s], pks[s]) for s in signers)
+    auths = tuple(_auth(s, kids[s]) for s in signers)
+    prep = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=_SKR(keys),
+        authority_resolver=_SAR(auths),
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
-    return (
-        selected_policy,
-        payload,
-        commit,
-        _approval_policy(),
-        _signature_profile(),
-        _challenge_policy(),
-        sig_set,
-        preparer,
-    )
+    return p, payload, commit, _approval_policy(), _sig_profile(), _chal_policy(), ss, prep
 
 
-def _prepare(bundle) -> object:
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
+def _do_prepare(bundle):
+    p, pl, c, ap, sp, cp, ss, prep = bundle
     return prep.prepare(
-        policy=policy,
-        signing_payload=payload,
-        commit=commit,
+        policy=p,
+        signing_payload=pl,
+        commit=c,
         approval_policy=ap,
         signature_profile=sp,
         challenge_policy=cp,
@@ -359,10 +311,49 @@ def _prepare(bundle) -> object:
     )
 
 
-def _deny(bundle) -> AssumptionPolicyActivationDenied:
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        _prepare(bundle)
-    return failure.value
+def _do_deny(bundle):
+    with pytest.raises(AssumptionPolicyActivationDenied) as f:
+        _do_prepare(bundle)
+    return f.value
+
+
+def _deny_with(prep, bundle):
+    p, pl, c, ap, sp, cp, ss, _ = bundle
+    with pytest.raises(AssumptionPolicyActivationDenied) as f:
+        prep.prepare(
+            policy=p,
+            signing_payload=pl,
+            commit=c,
+            approval_policy=ap,
+            signature_profile=sp,
+            challenge_policy=cp,
+            signature_set=ss,
+        )
+    return f.value
+
+
+def _prep_with(prep, bundle):
+    """Prepare with a custom preparer; returns the prepared activation."""
+    p, pl, c, ap, sp, cp, ss, _ = bundle
+    return prep.prepare(
+        policy=p,
+        signing_payload=pl,
+        commit=c,
+        approval_policy=ap,
+        signature_profile=sp,
+        challenge_policy=cp,
+        signature_set=ss,
+    )
+
+
+def _replace_c_resolver(bundle, *, key_resolver=None, authority_resolver=None, verifier=None):
+    """Return a new preparer with c's resolver/verifier replaced."""
+    _, _, _, _, _, _, _, orig = bundle
+    return ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=key_resolver or orig.key_resolver,  # type: ignore[attr-defined]
+        authority_resolver=authority_resolver or orig.authority_resolver,  # type: ignore[attr-defined]
+        signature_verifier=verifier or orig.signature_verifier,  # type: ignore[attr-defined]
+    )
 
 
 # ===========================================================================
@@ -371,110 +362,71 @@ def _deny(bundle) -> AssumptionPolicyActivationDenied:
 
 
 def test_valid_standard_preparation_succeeds() -> None:
-    prepared = _prepare(_bundle())
-    assert prepared.ledger_entry.activation_proof.valid_signer_ids == (
-        "authority:a",
-        "authority:b",
-    )
+    prepared = _do_prepare(_bundle3())
+    assert set(prepared.ledger_entry.activation_proof.valid_signer_ids) == set(_SIGNERS)
     assert prepared.ledger_entry.activation_proof.rejected_signer_codes == ()
 
 
 def test_valid_duty_exception_preparation_succeeds() -> None:
-    prepared = _prepare(
-        _bundle(
-            signers=("authority:a", "authority:b", "authority:c"),
-            policy=_policy_with_exception(),
-        )
-    )
+    prepared = _do_prepare(_bundle3(policy=_policy_with_exception(), signers=_SIGNERS))
     assert prepared.ledger_entry.policy_commit.signing_payload_digest
 
 
 def test_exact_threshold_succeeds() -> None:
-    prepared = _prepare(_bundle(signers=("authority:a", "authority:b")))
+    prepared = _do_prepare(_bundle3(signers=("authority:a", "authority:b")))
     assert len(prepared.ledger_entry.activation_proof.valid_signer_ids) == 2
 
 
 def test_permuted_signatures_produce_identical_prepared_bytes() -> None:
-    bundle = _bundle(signers=("authority:a", "authority:b"))
-    prepared_a = _prepare(bundle)
-    policy, payload, commit, ap, sp, cp, _, prep = bundle
-    records_rev = tuple(
-        _sig_record(
-            signer_id=s,
-            key_id=f"key:{s[-1]}",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=f"public-key-{s[-1]}".encode(),
-        )
+    b1 = _bundle3(signers=("authority:a", "authority:b"))
+    pa = _do_prepare(b1)
+    p, pl, c, ap, sp, cp, _, prep = b1
+    recs_rev = tuple(
+        _sig_record(s, f"key:{s[-1]}", pl.signing_payload_digest, f"pk-{s[-1]}".encode())
         for s in ("authority:b", "authority:a")
     )
-    sig_rev = _signature_set(records_rev)
-    prepared_b = prep.prepare(
-        policy=policy,
-        signing_payload=payload,
-        commit=commit,
+    pb = prep.prepare(
+        policy=p,
+        signing_payload=pl,
+        commit=c,
         approval_policy=ap,
         signature_profile=sp,
         challenge_policy=cp,
-        signature_set=sig_rev,
+        signature_set=_sig_set(recs_rev),
     )
-    assert prepared_a.prepared_digest == prepared_b.prepared_digest
+    assert pa.prepared_digest == pb.prepared_digest
 
 
 def test_identical_inputs_produce_identical_output() -> None:
-    a = _prepare(_bundle())
-    b = _prepare(_bundle())
+    a = _do_prepare(_bundle3(signers=("authority:a", "authority:b")))
+    b = _do_prepare(_bundle3(signers=("authority:a", "authority:b")))
     assert a.prepared_digest == b.prepared_digest
 
 
 def test_extra_rejected_signer_recorded_while_threshold_succeeds() -> None:
-    # a + b valid; d has wrong key bytes (signature won't verify).
-    policy = _policy()
-    payload = _signing_payload(policy=policy)
-    records = (
-        _sig_record(
-            signer_id="authority:a",
-            key_id="key:a",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-a",
-        ),
-        _sig_record(
-            signer_id="authority:b",
-            key_id="key:b",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-b",
-        ),
-        _sig_record(
-            signer_id="authority:d",
-            key_id="key:d",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-d-wrong",
-        ),
-    )
-    sig_set = _signature_set(records)
-    commit = _commit_v3(payload=payload, signature_set_digest=sig_set.digest)
-    keys = (
-        _verification_key("key:a", public_key_bytes=b"pk-a"),
-        _verification_key("key:b", public_key_bytes=b"pk-b"),
-        _verification_key("key:d", public_key_bytes=b"pk-d-real"),
-    )
-    authorities = (
-        _signer_authority("authority:a", key_id="key:a"),
-        _signer_authority("authority:b", key_id="key:b"),
-        _signer_authority("authority:d", key_id="key:d"),
-    )
-    prep = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_StaticKeyResolver(keys),
-        authority_resolver=_StaticAuthorityResolver(authorities),
+    # c has wrong public key -> signature won't verify; a+b still valid.
+    bundle = _bundle3()
+    p, pl, c, ap, sp, cp, _, prep = bundle
+    pks = {"authority:a": b"pk-a", "authority:b": b"pk-b", "authority:c": b"pk-c-wrong"}
+    kids = {"authority:a": "key:a", "authority:b": "key:b", "authority:c": "key:c"}
+    records = tuple(_sig_record(s, kids[s], pl.signing_payload_digest, pks[s]) for s in _SIGNERS)
+    ss = _sig_set(records)
+    commit = _commit(pl, ss.digest)
+    keys = tuple(_vkey(kids[s], f"pk-{s[-1]}".encode()) for s in _SIGNERS)
+    # c's resolver returns the REAL key, but the signature was built over pk-c-wrong.
+    prep3 = ReferenceAssumptionPolicyActivationPreparer(
+        key_resolver=_SKR(keys),
+        authority_resolver=_SAR(tuple(_auth(s, kids[s]) for s in _SIGNERS)),
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
-    prepared = prep.prepare(
-        policy=policy,
-        signing_payload=payload,
+    prepared = prep3.prepare(
+        policy=p,
+        signing_payload=pl,
         commit=commit,
-        approval_policy=_approval_policy(),
-        signature_profile=_signature_profile(),
-        challenge_policy=_challenge_policy(),
-        signature_set=sig_set,
+        approval_policy=ap,
+        signature_profile=sp,
+        challenge_policy=cp,
+        signature_set=ss,
     )
     assert prepared.ledger_entry.activation_proof.valid_signer_ids == (
         "authority:a",
@@ -491,344 +443,640 @@ def test_extra_rejected_signer_recorded_while_threshold_succeeds() -> None:
 
 
 def test_commit_v2_rejected_before_cryptography() -> None:
-    policy = _policy()
-    payload = _signing_payload(policy=policy)
-    # Build a V2 commit (the old self-referential shape).
-    commit_v2 = AssumptionAuthorityPolicyCommitV2.build(
-        policy=policy,
+    p = _policy()
+    pl = _payload(policy=p)
+    c2 = AssumptionAuthorityPolicyCommitV2.build(
+        policy=p,
         predecessor_policy_digest=None,
         predecessor_commit_receipt_digest=None,
         effective_from_sequence=10,
         approval_policy_digest=_approval_policy().approval_policy_digest,
-        signature_profile_digest=_signature_profile().profile_digest,
-        challenge_classification_policy_digest=_challenge_policy().policy_digest,
+        signature_profile_digest=_sig_profile().profile_digest,
+        challenge_classification_policy_digest=_chal_policy().policy_digest,
         signature_set_digest=_digest("b"),
     )
     prep = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_StaticKeyResolver(()),
-        authority_resolver=_StaticAuthorityResolver(()),
+        key_resolver=_SKR(()),
+        authority_resolver=_SAR(()),
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
+    rec = (_sig_record("authority:a", "key:a", pl.signing_payload_digest, b"pk-a"),)
+    with pytest.raises(AssumptionPolicyActivationDenied) as f:
         prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=commit_v2,  # type: ignore[arg-type]
+            policy=p,
+            signing_payload=pl,
+            commit=c2,  # type: ignore[arg-type]
             approval_policy=_approval_policy(),
-            signature_profile=_signature_profile(),
-            challenge_policy=_challenge_policy(),
-            signature_set=_signature_set(
-                (
-                    _sig_record(
-                        signer_id="authority:a",
-                        key_id="key:a",
-                        signing_payload_digest=payload.signing_payload_digest,
-                        public_key_bytes=b"pk-a",
-                    ),
-                )
-            ),
+            signature_profile=_sig_profile(),
+            challenge_policy=_chal_policy(),
+            signature_set=_sig_set(rec),
         )
-    assert failure.value.code == "ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE"
-    assert failure.value.stage == "PARSE_AND_SELF_DIGESTS"
+    assert f.value.code == "ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE"
+    assert f.value.stage == "PARSE_AND_SELF_DIGESTS"
+
+
+def test_policy_overlap_denied() -> None:
+    p = AssumptionAuthorityPolicy.build(
+        policy_id="policy:overlap",
+        authority_root_digest=_digest("a"),
+        grants=(_grant("g:a"), _grant("g:b")),
+    )
+    denied = _do_deny(_bundle3(policy=p))
+    assert denied.stage == "POLICY_STRUCTURE_AND_OVERLAP"
 
 
 def test_commit_payload_mismatch_denied() -> None:
-    bundle = list(_bundle())
-    policy, payload, _, ap, sp, cp, ss, prep = bundle
-    other_payload = _signing_payload(
+    bundle = _bundle3()
+    p, pl, _, ap, sp, cp, ss, prep = bundle
+    other_pl = _payload(
         policy=AssumptionAuthorityPolicy.build(
             policy_id="policy:other", authority_root_digest=_digest("a"), grants=(_grant(),)
         )
     )
-    wrong_commit = _commit_v3(payload=other_payload, signature_set_digest=ss.digest)
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=wrong_commit,
-            approval_policy=ap,
-            signature_profile=sp,
-            challenge_policy=cp,
-            signature_set=ss,
-        )
-    assert failure.value.code == "ASSUMPTION_POLICY_COMMIT_PAYLOAD_MISMATCH"
+    wrong_c = _commit(other_pl, ss.digest)
+    denied = _deny_with(
+        ReferenceAssumptionPolicyActivationPreparer(
+            key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+            authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
+            signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+        ),
+        (p, pl, wrong_c, ap, sp, cp, ss, prep),
+    )
+    assert denied.code == "ASSUMPTION_POLICY_COMMIT_PAYLOAD_MISMATCH"
 
 
 def test_commit_signature_set_mismatch_denied() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, _, prep = bundle
-    # Build a different signature set.
-    other_records = (
-        _sig_record(
-            signer_id="authority:a",
-            key_id="key:a",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"different-pk",
+    bundle = _bundle3()
+    p, pl, c, ap, sp, cp, _, prep = bundle
+    other_recs = (_sig_record("authority:a", "key:a", pl.signing_payload_digest, b"other-pk"),)
+    denied = _deny_with(
+        ReferenceAssumptionPolicyActivationPreparer(
+            key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+            authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
+            signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
         ),
+        (p, pl, c, ap, sp, cp, _sig_set(other_recs), prep),
     )
-    other_set = _signature_set(other_records)
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=commit,
-            approval_policy=ap,
-            signature_profile=sp,
-            challenge_policy=cp,
-            signature_set=other_set,
-        )
-    assert failure.value.code == "ASSUMPTION_POLICY_COMMIT_SIGNATURE_SET_MISMATCH"
+    assert denied.code == "ASSUMPTION_POLICY_COMMIT_SIGNATURE_SET_MISMATCH"
 
 
 def test_wrong_signed_target_rejected_before_key_resolution() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, _, prep = bundle
-    wrong_records = tuple(
-        _sig_record(
-            signer_id=s,
-            key_id=f"key:{s[-1]}",
-            signing_payload_digest=_digest("f"),  # wrong target
-            public_key_bytes=f"public-key-{s[-1]}".encode(),
-        )
+    bundle = _bundle3()
+    p, pl, _, ap, sp, cp, _, prep = bundle
+    wrong_recs = tuple(
+        _sig_record(s, f"key:{s[-1]}", _digest("f"), f"pk-{s[-1]}".encode())
         for s in ("authority:a", "authority:b")
     )
-    wrong_set = _signature_set(wrong_records)
-    wrong_commit = _commit_v3(payload=payload, signature_set_digest=wrong_set.digest)
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=wrong_commit,
-            approval_policy=ap,
-            signature_profile=sp,
-            challenge_policy=cp,
-            signature_set=wrong_set,
-        )
-    assert failure.value.code == "ASSUMPTION_POLICY_SIGNATURE_TARGET_MISMATCH"
-    assert failure.value.stage == "SIGNATURE_SET_SCHEMA_AND_CANONICAL_FORM"
+    wrong_ss = _sig_set(wrong_recs)
+    wrong_c = _commit(pl, wrong_ss.digest)
+    denied = _deny_with(
+        ReferenceAssumptionPolicyActivationPreparer(
+            key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
+            authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
+            signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+        ),
+        (p, pl, wrong_c, ap, sp, cp, wrong_ss, prep),
+    )
+    assert denied.code == "ASSUMPTION_POLICY_SIGNATURE_TARGET_MISMATCH"
 
 
 def test_duplicate_signer_denied() -> None:
-    bundle = list(_bundle(signers=("authority:a",)))
-    policy, payload, commit, ap, sp, cp, _, prep = bundle
-    dup_records = (
-        _sig_record(
-            signer_id="authority:a",
-            key_id="key:a",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-a",
-        ),
-        _sig_record(
-            signer_id="authority:a",
-            key_id="key:a2",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-a2",
-        ),
+    bundle = _bundle3(signers=("authority:a",))
+    p, pl, _, ap, sp, cp, _, prep = bundle
+    dup = (
+        _sig_record("authority:a", "key:a", pl.signing_payload_digest, b"pk-a"),
+        _sig_record("authority:a", "key:a2", pl.signing_payload_digest, b"pk-a2"),
     )
-    dup_set = _signature_set(dup_records)
-    dup_commit = _commit_v3(payload=payload, signature_set_digest=dup_set.digest)
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=dup_commit,
-            approval_policy=ap,
-            signature_profile=sp,
-            challenge_policy=cp,
-            signature_set=dup_set,
-        )
-    assert failure.value.code == "ASSUMPTION_POLICY_DUPLICATE_SIGNER_RECORD"
+    dup_ss = _sig_set(dup)
+    dup_c = _commit(pl, dup_ss.digest)
+    denied = _deny_with(prep, (p, pl, dup_c, ap, sp, cp, dup_ss, prep))
+    assert denied.code == "ASSUMPTION_POLICY_DUPLICATE_SIGNER_RECORD"
 
 
 def test_malformed_base64_denied() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, _, prep = bundle
-    bad_records = (
+    bundle = _bundle3(signers=("authority:a", "authority:b"))
+    p, pl, _, ap, sp, cp, _, prep = bundle
+    bad = (
         {
             "signer_id": "authority:a",
             "key_id": "key:a",
-            "algorithm": _ALGORITHM,
-            "signed_digest": payload.signing_payload_digest,
-            "signature_base64": "!!!not-base64!!!",
-            "authority_scope": _REQUIRED_SCOPE,
+            "algorithm": _ALGO,
+            "signed_digest": pl.signing_payload_digest,
+            "signature_base64": "!!!!",
+            "authority_scope": _SCOPE,
         },
-        _sig_record(
-            signer_id="authority:b",
-            key_id="key:b",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-b",
-        ),
+        _sig_record("authority:b", "key:b", pl.signing_payload_digest, b"pk-b"),
     )
-    bad_set = _signature_set(bad_records)
-    bad_commit = _commit_v3(payload=payload, signature_set_digest=bad_set.digest)
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=bad_commit,
-            approval_policy=ap,
-            signature_profile=sp,
-            challenge_policy=cp,
-            signature_set=bad_set,
-        )
-    assert failure.value.code == "ASSUMPTION_POLICY_SIGNATURE_ENCODING_INVALID"
+    bad_ss = _sig_set(bad)
+    bad_c = _commit(pl, bad_ss.digest)
+    denied = _deny_with(prep, (p, pl, bad_c, ap, sp, cp, bad_ss, prep))
+    assert denied.code == "ASSUMPTION_POLICY_SIGNATURE_ENCODING_INVALID"
 
 
 def test_algorithm_not_pinned_denied() -> None:
-    bundle = list(_bundle())
-    policy, payload, _, ap, sp, cp, _, prep = bundle
-    unpinned_records = tuple(
+    bundle = _bundle3(signers=("authority:a", "authority:b"))
+    p, pl, _, ap, sp, cp, _, prep = bundle
+    unp = tuple(
         {
             "signer_id": s,
             "key_id": f"key:{s[-1]}",
             "algorithm": "rsa-pss-sha256",
-            "signed_digest": payload.signing_payload_digest,
+            "signed_digest": pl.signing_payload_digest,
             "signature_base64": base64.b64encode(b"x" * 32).decode("ascii"),
-            "authority_scope": _REQUIRED_SCOPE,
+            "authority_scope": _SCOPE,
         }
         for s in ("authority:a", "authority:b")
     )
-    unpinned_set = _signature_set(unpinned_records)
-    unpinned_commit = _commit_v3(payload=payload, signature_set_digest=unpinned_set.digest)
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=unpinned_commit,
-            approval_policy=ap,
-            signature_profile=sp,
-            challenge_policy=cp,
-            signature_set=unpinned_set,
-        )
-    assert failure.value.code == "ASSUMPTION_POLICY_SIGNATURE_ALGORITHM_NOT_PINNED"
+    unp_ss = _sig_set(unp)
+    denied = _deny_with(prep, (p, pl, _commit(pl, unp_ss.digest), ap, sp, cp, unp_ss, prep))
+    assert denied.code == "ASSUMPTION_POLICY_SIGNATURE_ALGORITHM_NOT_PINNED"
 
 
 # ===========================================================================
-# Approval failures
+# Approval failures (whole-attempt denials)
 # ===========================================================================
 
 
 def test_threshold_minus_one_denied() -> None:
-    denied = _deny(_bundle(signers=("authority:a",)))
+    denied = _do_deny(_bundle3(signers=("authority:a",)))
     assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
 
 
 def test_missing_mandatory_signer_denied() -> None:
-    denied = _deny(_bundle(signers=("authority:b", "authority:c")))
+    denied = _do_deny(_bundle3(signers=("authority:b", "authority:c")))
     assert denied.code == "ASSUMPTION_APPROVAL_REQUIRED_SIGNER_MISSING"
     assert denied.detail == "authority:a"
 
 
 def test_ineligible_signer_denied() -> None:
-    bundle = list(_bundle())
-    policy, payload, _, ap, sp, cp, _, prep = bundle
-    records = (
-        _sig_record(
-            signer_id="authority:a",
-            key_id="key:a",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-a",
-        ),
-        _sig_record(
-            signer_id="authority:d",
-            key_id="key:d",
-            signing_payload_digest=payload.signing_payload_digest,
-            public_key_bytes=b"pk-d",
-        ),
+    bundle = _bundle3(signers=("authority:a", "authority:b"))
+    p, pl, _, ap, sp, cp, _, prep = bundle
+    recs = (
+        _sig_record("authority:a", "key:a", pl.signing_payload_digest, b"pk-a"),
+        _sig_record("authority:d", "key:d", pl.signing_payload_digest, b"pk-d"),
     )
-    sig_set = _signature_set(records)
-    commit = _commit_v3(payload=payload, signature_set_digest=sig_set.digest)
-    keys = (
-        _verification_key("key:a", public_key_bytes=b"pk-a"),
-        _verification_key("key:d", public_key_bytes=b"pk-d"),
-    )
-    authorities = (
-        _signer_authority("authority:a", key_id="key:a"),
-        _signer_authority("authority:d", key_id="key:d"),
-    )
+    ss = _sig_set(recs)
+    keys = (_vkey("key:a", b"pk-a"), _vkey("key:d", b"pk-d"))
+    auths = (_auth("authority:a", "key:a"), _auth("authority:d", "key:d"))
     prep_d = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_StaticKeyResolver(keys),
-        authority_resolver=_StaticAuthorityResolver(authorities),
+        key_resolver=_SKR(keys),
+        authority_resolver=_SAR(auths),
         signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
     )
-    denied_prep = _deny_with(prep_d, policy, payload, commit, ap, sp, cp, sig_set)
-    assert denied_prep.code == "ASSUMPTION_APPROVAL_SIGNER_INELIGIBLE"
+    denied = _deny_with(prep_d, (p, pl, _commit(pl, ss.digest), ap, sp, cp, ss, prep))
+    assert denied.code == "ASSUMPTION_APPROVAL_SIGNER_INELIGIBLE"
 
 
-def _deny_with(prep, policy, payload, commit, ap, sp, cp, ss) -> AssumptionPolicyActivationDenied:
-    with pytest.raises(AssumptionPolicyActivationDenied) as failure:
-        prep.prepare(
-            policy=policy,
-            signing_payload=payload,
-            commit=commit,
-            approval_policy=ap,
-            signature_profile=sp,
-            challenge_policy=cp,
-            signature_set=ss,
+# ===========================================================================
+# Record-level rejections via 3-signer pattern
+# a+b valid, c mutated; preparation succeeds, rejected_signer_codes exposes the code.
+# ===========================================================================
+
+
+class _COnlyKeyResolver:
+    """Returns a correct key for a+b, and a custom value for c."""
+
+    def __init__(self, c_value):
+        self._ab = _SKR((_vkey("key:a", b"pk-a"), _vkey("key:b", b"pk-b")))
+        self._c_value = c_value
+
+    def resolve(self, *, key_id, algorithm, key_authority_root_digest):
+        if key_id == "key:c":
+            return self._c_value
+        return self._ab.resolve(
+            key_id=key_id,
+            algorithm=algorithm,
+            key_authority_root_digest=key_authority_root_digest,
         )
-    return failure.value
 
 
-# ===========================================================================
-# Signer-authority failures (record-level rejections)
-# ===========================================================================
+class _COnlyAuthResolver:
+    """Returns a correct authority for a+b, and a custom value for c."""
+
+    def __init__(self, c_value):
+        self._ab = _SAR((_auth("authority:a", "key:a"), _auth("authority:b", "key:b")))
+        self._c_value = c_value
+
+    def resolve(self, *, signer_id, key_id, authority_root_digest):
+        if signer_id == "authority:c":
+            return self._c_value
+        return self._ab.resolve(
+            signer_id=signer_id,
+            key_id=key_id,
+            authority_root_digest=authority_root_digest,
+        )
 
 
-def test_unknown_key_recorded_as_rejected() -> None:
-    bundle = list(_bundle(signers=("authority:a", "authority:b")))
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    prep_no_b = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_StaticKeyResolver(
-            (_verification_key("key:a", public_key_bytes=b"public-key-a"),)
-        ),
-        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-    )
-    denied = _deny_with(prep_no_b, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+class _COnlyVerifier:
+    """Real verifier for a+b (first 2 calls), delegates to c_verifier for c (3rd call).
 
+    Records are processed in canonical (sorted) order, so authority:c is always
+    the third record. supports() calls are counted the same way.
+    """
 
-def test_authority_expired_recorded_as_rejected() -> None:
-    bundle = list(_bundle(signers=("authority:a", "authority:b")))
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    expired = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
-        authority_resolver=_StaticAuthorityResolver(
-            (
-                _signer_authority("authority:a", key_id="key:a"),
-                _signer_authority("authority:b", key_id="key:b", valid_until_sequence=5),
+    def __init__(self, c_verifier):
+        self._real = DeterministicAssumptionPolicySignatureVerifier()
+        self._c = c_verifier
+        self._call = 0
+
+    def supports(self, *, algorithm, verification_profile):
+        self._call += 1
+        if self._call == 3:
+            return self._c.supports(algorithm=algorithm, verification_profile=verification_profile)
+        return self._real.supports(algorithm=algorithm, verification_profile=verification_profile)
+
+    def verify(
+        self, *, algorithm, verification_profile, public_key_bytes, signed_digest, signature_bytes
+    ):
+        if public_key_bytes == b"pk-c":
+            return self._c.verify(
+                algorithm=algorithm,
+                verification_profile=verification_profile,
+                public_key_bytes=public_key_bytes,
+                signed_digest=signed_digest,
+                signature_bytes=signature_bytes,
             )
-        ),
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-    )
-    denied = _deny_with(expired, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+        return self._real.verify(
+            algorithm=algorithm,
+            verification_profile=verification_profile,
+            public_key_bytes=public_key_bytes,
+            signed_digest=signed_digest,
+            signature_bytes=signature_bytes,
+        )
 
 
-def test_authority_revoked_recorded_as_rejected() -> None:
-    bundle = list(_bundle(signers=("authority:a", "authority:b")))
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    revoked = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
-        authority_resolver=_StaticAuthorityResolver(
-            (
-                _signer_authority("authority:a", key_id="key:a"),
-                _signer_authority("authority:b", key_id="key:b", revocation_sequence=5),
-            )
-        ),
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+def _assert_c_rejected(bundle, c_resolver, expected_code):
+    """Prepare with c's resolver mutated; assert c's exact rejection code."""
+    prep = _replace_c_resolver(bundle, **c_resolver)
+    prepared = _prep_with(prep, bundle)
+    codes = prepared.ledger_entry.activation_proof.rejected_signer_codes
+    assert codes == (expected_code,), f"expected ({expected_code!r}), got {codes!r}"
+    assert set(prepared.ledger_entry.activation_proof.valid_signer_ids) == {
+        "authority:a",
+        "authority:b",
+    }
+
+
+# --- key-level rejections ---
+
+
+def test_key_id_mismatch() -> None:
+    b = _bundle3()
+    wrong = _vkey("key:wrong", b"pk-c")
+    _assert_c_rejected(
+        b,
+        {"key_resolver": _COnlyKeyResolver(wrong)},
+        "ASSUMPTION_POLICY_KEY_ID_MISMATCH",
     )
-    denied = _deny_with(revoked, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+
+
+def test_key_algorithm_mismatch() -> None:
+    b = _bundle3()
+    wrong = ResolvedAssumptionPolicyVerificationKey(
+        key_id="key:c",
+        algorithm="ecdsa-p256-sha256",
+        public_key_bytes=b"pk-c",
+        key_authority_root_digest=_digest("a"),
+        resolution_receipt_digest=_digest_for(b"kr:key:c"),
+    )
+    _assert_c_rejected(
+        b,
+        {"key_resolver": _COnlyKeyResolver(wrong)},
+        "ASSUMPTION_POLICY_KEY_ALGORITHM_INCOMPATIBLE",
+    )
+
+
+def test_key_root_mismatch() -> None:
+    b = _bundle3()
+    wrong = ResolvedAssumptionPolicyVerificationKey(
+        key_id="key:c",
+        algorithm=_ALGO,
+        public_key_bytes=b"pk-c",
+        key_authority_root_digest=_digest("c"),
+        resolution_receipt_digest=_digest_for(b"kr:key:c"),
+    )
+    _assert_c_rejected(
+        b,
+        {"key_resolver": _COnlyKeyResolver(wrong)},
+        "ASSUMPTION_POLICY_KEY_AUTHORITY_ROOT_MISMATCH",
+    )
+
+
+def test_unknown_key() -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b,
+        {"key_resolver": _COnlyKeyResolver(None)},
+        "ASSUMPTION_POLICY_SIGNER_UNKNOWN",
+    )
+
+
+# --- authority-level rejections ---
+
+
+def test_signer_key_mismatch() -> None:
+    b = _bundle3()
+    wrong = _auth("authority:wrong", "key:c")
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(wrong)},
+        "ASSUMPTION_POLICY_SIGNER_KEY_MISMATCH",
+    )
+
+
+def test_authority_root_mismatch() -> None:
+    b = _bundle3()
+    wrong = _auth("authority:c", "key:c", authority_root_digest=_digest("c"))
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(wrong)},
+        "ASSUMPTION_POLICY_SIGNER_AUTHORITY_ROOT_MISMATCH",
+    )
+
+
+def test_scope_absent() -> None:
+    b = _bundle3()
+    wrong = _auth("authority:c", "key:c", authority_scopes=("OTHER",))
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(wrong)},
+        "ASSUMPTION_POLICY_SIGNER_SCOPE_INVALID",
+    )
+
+
+def test_algorithm_unauthorized() -> None:
+    b = _bundle3()
+    wrong = _auth("authority:c", "key:c", algorithms=("ecdsa-p256-sha256",))
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(wrong)},
+        "ASSUMPTION_POLICY_SIGNER_ALGORITHM_UNAUTHORIZED",
+    )
+
+
+def test_not_yet_valid() -> None:
+    b = _bundle3()
+    wrong = _auth("authority:c", "key:c", valid_from_sequence=20)
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(wrong)},
+        "ASSUMPTION_POLICY_KEY_NOT_YET_VALID",
+    )
+
+
+def test_expired() -> None:
+    b = _bundle3()
+    wrong = _auth("authority:c", "key:c", valid_until_sequence=5)
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(wrong)},
+        "ASSUMPTION_POLICY_KEY_EXPIRED",
+    )
+
+
+def test_revoked() -> None:
+    b = _bundle3()
+    wrong = _auth("authority:c", "key:c", revocation_sequence=5)
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(wrong)},
+        "ASSUMPTION_POLICY_KEY_REVOKED",
+    )
+
+
+def test_unknown_authority() -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(None)},
+        "ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED",
+    )
 
 
 # ===========================================================================
-# V3 integration: proof/2 binds payload + commit/3; entry/3 produced
+# Backend exception normalization (3-signer pattern, exact codes)
+# ===========================================================================
+
+
+class _ExcKeyResolver:
+    """Valid for a+b; raises for c."""
+
+    def __init__(self, exc):
+        self._ab = _SKR((_vkey("key:a", b"pk-a"), _vkey("key:b", b"pk-b")))
+        self._exc = exc
+
+    def resolve(self, *, key_id, algorithm, key_authority_root_digest):
+        if key_id == "key:c":
+            raise self._exc
+        return self._ab.resolve(
+            key_id=key_id,
+            algorithm=algorithm,
+            key_authority_root_digest=key_authority_root_digest,
+        )
+
+
+class _ExcAuthResolver:
+    def __init__(self, exc):
+        self._ab = _SAR((_auth("authority:a", "key:a"), _auth("authority:b", "key:b")))
+        self._exc = exc
+
+    def resolve(self, *, signer_id, key_id, authority_root_digest):
+        if signer_id == "authority:c":
+            raise self._exc
+        return self._ab.resolve(
+            signer_id=signer_id,
+            key_id=key_id,
+            authority_root_digest=authority_root_digest,
+        )
+
+
+def test_key_resolver_exceptions_produce_identical_codes_and_bytes() -> None:
+    b = _bundle3()
+    digests = []
+    for exc in (RuntimeError("A"), ValueError("B"), OSError("C")):
+        prep = _replace_c_resolver(b, key_resolver=_ExcKeyResolver(exc))
+        prepared = _prep_with(prep, b)
+        codes = prepared.ledger_entry.activation_proof.rejected_signer_codes
+        assert codes == ("ASSUMPTION_POLICY_SIGNER_UNKNOWN",)
+        digests.append(prepared.prepared_digest)
+    assert len(set(digests)) == 1
+
+
+def test_authority_resolver_exceptions_produce_identical_codes_and_bytes() -> None:
+    b = _bundle3()
+    digests = []
+    for exc in (RuntimeError("A"), ValueError("B")):
+        prep = _replace_c_resolver(b, authority_resolver=_ExcAuthResolver(exc))
+        prepared = _prep_with(prep, b)
+        codes = prepared.ledger_entry.activation_proof.rejected_signer_codes
+        assert codes == ("ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED",)
+        digests.append(prepared.prepared_digest)
+    assert len(set(digests)) == 1
+
+
+# --- separate verifier doubles ---
+
+
+class _SupportsRaises:
+    def supports(self, *, algorithm, verification_profile):
+        raise RuntimeError("diagnostic A")
+
+    def verify(self, **kw):
+        return True
+
+
+class _SupportsFalse:
+    def supports(self, *, algorithm, verification_profile):
+        return False
+
+    def verify(self, **kw):
+        return True
+
+
+class _VerifyRaises:
+    def supports(self, *, algorithm, verification_profile):
+        return True
+
+    def verify(self, **kw):
+        raise ValueError("diagnostic B")
+
+
+class _VerifyFalse:
+    def supports(self, *, algorithm, verification_profile):
+        return True
+
+    def verify(self, **kw):
+        return False
+
+
+def test_supports_raises_normalized() -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b,
+        {"verifier": _COnlyVerifier(_SupportsRaises())},
+        "ASSUMPTION_POLICY_SIGNATURE_PROFILE_UNSUPPORTED",
+    )
+
+
+def test_supports_false_normalized() -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b,
+        {"verifier": _COnlyVerifier(_SupportsFalse())},
+        "ASSUMPTION_POLICY_SIGNATURE_PROFILE_UNSUPPORTED",
+    )
+
+
+def test_verify_raises_normalized() -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b, {"verifier": _COnlyVerifier(_VerifyRaises())}, "ASSUMPTION_POLICY_SIGNATURE_INVALID"
+    )
+
+
+def test_verify_false_normalized() -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b, {"verifier": _COnlyVerifier(_VerifyFalse())}, "ASSUMPTION_POLICY_SIGNATURE_INVALID"
+    )
+
+
+# ===========================================================================
+# Backend return type validation (correction 4)
+# ===========================================================================
+
+
+@pytest.mark.parametrize("bad_value", [object(), "unexpected", {}])
+def test_key_resolver_bad_return_type_rejected(bad_value) -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b,
+        {"key_resolver": _COnlyKeyResolver(bad_value)},
+        "ASSUMPTION_POLICY_SIGNER_UNKNOWN",
+    )
+
+
+@pytest.mark.parametrize("bad_value", [object(), "unexpected", {}])
+def test_authority_resolver_bad_return_type_rejected(bad_value) -> None:
+    b = _bundle3()
+    _assert_c_rejected(
+        b,
+        {"authority_resolver": _COnlyAuthResolver(bad_value)},
+        "ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED",
+    )
+
+
+# ===========================================================================
+# Exact Boolean verifier results (correction 5)
+# ===========================================================================
+
+
+class _TruthySupports:
+    def supports(self, *, algorithm, verification_profile):
+        return 1
+
+    def verify(self, **kw):
+        return True
+
+
+class _TruthyVerify:
+    def supports(self, *, algorithm, verification_profile):
+        return True
+
+    def verify(self, **kw):
+        return "yes"
+
+
+@pytest.mark.parametrize(
+    "double,code",
+    [
+        (_TruthySupports(), "ASSUMPTION_POLICY_SIGNATURE_PROFILE_UNSUPPORTED"),
+        (_TruthyVerify(), "ASSUMPTION_POLICY_SIGNATURE_INVALID"),
+    ],
+)
+def test_truthy_non_bool_rejected(double, code) -> None:
+    b = _bundle3()
+    _assert_c_rejected(b, {"verifier": _COnlyVerifier(double)}, code)
+
+
+# ===========================================================================
+# Proof/entry denial translation (correction 8)
+# ===========================================================================
+
+
+def test_proof_build_failure_translated_to_denial(monkeypatch) -> None:
+    b = _bundle3()
+
+    def fail(**kw):
+        raise AssumptionPolicyActivationContractError("TEST_PROOF_FAILURE")
+
+    monkeypatch.setattr(AssumptionPolicyActivationProofV2, "build", fail)
+    denied = _do_deny(b)
+    assert denied.code == "TEST_PROOF_FAILURE"
+    assert denied.stage == "ACTIVATION_PROOF_AND_ENTRY"
+    assert isinstance(denied, AssumptionPolicyActivationDenied)
+
+
+def test_entry_build_failure_translated_to_denial(monkeypatch) -> None:
+    b = _bundle3()
+
+    def fail(**kw):
+        raise AssumptionPolicyActivationContractError("TEST_ENTRY_FAILURE")
+
+    monkeypatch.setattr(AssumptionPolicyLedgerEntryV3, "build", fail)
+    denied = _do_deny(b)
+    assert denied.code == "TEST_ENTRY_FAILURE"
+    assert denied.stage == "ACTIVATION_PROOF_AND_ENTRY"
+    assert isinstance(denied, AssumptionPolicyActivationDenied)
+
+
+# ===========================================================================
+# V3 integration
 # ===========================================================================
 
 
 def test_proof_v2_binds_signing_payload_and_commit() -> None:
-    prepared = _prepare(_bundle())
+    prepared = _do_prepare(_bundle3())
     proof = prepared.ledger_entry.activation_proof
     payload = prepared.ledger_entry.signing_payload
     commit = prepared.ledger_entry.policy_commit
@@ -837,103 +1085,28 @@ def test_proof_v2_binds_signing_payload_and_commit() -> None:
 
 
 def test_entry_v3_is_produced() -> None:
-    prepared = _prepare(_bundle())
+    prepared = _do_prepare(_bundle3())
     assert type(prepared.ledger_entry) is AssumptionPolicyLedgerEntryV3
 
 
 def test_entry_v2_is_never_produced() -> None:
-    prepared = _prepare(_bundle())
     from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
         AssumptionPolicyLedgerEntryV2,
     )
 
+    prepared = _do_prepare(_bundle3())
     assert not isinstance(prepared.ledger_entry, AssumptionPolicyLedgerEntryV2)
 
 
-# ===========================================================================
-# Boundary guarantee
-# ===========================================================================
-
-
 def test_preparer_has_no_store_or_publisher() -> None:
-    bundle = _bundle()
-    prep = bundle[7]
+    prep = _bundle3()[7]
     assert not hasattr(prep, "store")
     assert not hasattr(prep, "publisher")
     assert not hasattr(prep, "ledger")
 
 
 # ===========================================================================
-# Deterministic verifier message-binding
-# ===========================================================================
-
-
-def test_changed_signed_digest_changes_expected_bytes() -> None:
-    sig_a = deterministic_policy_signature_bytes(
-        algorithm=_ALGORITHM,
-        verification_profile=_VERIFICATION_PROFILE,
-        public_key_bytes=b"pk",
-        signed_digest=_digest("a"),
-    )
-    sig_b = deterministic_policy_signature_bytes(
-        algorithm=_ALGORITHM,
-        verification_profile=_VERIFICATION_PROFILE,
-        public_key_bytes=b"pk",
-        signed_digest=_digest("b"),
-    )
-    assert sig_a != sig_b
-
-
-def test_changed_key_changes_expected_bytes() -> None:
-    sig_a = deterministic_policy_signature_bytes(
-        algorithm=_ALGORITHM,
-        verification_profile=_VERIFICATION_PROFILE,
-        public_key_bytes=b"pk-a",
-        signed_digest=_digest("a"),
-    )
-    sig_b = deterministic_policy_signature_bytes(
-        algorithm=_ALGORITHM,
-        verification_profile=_VERIFICATION_PROFILE,
-        public_key_bytes=b"pk-b",
-        signed_digest=_digest("a"),
-    )
-    assert sig_a != sig_b
-
-
-def test_changed_algorithm_changes_expected_bytes() -> None:
-    sig_a = deterministic_policy_signature_bytes(
-        algorithm="ed25519",
-        verification_profile=_VERIFICATION_PROFILE,
-        public_key_bytes=b"pk",
-        signed_digest=_digest("a"),
-    )
-    sig_b = deterministic_policy_signature_bytes(
-        algorithm="ecdsa-p256-sha256",
-        verification_profile=_VERIFICATION_PROFILE,
-        public_key_bytes=b"pk",
-        signed_digest=_digest("a"),
-    )
-    assert sig_a != sig_b
-
-
-def test_changed_profile_changes_expected_bytes() -> None:
-    sig_a = deterministic_policy_signature_bytes(
-        algorithm=_ALGORITHM,
-        verification_profile="ed25519-rfc8032-strict/1",
-        public_key_bytes=b"pk",
-        signed_digest=_digest("a"),
-    )
-    sig_b = deterministic_policy_signature_bytes(
-        algorithm=_ALGORITHM,
-        verification_profile="ed25519-rfc8032-strict/2",
-        public_key_bytes=b"pk",
-        signed_digest=_digest("a"),
-    )
-    assert sig_a != sig_b
-
-
-# ===========================================================================
-# Correction 1: PreparedPolicyActivation public type (V2|V3)
+# PreparedPolicyActivation compatibility (correction 9)
 # ===========================================================================
 
 
@@ -942,14 +1115,13 @@ def test_prepared_activation_build_accepts_entry_v3() -> None:
         PreparedPolicyActivation,
     )
 
-    prepared = _prepare(_bundle())
+    prepared = _do_prepare(_bundle3(signers=("authority:a", "authority:b")))
     rebuilt = PreparedPolicyActivation.build(prepared.ledger_entry)
     assert rebuilt.prepared_digest == prepared.prepared_digest
 
 
 def test_prepared_activation_build_accepts_entry_v2() -> None:
     from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
-        AssumptionAuthorityPolicyCommitV2,
         AssumptionPolicyActivationProof,
     )
     from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
@@ -959,9 +1131,9 @@ def test_prepared_activation_build_accepts_entry_v2() -> None:
 
     policy = _policy()
     approval = _approval_policy()
-    profile = _signature_profile()
-    challenge = _challenge_policy()
-    commit_v2 = AssumptionAuthorityPolicyCommitV2.build(
+    profile = _sig_profile()
+    challenge = _chal_policy()
+    c2 = AssumptionAuthorityPolicyCommitV2.build(
         policy=policy,
         predecessor_policy_digest=None,
         predecessor_commit_receipt_digest=None,
@@ -971,277 +1143,112 @@ def test_prepared_activation_build_accepts_entry_v2() -> None:
         challenge_classification_policy_digest=challenge.policy_digest,
         signature_set_digest=_digest("b"),
     )
-    rule = approval.rule_for(commit_v2.approval_class)
+    rule = approval.rule_for(c2.approval_class)
     proof_v1 = AssumptionPolicyActivationProof.build(
-        policy_commit_receipt_digest=commit_v2.commit_receipt_digest,
+        policy_commit_receipt_digest=c2.commit_receipt_digest,
         approval_policy_digest=approval.approval_policy_digest,
         approval_rule_digest=rule.rule_digest,
         signature_profile_digest=profile.profile_digest,
         challenge_classification_policy_digest=challenge.policy_digest,
         authority_root_digest=policy.authority_root_digest,
-        signature_set_digest=commit_v2.signature_set_digest,
+        signature_set_digest=c2.signature_set_digest,
         valid_signer_ids=("authority:a", "authority:b"),
     )
-    entry_v2 = AssumptionPolicyLedgerEntryV2.build(
+    e2 = AssumptionPolicyLedgerEntryV2.build(
         policy=policy,
-        policy_commit=commit_v2,
+        policy_commit=c2,
         approval_policy=approval,
         signature_profile=profile,
         challenge_classification_policy=challenge,
         activation_proof=proof_v1,
     )
-    prepared = PreparedPolicyActivation.build(entry_v2)
-    assert prepared.prepared_digest
+    assert PreparedPolicyActivation.build(e2).prepared_digest
 
 
 def test_prepared_v3_digest_is_deterministic() -> None:
-    a = _prepare(_bundle())
-    b = _prepare(_bundle())
+    a = _do_prepare(_bundle3(signers=("authority:a", "authority:b")))
+    b = _do_prepare(_bundle3(signers=("authority:a", "authority:b")))
     assert a.prepared_digest == b.prepared_digest
 
 
 def test_tampered_prepared_digest_rejects() -> None:
-    from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
-        AssumptionPolicyActivationContractError,
-    )
     from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
         PreparedPolicyActivation,
     )
 
-    prepared = _prepare(_bundle())
-    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+    prepared = _do_prepare(_bundle3(signers=("authority:a", "authority:b")))
+    with pytest.raises(AssumptionPolicyActivationContractError) as f:
         PreparedPolicyActivation(
             ledger_entry=prepared.ledger_entry,
             prepared_digest=_digest("f"),
         )
-    assert failure.value.code == "ASSUMPTION_POLICY_PREPARED_ACTIVATION_DIGEST_MISMATCH"
+    assert f.value.code == "ASSUMPTION_POLICY_PREPARED_ACTIVATION_DIGEST_MISMATCH"
 
 
 # ===========================================================================
-# Correction 3: verification-key resolver output revalidation
-#
-# These tests use a _MixedKeyResolver that returns the correct key for
-# authority:b (so b passes) and a deliberately wrong key for authority:a
-# (so a is rejected with the specific code). This way the proof has one
-# valid signer (b) and one rejected (a), making the rejection code visible.
+# Deterministic verifier message-binding
 # ===========================================================================
 
 
-class _MixedKeyResolver:
-    """Returns a correct key for key:b and a wrong key for any other."""
-
-    def __init__(self, wrong: ResolvedAssumptionPolicyVerificationKey) -> None:
-        self._correct = _verification_key("key:b", public_key_bytes=b"public-key-b")
-        self._wrong = wrong
-
-    def resolve(
-        self, *, key_id: str, algorithm: str, key_authority_root_digest: str
-    ) -> ResolvedAssumptionPolicyVerificationKey | None:
-        return self._correct if key_id == "key:b" else self._wrong
-
-
-def test_returned_key_id_mismatch_rejected() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    wrong = _verification_key("key:wrong", public_key_bytes=b"public-key-a")
-    p = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_MixedKeyResolver(wrong),
-        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+def test_changed_signed_digest_changes_bytes() -> None:
+    a = deterministic_policy_signature_bytes(
+        algorithm=_ALGO,
+        verification_profile=_VP,
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
     )
-    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
+    b = deterministic_policy_signature_bytes(
+        algorithm=_ALGO,
+        verification_profile=_VP,
+        public_key_bytes=b"pk",
+        signed_digest=_digest("b"),
+    )
+    assert a != b
 
 
-def test_returned_key_algorithm_mismatch_rejected() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    wrong = ResolvedAssumptionPolicyVerificationKey(
-        key_id="key:a",
+def test_changed_key_changes_bytes() -> None:
+    a = deterministic_policy_signature_bytes(
+        algorithm=_ALGO,
+        verification_profile=_VP,
+        public_key_bytes=b"pk-a",
+        signed_digest=_digest("a"),
+    )
+    b = deterministic_policy_signature_bytes(
+        algorithm=_ALGO,
+        verification_profile=_VP,
+        public_key_bytes=b"pk-b",
+        signed_digest=_digest("a"),
+    )
+    assert a != b
+
+
+def test_changed_algorithm_changes_bytes() -> None:
+    a = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile=_VP,
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
+    )
+    b = deterministic_policy_signature_bytes(
         algorithm="ecdsa-p256-sha256",
-        public_key_bytes=b"public-key-a",
-        public_key_digest=_digest_for(b"public-key-a"),
-        key_authority_root_digest=_digest("a"),
-        resolution_receipt_digest=_digest_for(b"kr:key:a"),
+        verification_profile=_VP,
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
     )
-    p = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_MixedKeyResolver(wrong),
-        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
+    assert a != b
+
+
+def test_changed_profile_changes_bytes() -> None:
+    a = deterministic_policy_signature_bytes(
+        algorithm=_ALGO,
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
     )
-    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
-
-
-def test_returned_key_root_mismatch_rejected() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    wrong = ResolvedAssumptionPolicyVerificationKey(
-        key_id="key:a",
-        algorithm=_ALGORITHM,
-        public_key_bytes=b"public-key-a",
-        public_key_digest=_digest_for(b"public-key-a"),
-        key_authority_root_digest=_digest("c"),
-        resolution_receipt_digest=_digest_for(b"kr:key:a"),
+    b = deterministic_policy_signature_bytes(
+        algorithm=_ALGO,
+        verification_profile="ed25519-rfc8032-strict/2",
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
     )
-    p = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=_MixedKeyResolver(wrong),
-        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-    )
-    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
-
-
-# ===========================================================================
-# Correction 4: signer-authority resolver output revalidation
-# ===========================================================================
-
-
-class _MixedAuthorityResolver:
-    """Returns a correct authority for authority:b and a wrong one otherwise."""
-
-    def __init__(self, wrong: ResolvedAssumptionPolicySignerAuthority) -> None:
-        self._correct = _signer_authority("authority:b", key_id="key:b")
-        self._wrong = wrong
-
-    def resolve(
-        self, *, signer_id: str, key_id: str, authority_root_digest: str
-    ) -> ResolvedAssumptionPolicySignerAuthority | None:
-        return self._correct if signer_id == "authority:b" else self._wrong
-
-
-def test_signer_mismatch_rejected() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    wrong = _signer_authority("authority:wrong", key_id="key:a")
-    p = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
-        authority_resolver=_MixedAuthorityResolver(wrong),
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-    )
-    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
-
-
-def test_authority_key_mismatch_rejected() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    wrong = _signer_authority("authority:a", key_id="key:wrong")
-    p = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
-        authority_resolver=_MixedAuthorityResolver(wrong),
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-    )
-    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
-
-
-def test_authority_root_mismatch_rejected() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    wrong = ResolvedAssumptionPolicySignerAuthority(
-        signer_id="authority:a",
-        key_id="key:a",
-        authority_root_digest=_digest("c"),
-        authority_scopes=(_REQUIRED_SCOPE,),
-        algorithms=(_ALGORITHM,),
-        valid_from_sequence=0,
-        valid_until_sequence=None,
-        revocation_sequence=None,
-        resolution_receipt_digest=_digest_for(b"ar:authority:a"),
-    )
-    p = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
-        authority_resolver=_MixedAuthorityResolver(wrong),
-        signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-    )
-    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
-
-
-# ===========================================================================
-# Correction 5: backend exception normalization
-# ===========================================================================
-
-
-class _ExceptionKeyResolver:
-    def __init__(self, exc: Exception) -> None:
-        self._exc = exc
-
-    def resolve(
-        self, *, key_id: str, algorithm: str, key_authority_root_digest: str
-    ) -> ResolvedAssumptionPolicyVerificationKey | None:
-        raise self._exc
-
-
-class _ExceptionAuthorityResolver:
-    def __init__(self, exc: Exception) -> None:
-        self._exc = exc
-
-    def resolve(
-        self, *, signer_id: str, key_id: str, authority_root_digest: str
-    ) -> ResolvedAssumptionPolicySignerAuthority | None:
-        raise self._exc
-
-
-class _ExceptionVerifier:
-    def supports(self, *, algorithm: str, verification_profile: str) -> bool:
-        raise RuntimeError("backend A failed")
-
-    def verify(
-        self,
-        *,
-        algorithm: str,
-        verification_profile: str,
-        public_key_bytes: bytes,
-        signed_digest: str,
-        signature_bytes: bytes,
-    ) -> bool:
-        raise ValueError("completely different diagnostic")
-
-
-def test_key_resolver_exceptions_produce_identical_codes() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, _ = bundle
-    codes = set()
-    for exc in (RuntimeError("backend A"), ValueError("backend B"), OSError("backend C")):
-        p = ReferenceAssumptionPolicyActivationPreparer(
-            key_resolver=_ExceptionKeyResolver(exc),
-            authority_resolver=_StaticAuthorityResolver(()),
-            signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-        )
-        codes.add(_deny_with(p, policy, payload, commit, ap, sp, cp, ss).code)
-    assert len(codes) == 1
-
-
-def test_authority_resolver_exceptions_produce_identical_codes() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    codes = set()
-    for exc in (RuntimeError("backend A"), ValueError("backend B")):
-        p = ReferenceAssumptionPolicyActivationPreparer(
-            key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
-            authority_resolver=_ExceptionAuthorityResolver(exc),
-            signature_verifier=DeterministicAssumptionPolicySignatureVerifier(),
-        )
-        codes.add(_deny_with(p, policy, payload, commit, ap, sp, cp, ss).code)
-    assert len(codes) == 1
-
-
-def test_supports_exception_normalized() -> None:
-    bundle = list(_bundle())
-    policy, payload, commit, ap, sp, cp, ss, prep = bundle
-    p = ReferenceAssumptionPolicyActivationPreparer(
-        key_resolver=prep.key_resolver,  # type: ignore[attr-defined]
-        authority_resolver=prep.authority_resolver,  # type: ignore[attr-defined]
-        signature_verifier=_ExceptionVerifier(),
-    )
-    denied = _deny_with(p, policy, payload, commit, ap, sp, cp, ss)
-    assert denied.code == "ASSUMPTION_APPROVAL_THRESHOLD_NOT_MET"
-
-
-def test_verify_exception_normalized() -> None:
-    # _ExceptionVerifier raises on both supports() and verify(); both normalize
-    # to stable rejection codes, so the threshold fails identically.
-    test_supports_exception_normalized()
+    assert a != b

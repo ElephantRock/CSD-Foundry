@@ -70,7 +70,6 @@ class ResolvedAssumptionPolicyVerificationKey:
     key_id: str
     algorithm: str
     public_key_bytes: bytes
-    public_key_digest: str
     key_authority_root_digest: str
     resolution_receipt_digest: str
 
@@ -81,7 +80,6 @@ class ResolvedAssumptionPolicyVerificationKey:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_POLICY_PUBLIC_KEY_BYTES_INVALID"
             )
-        require_digest(self.public_key_digest, "ASSUMPTION_POLICY_PUBLIC_KEY_DIGEST_INVALID")
         require_digest(
             self.key_authority_root_digest,
             "ASSUMPTION_POLICY_KEY_AUTHORITY_ROOT_INVALID",
@@ -340,7 +338,6 @@ class ReferenceAssumptionPolicyActivationPreparer:
         valid_signer_ids, rejected_signer_codes = _verify_signatures_and_authority(
             records=records,
             signing_payload=signing_payload,
-            commit=commit,
             signature_profile=signature_profile,
             key_resolver=self.key_resolver,
             authority_resolver=self.authority_resolver,
@@ -650,7 +647,6 @@ def _verify_signatures_and_authority(
     *,
     records: tuple[_ProcessingSignatureRecord, ...],
     signing_payload: AssumptionPolicySigningPayload,
-    commit: AssumptionAuthorityPolicyCommitV3,
     signature_profile: AssumptionPolicySignatureProfile,
     key_resolver: AssumptionPolicyVerificationKeyResolver,
     authority_resolver: AssumptionPolicySignerAuthorityResolver,
@@ -662,7 +658,6 @@ def _verify_signatures_and_authority(
         code = _verify_one_record(
             record=record,
             signing_payload=signing_payload,
-            commit=commit,
             signature_profile=signature_profile,
             key_resolver=key_resolver,
             authority_resolver=authority_resolver,
@@ -679,13 +674,12 @@ def _verify_one_record(
     *,
     record: _ProcessingSignatureRecord,
     signing_payload: AssumptionPolicySigningPayload,
-    commit: AssumptionAuthorityPolicyCommitV3,
     signature_profile: AssumptionPolicySignatureProfile,
     key_resolver: AssumptionPolicyVerificationKeyResolver,
     authority_resolver: AssumptionPolicySignerAuthorityResolver,
     signature_verifier: AssumptionPolicySignatureVerifier,
 ) -> str | None:
-    # CRYPTOGRAPHIC_VERIFICATION: resolve key material, revalidate, then verify.
+    # CRYPTOGRAPHIC_VERIFICATION: resolve key material, type-check, revalidate, then verify.
     try:
         resolved_key = key_resolver.resolve(
             key_id=record.key_id,
@@ -695,6 +689,8 @@ def _verify_one_record(
     except Exception:
         return "ASSUMPTION_POLICY_SIGNER_UNKNOWN"
     if resolved_key is None:
+        return "ASSUMPTION_POLICY_SIGNER_UNKNOWN"
+    if type(resolved_key) is not ResolvedAssumptionPolicyVerificationKey:
         return "ASSUMPTION_POLICY_SIGNER_UNKNOWN"
     # Revalidate resolver output against the request parameters.
     if resolved_key.key_id != record.key_id:
@@ -711,7 +707,7 @@ def _verify_one_record(
         )
     except Exception:
         return "ASSUMPTION_POLICY_SIGNATURE_PROFILE_UNSUPPORTED"
-    if not supported:
+    if type(supported) is not bool or supported is not True:
         return "ASSUMPTION_POLICY_SIGNATURE_PROFILE_UNSUPPORTED"
     try:
         verified = signature_verifier.verify(
@@ -723,10 +719,11 @@ def _verify_one_record(
         )
     except Exception:
         return "ASSUMPTION_POLICY_SIGNATURE_INVALID"
-    if not verified:
+    if type(verified) is not bool or verified is not True:
         return "ASSUMPTION_POLICY_SIGNATURE_INVALID"
 
-    # SIGNER_AUTHORITY: resolve authority, revalidate, check scope/algorithm/validity/revocation.
+    # SIGNER_AUTHORITY: resolve authority, type-check, revalidate,
+    # check scope/algorithm/validity/revocation.
     try:
         authority = authority_resolver.resolve(
             signer_id=record.signer_id,
@@ -736,6 +733,8 @@ def _verify_one_record(
     except Exception:
         return "ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED"
     if authority is None:
+        return "ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED"
+    if type(authority) is not ResolvedAssumptionPolicySignerAuthority:
         return "ASSUMPTION_POLICY_SIGNER_UNAUTHORIZED"
     # Revalidate resolver output against the request parameters.
     if authority.signer_id != record.signer_id or authority.key_id != record.key_id:
