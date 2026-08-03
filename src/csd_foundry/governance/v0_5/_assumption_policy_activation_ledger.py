@@ -48,23 +48,11 @@ class AssumptionAuthorityPolicyCommitV2:
     commit_receipt_digest: str
 
     def __post_init__(self) -> None:
-        require_token(
-            self.policy_id,
-            "ASSUMPTION_POLICY_COMMIT_POLICY_ID_INVALID",
-        )
+        require_token(self.policy_id, "ASSUMPTION_POLICY_COMMIT_POLICY_ID_INVALID")
         digest_fields = (
-            (
-                self.policy_digest,
-                "ASSUMPTION_POLICY_COMMIT_POLICY_DIGEST_INVALID",
-            ),
-            (
-                self.authority_root_digest,
-                "ASSUMPTION_POLICY_COMMIT_ROOT_INVALID",
-            ),
-            (
-                self.grant_set_digest,
-                "ASSUMPTION_POLICY_COMMIT_GRANT_SET_INVALID",
-            ),
+            (self.policy_digest, "ASSUMPTION_POLICY_COMMIT_POLICY_DIGEST_INVALID"),
+            (self.authority_root_digest, "ASSUMPTION_POLICY_COMMIT_ROOT_INVALID"),
+            (self.grant_set_digest, "ASSUMPTION_POLICY_COMMIT_GRANT_SET_INVALID"),
             (
                 self.separation_duty_rule_set_digest,
                 "ASSUMPTION_POLICY_COMMIT_RULE_SET_INVALID",
@@ -116,10 +104,7 @@ class AssumptionAuthorityPolicyCommitV2:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_POLICY_COMMIT_APPROVAL_CLASS_DOWNGRADE"
             )
-        if (
-            type(self.effective_from_sequence) is not int
-            or self.effective_from_sequence < 0
-        ):
+        if type(self.effective_from_sequence) is not int or self.effective_from_sequence < 0:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_POLICY_COMMIT_EFFECTIVE_SEQUENCE_INVALID"
             )
@@ -158,13 +143,9 @@ class AssumptionAuthorityPolicyCommitV2:
             "grant_set_digest": policy.grant_set_digest,
             "policy_digest": policy.policy_digest,
             "policy_id": policy.policy_id,
-            "predecessor_commit_receipt_digest": (
-                predecessor_commit_receipt_digest
-            ),
+            "predecessor_commit_receipt_digest": (predecessor_commit_receipt_digest),
             "predecessor_policy_digest": predecessor_policy_digest,
-            "separation_duty_rule_set_digest": (
-                policy.separation_duty_rule_set_digest
-            ),
+            "separation_duty_rule_set_digest": (policy.separation_duty_rule_set_digest),
             "signature_profile_digest": signature_profile_digest,
             "signature_set_digest": signature_set_digest,
         }
@@ -172,14 +153,10 @@ class AssumptionAuthorityPolicyCommitV2:
             policy_id=policy.policy_id,
             policy_digest=policy.policy_digest,
             predecessor_policy_digest=predecessor_policy_digest,
-            predecessor_commit_receipt_digest=(
-                predecessor_commit_receipt_digest
-            ),
+            predecessor_commit_receipt_digest=(predecessor_commit_receipt_digest),
             authority_root_digest=policy.authority_root_digest,
             grant_set_digest=policy.grant_set_digest,
-            separation_duty_rule_set_digest=(
-                policy.separation_duty_rule_set_digest
-            ),
+            separation_duty_rule_set_digest=(policy.separation_duty_rule_set_digest),
             exception_set_digest=policy.exception_set_digest,
             exception_count=len(policy.duty_exceptions),
             approval_class=approval_class,
@@ -191,8 +168,7 @@ class AssumptionAuthorityPolicyCommitV2:
             ),
             signature_set_digest=signature_set_digest,
             commit_receipt_digest=domain_digest(
-                "ASSUMPTION_AUTHORITY_POLICY_COMMIT_V2",
-                unsigned,
+                "ASSUMPTION_AUTHORITY_POLICY_COMMIT_V2", unsigned
             ),
         )
 
@@ -215,9 +191,7 @@ class AssumptionAuthorityPolicyCommitV2:
                 self.predecessor_commit_receipt_digest
             ),
             "predecessor_policy_digest": self.predecessor_policy_digest,
-            "separation_duty_rule_set_digest": (
-                self.separation_duty_rule_set_digest
-            ),
+            "separation_duty_rule_set_digest": (self.separation_duty_rule_set_digest),
             "signature_profile_digest": self.signature_profile_digest,
             "signature_set_digest": self.signature_set_digest,
         }
@@ -264,10 +238,7 @@ class AssumptionPolicyActivationProof:
                 self.challenge_classification_policy_digest,
                 "ASSUMPTION_ACTIVATION_PROOF_CHALLENGE_POLICY_INVALID",
             ),
-            (
-                self.authority_root_digest,
-                "ASSUMPTION_ACTIVATION_PROOF_ROOT_INVALID",
-            ),
+            (self.authority_root_digest, "ASSUMPTION_ACTIVATION_PROOF_ROOT_INVALID"),
             (
                 self.signature_set_digest,
                 "ASSUMPTION_ACTIVATION_PROOF_SIGNATURE_SET_INVALID",
@@ -335,8 +306,7 @@ class AssumptionPolicyActivationProof:
             valid_signer_ids=signers,
             rejected_signer_codes=rejected,
             activation_proof_digest=domain_digest(
-                "ASSUMPTION_POLICY_ACTIVATION_PROOF",
-                unsigned,
+                "ASSUMPTION_POLICY_ACTIVATION_PROOF", unsigned
             ),
         )
 
@@ -389,10 +359,7 @@ class AssumptionPolicyLedgerEntryV2:
                 commit.approval_policy_digest,
                 self.approval_policy.approval_policy_digest,
             ),
-            (
-                commit.signature_profile_digest,
-                self.signature_profile.profile_digest,
-            ),
+            (commit.signature_profile_digest, self.signature_profile.profile_digest),
             (
                 commit.challenge_classification_policy_digest,
                 self.challenge_classification_policy.policy_digest,
@@ -432,9 +399,7 @@ class AssumptionPolicyLedgerEntryV2:
             "schema_version": POLICY_LEDGER_ENTRY_V2_SCHEMA_VERSION,
             "activation_proof": activation_proof.to_json_value(),
             "approval_policy": approval_policy.to_json_value(),
-            "challenge_classification_policy": (
-                challenge_classification_policy.to_json_value()
-            ),
+            "challenge_classification_policy": (challenge_classification_policy.to_json_value()),
             "policy": policy.to_json_value(),
             "policy_commit": policy_commit.to_json_value(),
             "signature_profile": signature_profile.to_json_value(),
@@ -447,8 +412,7 @@ class AssumptionPolicyLedgerEntryV2:
             challenge_classification_policy=challenge_classification_policy,
             activation_proof=activation_proof,
             ledger_entry_digest=domain_digest(
-                "ASSUMPTION_POLICY_LEDGER_ENTRY_V2",
-                unsigned,
+                "ASSUMPTION_POLICY_LEDGER_ENTRY_V2", unsigned
             ),
         )
 
@@ -496,8 +460,7 @@ class AssumptionPolicyLedgerV2:
 
     @classmethod
     def build(
-        cls,
-        entries: tuple[AssumptionPolicyLedgerEntryV2, ...],
+        cls, entries: tuple[AssumptionPolicyLedgerEntryV2, ...]
     ) -> AssumptionPolicyLedgerV2:
         ordered = order_policy_entries(entries)
         unsigned = {
@@ -506,10 +469,7 @@ class AssumptionPolicyLedgerV2:
         }
         return cls(
             entries=ordered,
-            ledger_root_digest=domain_digest(
-                "ASSUMPTION_POLICY_LEDGER",
-                unsigned,
-            ),
+            ledger_root_digest=domain_digest("ASSUMPTION_POLICY_LEDGER", unsigned),
         )
 
     def _unsigned_value(self) -> dict[str, object]:
@@ -519,10 +479,7 @@ class AssumptionPolicyLedgerV2:
         }
 
     def to_json_value(self) -> dict[str, object]:
-        return {
-            **self._unsigned_value(),
-            "ledger_root_digest": self.ledger_root_digest,
-        }
+        return {**self._unsigned_value(), "ledger_root_digest": self.ledger_root_digest}
 
 
 @dataclass(frozen=True, slots=True)
@@ -591,8 +548,7 @@ class AssumptionPolicyActivationResult:
             predecessor_ledger_root=predecessor_ledger_root,
             resulting_ledger_root=resulting_ledger_root,
             result_digest=domain_digest(
-                "ASSUMPTION_POLICY_ACTIVATION_RESULT",
-                unsigned,
+                "ASSUMPTION_POLICY_ACTIVATION_RESULT", unsigned
             ),
         )
 
@@ -620,9 +576,7 @@ def classify_exact_idempotence(
         == candidate.policy_commit.commit_receipt_digest
     )
     if same_commit:
-        raise AssumptionPolicyActivationContractError(
-            "ASSUMPTION_POLICY_ENTRY_DIVERGENCE"
-        )
+        raise AssumptionPolicyActivationContractError("ASSUMPTION_POLICY_ENTRY_DIVERGENCE")
     return "DISTINCT_ENTRY"
 
 
@@ -633,17 +587,11 @@ def validate_successor_position(
     commit = candidate.policy_commit
     predecessor_matches = (
         commit.predecessor_policy_digest == head.policy.policy_digest
-        and commit.predecessor_commit_receipt_digest
-        == head.policy_commit.commit_receipt_digest
+        and commit.predecessor_commit_receipt_digest == head.policy_commit.commit_receipt_digest
     )
     if not predecessor_matches:
-        raise AssumptionPolicyActivationContractError(
-            "ASSUMPTION_POLICY_CHAIN_FORK"
-        )
-    if (
-        commit.effective_from_sequence
-        <= head.policy_commit.effective_from_sequence
-    ):
+        raise AssumptionPolicyActivationContractError("ASSUMPTION_POLICY_CHAIN_FORK")
+    if commit.effective_from_sequence <= head.policy_commit.effective_from_sequence:
         raise AssumptionPolicyActivationContractError(
             "ASSUMPTION_POLICY_EFFECTIVE_SEQUENCE_NOT_INCREASING"
         )
@@ -663,32 +611,24 @@ def order_policy_entries(
         else:
             children.setdefault(predecessor, []).append(entry)
     if len(genesis) != 1:
-        raise AssumptionPolicyActivationContractError(
-            "ASSUMPTION_POLICY_LEDGER_GENESIS_INVALID"
-        )
+        raise AssumptionPolicyActivationContractError("ASSUMPTION_POLICY_LEDGER_GENESIS_INVALID")
     ordered: list[AssumptionPolicyLedgerEntryV2] = []
     visited: set[str] = set()
     current = genesis[0]
     while True:
         digest = current.policy_commit.commit_receipt_digest
         if digest in visited:
-            raise AssumptionPolicyActivationContractError(
-                "ASSUMPTION_POLICY_LEDGER_CYCLE"
-            )
+            raise AssumptionPolicyActivationContractError("ASSUMPTION_POLICY_LEDGER_CYCLE")
         visited.add(digest)
         ordered.append(current)
         successors = children.get(digest, [])
         if len(successors) > 1:
-            raise AssumptionPolicyActivationContractError(
-                "ASSUMPTION_POLICY_CHAIN_FORK"
-            )
+            raise AssumptionPolicyActivationContractError("ASSUMPTION_POLICY_CHAIN_FORK")
         if not successors:
             break
         successor = successors[0]
         validate_successor_position(current, successor)
         current = successor
     if len(visited) != len(entries):
-        raise AssumptionPolicyActivationContractError(
-            "ASSUMPTION_POLICY_LEDGER_DISCONNECTED"
-        )
+        raise AssumptionPolicyActivationContractError("ASSUMPTION_POLICY_LEDGER_DISCONNECTED")
     return tuple(ordered)
