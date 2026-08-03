@@ -1,0 +1,18 @@
+# Enforce LF line endings repo-wide.
+#
+# Many CSD Foundry artifacts are content-addressed by SHA-256 (seed JSONL,
+# v0.4 execution/publication/reconciliation schemas and fixtures, v0.5 frozen
+# contracts). A contributor's `core.autocrlf=true` (the historical default on
+# Windows) silently rewrites LF -> CRLF on checkout, which invalidates every
+# frozen digest. Pin every text file to LF so the working-tree bytes match
+# the committed bytes on every platform.
+* text=auto eol=lf
+
+# Binary artifacts must never be touched by any EOL or text filter.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary

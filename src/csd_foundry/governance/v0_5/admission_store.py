@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
+from csd_foundry._platform import fsync_directory
 from csd_foundry.governance.v0_5.admission import CommittedValidationContext
 from csd_foundry.governance.v0_5.canonicalization import GovernanceContractError
 from csd_foundry.governance.v0_5.contracts import CONTRACT_TYPES, ContractObject, parse_contract
@@ -185,8 +186,4 @@ def _digest_hex(value: object) -> str:
 
 
 def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    fsync_directory(path)
