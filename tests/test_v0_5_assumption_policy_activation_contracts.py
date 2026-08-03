@@ -222,9 +222,7 @@ def test_signature_profile_pins_schema_algorithm_and_semantics() -> None:
     profile = _signature_profile()
     assert profile.signature_set_schema_version == "signature-set/1"
     assert profile.signature_record_semantics_version == "signature-record/1"
-    assert profile.verification_profile_for("ed25519") == (
-        "ed25519-rfc8032-strict/1"
-    )
+    assert profile.verification_profile_for("ed25519") == ("ed25519-rfc8032-strict/1")
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         profile.verification_profile_for("rsa-pss-sha256")
     assert failure.value.code == "ASSUMPTION_SIGNATURE_ALGORITHM_NOT_PINNED"
@@ -234,18 +232,12 @@ def test_legacy_commit_is_not_activatable() -> None:
     legacy = {"schema_version": "assumption-authority-policy-commit/1"}
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         validate_activatable_commit_version(legacy)
-    assert failure.value.code == (
-        "ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE"
-    )
+    assert failure.value.code == ("ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE")
 
 
 def test_fail_fast_order_places_overlap_before_crypto() -> None:
-    overlap_index = ACTIVATION_VALIDATION_ORDER.index(
-        "POLICY_STRUCTURE_AND_OVERLAP"
-    )
-    crypto_index = ACTIVATION_VALIDATION_ORDER.index(
-        "CRYPTOGRAPHIC_VERIFICATION"
-    )
+    overlap_index = ACTIVATION_VALIDATION_ORDER.index("POLICY_STRUCTURE_AND_OVERLAP")
+    crypto_index = ACTIVATION_VALIDATION_ORDER.index("CRYPTOGRAPHIC_VERIFICATION")
     assert overlap_index < crypto_index
     assert POLICY_APPEND_PRECEDENCE == (
         "EXACT_IDEMPOTENCE",
@@ -294,9 +286,7 @@ def test_position_precedence_distinguishes_fork_and_equal_sequence() -> None:
     equal = _entry(predecessor=head, effective_from_sequence=10)
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         validate_successor_position(head, equal)
-    assert failure.value.code == (
-        "ASSUMPTION_POLICY_EFFECTIVE_SEQUENCE_NOT_INCREASING"
-    )
+    assert failure.value.code == ("ASSUMPTION_POLICY_EFFECTIVE_SEQUENCE_NOT_INCREASING")
 
     wrong_predecessor = _entry(effective_from_sequence=20)
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
