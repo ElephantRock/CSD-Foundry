@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from csd_foundry.governance.v0_5.assumption import (
@@ -63,55 +61,47 @@ def _approval_policy() -> AssumptionPolicyApprovalPolicy:
 
 
 def _signature_profile() -> AssumptionPolicySignatureProfile:
+    profile = AssumptionPolicyAlgorithmProfile(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/1",
+    )
     return AssumptionPolicySignatureProfile.build(
-        algorithm_profiles=(
-            AssumptionPolicyAlgorithmProfile(
-                algorithm="ed25519",
-                verification_profile="ed25519-rfc8032-strict/1",
-            ),
-        ),
+        algorithm_profiles=(profile,),
         required_authority_scope="ASSUMPTION_POLICY_APPROVAL",
         key_authority_root_digest=_digest("a"),
     )
 
 
 def _challenge_policy() -> AssumptionChallengeClassificationPolicy:
-    return AssumptionChallengeClassificationPolicy.build(
-        reason_rules=(
-            AssumptionChallengeClassificationRule(
-                reason_code="PROVENANCE_CONFLICT",
-                materiality="MATERIAL",
-            ),
-        )
+    rule = AssumptionChallengeClassificationRule(
+        reason_code="PROVENANCE_CONFLICT",
+        materiality="MATERIAL",
     )
+    return AssumptionChallengeClassificationPolicy.build(reason_rules=(rule,))
 
 
 def _grant(
     grant_id: str = "grant:1",
     *,
     action: str = "ADMIT",
-    scope_ids: tuple[str, ...] = ("scope:control",),
-    effective_from_sequence: int = 1,
-    effective_until_sequence: int | None = None,
-    challenge_materialities: tuple[str, ...] = (),
+    assumption_materialities: tuple[str, ...] = ("MATERIAL",),
 ) -> AssumptionAuthorityGrant:
     return AssumptionAuthorityGrant.build(
         grant_id=grant_id,
         action=action,
         authority_id="authority:operator",
-        scope_ids=scope_ids,
-        assumption_materialities=("MATERIAL",),
-        challenge_materialities=challenge_materialities,
-        effective_from_sequence=effective_from_sequence,
-        effective_until_sequence=effective_until_sequence,
+        scope_ids=("scope:control",),
+        assumption_materialities=assumption_materialities,
+        effective_from_sequence=1,
     )
 
 
 def _policy(*grants: AssumptionAuthorityGrant) -> AssumptionAuthorityPolicy:
+    selected = grants or (_grant(),)
     return AssumptionAuthorityPolicy.build(
         policy_id="policy:assumptions:1",
         authority_root_digest=_digest("a"),
-        grants=grants or (_grant(),),
+        grants=selected,
     )
 
 
@@ -126,16 +116,15 @@ def _entry(
     approval_policy = _approval_policy()
     signature_profile = _signature_profile()
     challenge_policy = _challenge_policy()
+    predecessor_policy = None
+    predecessor_commit = None
+    if predecessor is not None:
+        predecessor_policy = predecessor.policy.policy_digest
+        predecessor_commit = predecessor.policy_commit.commit_receipt_digest
     commit = AssumptionAuthorityPolicyCommitV2.build(
         policy=selected_policy,
-        predecessor_policy_digest=(
-            None if predecessor is None else predecessor.policy.policy_digest
-        ),
-        predecessor_commit_receipt_digest=(
-            None
-            if predecessor is None
-            else predecessor.policy_commit.commit_receipt_digest
-        ),
+        predecessor_policy_digest=predecessor_policy,
+        predecessor_commit_receipt_digest=predecessor_commit,
         effective_from_sequence=effective_from_sequence,
         approval_policy_digest=approval_policy.approval_policy_digest,
         signature_profile_digest=signature_profile.profile_digest,
@@ -165,6 +154,22 @@ def _entry(
 
 
 def _assumption() -> Assumption:
+    challenge_a = AssumptionChallenge(
+        challenge_id="challenge:a",
+        challenger_authority_id="authority:challenger-a",
+        reason_code="PROVENANCE_CONFLICT",
+        challenge_receipt_digest=_digest("c"),
+        opened_at_sequence=2,
+        opening_event_digest=_digest("d"),
+    )
+    challenge_b = AssumptionChallenge(
+        challenge_id="challenge:b",
+        challenger_authority_id="authority:challenger-b",
+        reason_code="UNKNOWN_REASON",
+        challenge_receipt_digest=_digest("e"),
+        opened_at_sequence=3,
+        opening_event_digest=_digest("f"),
+    )
     return Assumption(
         assumption_id="assumption:1",
         proposition_id="proposition:1",
@@ -181,30 +186,35 @@ def _assumption() -> Assumption:
         limitations=(),
         maximum_reuse_class="D2",
         standing=STANDING_ADMITTED,
-        active_challenges=(
-            AssumptionChallenge(
-                challenge_id="challenge:a",
-                challenger_authority_id="authority:challenger-a",
-                reason_code="PROVENANCE_CONFLICT",
-                challenge_receipt_digest=_digest("c"),
-                opened_at_sequence=2,
-                opening_event_digest=_digest("d"),
-            ),
-            AssumptionChallenge(
-                challenge_id="challenge:b",
-                challenger_authority_id="authority:challenger-b",
-                reason_code="UNKNOWN_REASON",
-                challenge_receipt_digest=_digest("e"),
-                opened_at_sequence=3,
-                opening_event_digest=_digest("f"),
-            ),
-        ),
+        active_challenges=(challenge_a, challenge_b),
         superseded_by_id=None,
         proposal_source_receipt_digest=_digest("1"),
         current_source_receipt_digest=_digest("2"),
         current_event_digest=_digest("3"),
         current_entity_sequence=3,
         last_clock_sequence=3,
+    )
+
+
+def _resolution_event(
+    assumption: Assumption,
+    resolved_challenge_ids: list[str],
+):
+    return build_assumption_event(
+        assumption_id=assumption.assumption_id,
+        entity_sequence=4,
+        previous_entity_event_digest=assumption.current_event_digest,
+        clock_sequence=4,
+        source_receipt_digest=_digest("4"),
+        payload={
+            "operation": "RESOLVE_CHALLENGES",
+            "resolution_outcome": "RETURN_TO_ADMITTED",
+            "resolver_authority_id": "authority:resolver",
+            "resolution_receipt_digest": _digest("5"),
+            "resolution_basis_code": "ADJUDICATED",
+            "resolved_challenge_ids": resolved_challenge_ids,
+            "replacement_assumption_id": None,
+        },
     )
 
 
@@ -221,19 +231,22 @@ def test_signature_profile_pins_schema_algorithm_and_semantics() -> None:
 
 
 def test_legacy_commit_is_not_activatable() -> None:
+    legacy = {"schema_version": "assumption-authority-policy-commit/1"}
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
-        validate_activatable_commit_version(
-            {"schema_version": "assumption-authority-policy-commit/1"}
-        )
+        validate_activatable_commit_version(legacy)
     assert failure.value.code == (
         "ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE"
     )
 
 
 def test_fail_fast_order_places_overlap_before_crypto() -> None:
-    assert ACTIVATION_VALIDATION_ORDER.index("POLICY_STRUCTURE_AND_OVERLAP") < (
-        ACTIVATION_VALIDATION_ORDER.index("CRYPTOGRAPHIC_VERIFICATION")
+    overlap_index = ACTIVATION_VALIDATION_ORDER.index(
+        "POLICY_STRUCTURE_AND_OVERLAP"
     )
+    crypto_index = ACTIVATION_VALIDATION_ORDER.index(
+        "CRYPTOGRAPHIC_VERIFICATION"
+    )
+    assert overlap_index < crypto_index
     assert POLICY_APPEND_PRECEDENCE == (
         "EXACT_IDEMPOTENCE",
         "PREDECESSOR_HEAD_MATCH",
@@ -251,13 +264,9 @@ def test_overlapping_grants_are_rejected_structurally() -> None:
 
 def test_disjoint_materiality_grants_are_accepted() -> None:
     material = _grant("grant:material")
-    advisory = AssumptionAuthorityGrant.build(
-        grant_id="grant:advisory",
-        action="ADMIT",
-        authority_id="authority:operator",
-        scope_ids=("scope:control",),
+    advisory = _grant(
+        "grant:advisory",
         assumption_materialities=("ADVISORY",),
-        effective_from_sequence=1,
     )
     validate_policy_overlap(_policy(advisory, material))
 
@@ -266,20 +275,15 @@ def test_full_chain_root_commits_to_complete_ordered_entries() -> None:
     first = _entry(effective_from_sequence=10)
     second = _entry(predecessor=first, effective_from_sequence=20)
     ledger = AssumptionPolicyLedgerV2.build((first, second))
+    first_only = AssumptionPolicyLedgerV2.build((first,))
     assert ledger.entries == (first, second)
-    assert ledger.ledger_root_digest != AssumptionPolicyLedgerV2.build(
-        (first,)
-    ).ledger_root_digest
+    assert ledger.ledger_root_digest != first_only.ledger_root_digest
 
 
 def test_exact_digest_and_bytes_define_idempotence() -> None:
     entry = _entry()
-    assert classify_exact_idempotence(entry, entry) == "IDEMPOTENT_APPEND"
     divergent = _entry(rejected_signer_codes=("SIGNATURE_INVALID",))
-    divergent = replace(
-        divergent,
-        policy_commit=entry.policy_commit,
-    )
+    assert classify_exact_idempotence(entry, entry) == "IDEMPOTENT_APPEND"
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         classify_exact_idempotence(entry, divergent)
     assert failure.value.code == "ASSUMPTION_POLICY_ENTRY_DIVERGENCE"
@@ -302,21 +306,9 @@ def test_position_precedence_distinguishes_fork_and_equal_sequence() -> None:
 
 def test_resolution_materiality_is_derived_from_current_challenges() -> None:
     assumption = _assumption()
-    event = build_assumption_event(
-        assumption_id=assumption.assumption_id,
-        entity_sequence=4,
-        previous_entity_event_digest=assumption.current_event_digest,
-        clock_sequence=4,
-        source_receipt_digest=_digest("4"),
-        payload={
-            "operation": "RESOLVE_CHALLENGES",
-            "resolution_outcome": "RETURN_TO_ADMITTED",
-            "resolver_authority_id": "authority:resolver",
-            "resolution_receipt_digest": _digest("5"),
-            "resolution_basis_code": "ADJUDICATED",
-            "resolved_challenge_ids": ["challenge:a", "challenge:b"],
-            "replacement_assumption_id": None,
-        },
+    event = _resolution_event(
+        assumption,
+        ["challenge:a", "challenge:b"],
     )
     challenge_ids, materialities = derive_resolution_challenge_materialities(
         assumption,
@@ -329,22 +321,7 @@ def test_resolution_materiality_is_derived_from_current_challenges() -> None:
 
 def test_resolution_unknown_challenge_fails_closed() -> None:
     assumption = _assumption()
-    event = build_assumption_event(
-        assumption_id=assumption.assumption_id,
-        entity_sequence=4,
-        previous_entity_event_digest=assumption.current_event_digest,
-        clock_sequence=4,
-        source_receipt_digest=_digest("4"),
-        payload={
-            "operation": "RESOLVE_CHALLENGES",
-            "resolution_outcome": "RETURN_TO_ADMITTED",
-            "resolver_authority_id": "authority:resolver",
-            "resolution_receipt_digest": _digest("5"),
-            "resolution_basis_code": "ADJUDICATED",
-            "resolved_challenge_ids": ["challenge:missing"],
-            "replacement_assumption_id": None,
-        },
-    )
+    event = _resolution_event(assumption, ["challenge:missing"])
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         derive_resolution_challenge_materialities(
             assumption,
