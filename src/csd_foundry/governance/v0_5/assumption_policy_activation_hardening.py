@@ -15,6 +15,9 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     require_digest,
     require_self_digest,
 )
+from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
+    AssumptionPolicyLedgerEntryV3,
+)
 from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
     AssumptionAuthorityPolicyCommitV2,
     AssumptionPolicyActivationResult,
@@ -170,11 +173,14 @@ class ExpectedPolicyLedgerState:
         }
 
 
+PreparedPolicyLedgerEntry: TypeAlias = AssumptionPolicyLedgerEntryV2 | AssumptionPolicyLedgerEntryV3
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedPolicyActivation:
     """Purely validated entry that makes no publication claim."""
 
-    ledger_entry: AssumptionPolicyLedgerEntryV2
+    ledger_entry: PreparedPolicyLedgerEntry
     prepared_digest: str
 
     def __post_init__(self) -> None:
@@ -188,7 +194,7 @@ class PreparedPolicyActivation:
     @classmethod
     def build(
         cls,
-        ledger_entry: AssumptionPolicyLedgerEntryV2,
+        ledger_entry: PreparedPolicyLedgerEntry,
     ) -> PreparedPolicyActivation:
         unsigned = {
             "schema_version": PREPARED_POLICY_ACTIVATION_SCHEMA_VERSION,
