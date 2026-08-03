@@ -604,6 +604,7 @@ class AssumptionPolicyLedgerV3:
 
     @classmethod
     def build(cls, entries: tuple[AssumptionPolicyLedgerEntryV3, ...]) -> AssumptionPolicyLedgerV3:
+        _require_v3_entries(entries)
         ordered = order_policy_entries_v3(entries)
         unsigned = {
             "schema_version": POLICY_LEDGER_V3_SCHEMA_VERSION,
@@ -736,9 +737,26 @@ def validate_successor_position_v3(
 # --- chain ordering for V3 -------------------------------------------------
 
 
+def _require_v3_entries(entries: tuple[object, ...]) -> None:
+    """Reject any entry that is not exactly ``AssumptionPolicyLedgerEntryV3``.
+
+    Must be called before any field access on entries, from every public path
+    (``build``, ``__post_init__``, ``order_policy_entries_v3``) so that a V2 or
+    foreign object surfaces the stable governance code rather than
+    ``AttributeError``.
+    """
+
+    for entry in entries:
+        if type(entry) is not AssumptionPolicyLedgerEntryV3:
+            raise AssumptionPolicyActivationContractError(
+                "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
+            )
+
+
 def order_policy_entries_v3(
     entries: tuple[AssumptionPolicyLedgerEntryV3, ...],
 ) -> tuple[AssumptionPolicyLedgerEntryV3, ...]:
+    _require_v3_entries(entries)
     if not entries:
         return ()
     children: dict[str, list[AssumptionPolicyLedgerEntryV3]] = {}

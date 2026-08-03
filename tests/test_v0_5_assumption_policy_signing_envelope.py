@@ -775,8 +775,15 @@ def test_v2_entry_rejected_from_ledger_v3_at_runtime() -> None:
         challenge_classification_policy=challenge,
         activation_proof=proof_v1,
     )
-    # Attempting to insert it into ledger/3 must reject with the stable code,
-    # not an AttributeError.
+    # The public build() path must reject V2 entries with the stable governance
+    # code, not an AttributeError. This tests the path that was previously
+    # vulnerable: build() -> order_policy_entries_v3() -> entry.signing_payload
+    # (field access before type validation).
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        AssumptionPolicyLedgerV3.build((entry_v2,))  # type: ignore[arg-type]
+    assert failure.value.code == "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
+
+    # The constructor path must also reject for defense in depth.
     ledger = AssumptionPolicyLedgerV3.build(())
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         AssumptionPolicyLedgerV3(
@@ -1064,3 +1071,52 @@ def test_identical_inputs_produce_byte_identical_everything() -> None:
     ledger_a = AssumptionPolicyLedgerV3.build((e1,))
     ledger_b = AssumptionPolicyLedgerV3.build((e2,))
     assert ledger_a.ledger_root_digest == ledger_b.ledger_root_digest
+
+
+# ===========================================================================
+# Correction: signature-set permutation vector
+# ===========================================================================
+
+
+def test_signature_set_permutations_preserve_digest_and_bytes() -> None:
+    """Two real SignatureSet objects with identical records in opposite orders
+    must have the same digest and canonical bytes.
+
+    This validates that the V3 envelope composes correctly with the frozen SET
+    canonicalization used by signature-set/1.
+    """
+
+    from typing import cast
+
+    from csd_foundry.governance.v0_5.contracts import SignatureSet
+
+    record_a = {
+        "signer_id": "authority:a",
+        "key_id": "key:a",
+        "algorithm": "ed25519",
+        "signed_digest": _digest("a"),
+        "signature_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+        "authority_scope": "ASSUMPTION_POLICY_APPROVAL",
+    }
+    record_b = {
+        "signer_id": "authority:b",
+        "key_id": "key:b",
+        "algorithm": "ed25519",
+        "signed_digest": _digest("a"),
+        "signature_base64": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+        "authority_scope": "ASSUMPTION_POLICY_APPROVAL",
+    }
+    set_forward = cast(
+        SignatureSet,
+        SignatureSet.build(
+            {"schema_version": "signature-set/1", "signatures": [record_a, record_b]}
+        ),
+    )
+    set_reversed = cast(
+        SignatureSet,
+        SignatureSet.build(
+            {"schema_version": "signature-set/1", "signatures": [record_b, record_a]}
+        ),
+    )
+    assert set_forward.digest == set_reversed.digest
+    assert set_forward.canonical_bytes == set_reversed.canonical_bytes
