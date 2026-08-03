@@ -8,9 +8,7 @@ import re
 from dataclasses import dataclass
 
 SIGNATURE_PROFILE_SCHEMA_VERSION = "assumption-policy-signature-profile/1"
-CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION = (
-    "assumption-challenge-classification-policy/1"
-)
+CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION = "assumption-challenge-classification-policy/1"
 AUTHORITY_POLICY_COMMIT_V2_SCHEMA_VERSION = "assumption-authority-policy-commit/2"
 ACTIVATION_PROOF_SCHEMA_VERSION = "assumption-policy-activation-proof/1"
 POLICY_LEDGER_ENTRY_V2_SCHEMA_VERSION = "assumption-policy-ledger-entry/2"
@@ -91,9 +89,7 @@ class AssumptionPolicySignatureProfile:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_SIGNATURE_RECORD_SEMANTICS_UNSUPPORTED"
             )
-        canonical = tuple(
-            sorted(self.algorithm_profiles, key=lambda item: item.algorithm)
-        )
+        canonical = tuple(sorted(self.algorithm_profiles, key=lambda item: item.algorithm))
         if not canonical or canonical != self.algorithm_profiles:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_SIGNATURE_PROFILE_ALGORITHMS_NOT_CANONICAL"
@@ -132,27 +128,19 @@ class AssumptionPolicySignatureProfile:
         signature_record_semantics_version: str = "signature-record/1",
         duplicate_signer_rule: str = "ONE_SIGNER_ONE_VOTE",
     ) -> AssumptionPolicySignatureProfile:
-        canonical = tuple(
-            sorted(algorithm_profiles, key=lambda item: item.algorithm)
-        )
+        canonical = tuple(sorted(algorithm_profiles, key=lambda item: item.algorithm))
         unsigned = {
             "schema_version": SIGNATURE_PROFILE_SCHEMA_VERSION,
-            "algorithm_profiles": [
-                item.to_json_value() for item in canonical
-            ],
+            "algorithm_profiles": [item.to_json_value() for item in canonical],
             "duplicate_signer_rule": duplicate_signer_rule,
             "key_authority_root_digest": key_authority_root_digest,
             "required_authority_scope": required_authority_scope,
-            "signature_record_semantics_version": (
-                signature_record_semantics_version
-            ),
+            "signature_record_semantics_version": (signature_record_semantics_version),
             "signature_set_schema_version": signature_set_schema_version,
         }
         return cls(
             signature_set_schema_version=signature_set_schema_version,
-            signature_record_semantics_version=(
-                signature_record_semantics_version
-            ),
+            signature_record_semantics_version=(signature_record_semantics_version),
             algorithm_profiles=canonical,
             required_authority_scope=required_authority_scope,
             key_authority_root_digest=key_authority_root_digest,
@@ -166,15 +154,11 @@ class AssumptionPolicySignatureProfile:
     def _unsigned_value(self) -> dict[str, object]:
         return {
             "schema_version": SIGNATURE_PROFILE_SCHEMA_VERSION,
-            "algorithm_profiles": [
-                item.to_json_value() for item in self.algorithm_profiles
-            ],
+            "algorithm_profiles": [item.to_json_value() for item in self.algorithm_profiles],
             "duplicate_signer_rule": self.duplicate_signer_rule,
             "key_authority_root_digest": self.key_authority_root_digest,
             "required_authority_scope": self.required_authority_scope,
-            "signature_record_semantics_version": (
-                self.signature_record_semantics_version
-            ),
+            "signature_record_semantics_version": (self.signature_record_semantics_version),
             "signature_set_schema_version": self.signature_set_schema_version,
         }
 
@@ -223,9 +207,7 @@ class AssumptionChallengeClassificationPolicy:
     policy_digest: str
 
     def __post_init__(self) -> None:
-        canonical = tuple(
-            sorted(self.reason_rules, key=lambda item: item.reason_code)
-        )
+        canonical = tuple(sorted(self.reason_rules, key=lambda item: item.reason_code))
         if canonical != self.reason_rules:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_CHALLENGE_CLASSIFICATION_RULES_NOT_CANONICAL"
@@ -252,9 +234,7 @@ class AssumptionChallengeClassificationPolicy:
         reason_rules: tuple[AssumptionChallengeClassificationRule, ...],
         unknown_reason_behavior: str = "FAIL_CLOSED_AS_CRITICAL",
     ) -> AssumptionChallengeClassificationPolicy:
-        canonical = tuple(
-            sorted(reason_rules, key=lambda item: item.reason_code)
-        )
+        canonical = tuple(sorted(reason_rules, key=lambda item: item.reason_code))
         unsigned = {
             "schema_version": CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION,
             "reason_rules": [item.to_json_value() for item in canonical],
@@ -272,9 +252,7 @@ class AssumptionChallengeClassificationPolicy:
     def _unsigned_value(self) -> dict[str, object]:
         return {
             "schema_version": CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION,
-            "reason_rules": [
-                item.to_json_value() for item in self.reason_rules
-            ],
+            "reason_rules": [item.to_json_value() for item in self.reason_rules],
             "unknown_reason_behavior": self.unknown_reason_behavior,
         }
 
