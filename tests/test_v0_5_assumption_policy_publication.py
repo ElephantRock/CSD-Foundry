@@ -592,7 +592,7 @@ def test_publisher_idempotent_retry() -> None:
     assert result.append_result == "IDEMPOTENT_APPEND"
 
 
-def test_same_snapshot_competing_writers() -> None:
+def test_sequential_stale_state_conflict() -> None:
     pub = InMemoryAssumptionPolicyPublisher()
     pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
     pb = _prepared_activation(("authority:a", "authority:b"), seq=20)
@@ -600,10 +600,11 @@ def test_same_snapshot_competing_writers() -> None:
     state = pub.read_state()
     result_a = pub.publish(prepared=pa, expected_state=state)
     assert result_a.append_result == "COMMITTED"
-    # b uses the same stale state; the ledger has advanced.
+    # b uses the same stale state; the ledger has advanced. pb has no
+    # predecessor (genesis), which conflicts with the non-empty head.
     with pytest.raises(AssumptionPolicyPublicationConflict) as f:
         pub.publish(prepared=pb, expected_state=state)
-    assert f.value.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
+    assert f.value.code == "ASSUMPTION_POLICY_CHAIN_V3_FORK"
 
 
 def test_no_clobber_state_preserved_on_conflict() -> None:
@@ -739,3 +740,371 @@ def test_identical_inputs_produce_byte_identical_activation_result() -> None:
     r1 = _full_publish()
     r2 = _full_publish()
     assert r1.result_digest == r2.result_digest
+
+
+# ===========================================================================
+# Correction 2: same-commit divergence as publication conflict
+# ===========================================================================
+
+
+def test_divergent_entry_same_commit_raises_publication_conflict() -> None:
+    """Publish an entry, then attempt to publish a divergent entry with the
+    same commit receipt. Must raise PublicationConflict, not a raw contract error."""
+
+    pub = InMemoryAssumptionPolicyPublisher()
+    pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
+    state = pub.read_state()
+    pub.publish(prepared=pa, expected_state=state)
+    state_after = pub.read_state()
+
+    # Build a divergent entry: same commit but different proof signers.
+    entry = pa.ledger_entry
+    payload = entry.signing_payload
+    commit = entry.policy_commit
+    divergent_proof = AssumptionPolicyActivationProofV2.build(
+        signing_payload_digest=payload.signing_payload_digest,
+        policy_commit_receipt_digest=commit.commit_receipt_digest,
+        approval_policy_digest=entry.approval_policy.approval_policy_digest,
+        approval_rule_digest=entry.approval_policy.rule_for(payload.approval_class).rule_digest,
+        signature_profile_digest=entry.signature_profile.profile_digest,
+        challenge_classification_policy_digest=entry.challenge_classification_policy.policy_digest,
+        authority_root_digest=payload.authority_root_digest,
+        signature_set_digest=commit.signature_set_digest,
+        valid_signer_ids=("authority:a", "authority:b"),
+        rejected_signer_codes=("SIGNATURE_INVALID",),
+    )
+    divergent_entry = AssumptionPolicyLedgerEntryV3.build(
+        policy=entry.policy,
+        signing_payload=payload,
+        policy_commit=commit,
+        approval_policy=entry.approval_policy,
+        signature_profile=entry.signature_profile,
+        challenge_classification_policy=entry.challenge_classification_policy,
+        activation_proof=divergent_proof,
+    )
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation as PPA,
+    )
+
+    divergent_prepared = PPA.build(divergent_entry)
+
+    with pytest.raises(AssumptionPolicyPublicationConflict) as f:
+        pub.publish(prepared=divergent_prepared, expected_state=state_after)
+    assert f.value.code == "ASSUMPTION_POLICY_ENTRY_V3_DIVERGENCE"
+    # Root and head unchanged.
+    assert pub.read_state() == state_after
+
+
+# ===========================================================================
+# Correction 3: separate stale-state fork tests
+# ===========================================================================
+
+
+def _make_successor(predecessor_entry, seq=20, *, wrong_policy=False, wrong_commit=False):
+    """Build a V3 successor entry with optional predecessor mutations."""
+
+    pred_policy = predecessor_entry.signing_payload.policy_digest
+    pred_commit = predecessor_entry.policy_commit.commit_receipt_digest
+    if wrong_policy:
+        pred_policy = _digest("f")
+    if wrong_commit:
+        pred_commit = _digest("d")
+    payload = _payload(seq=seq, pred_policy=pred_policy, pred_commit=pred_commit)
+    c = _commit(payload, _digest("c"))
+    proof = _proof(payload, c)
+    return AssumptionPolicyLedgerEntryV3.build(
+        policy=_policy(),
+        signing_payload=payload,
+        policy_commit=c,
+        approval_policy=_approval_policy(),
+        signature_profile=_sig_profile(),
+        challenge_classification_policy=_chal_policy(),
+        activation_proof=proof,
+    )
+
+
+def test_stale_state_wrong_predecessor_policy_fork() -> None:
+    first = _entry(seq=10)
+    ledger = AssumptionPolicyLedgerV3.build((first,))
+    # Candidate has correct predecessor commit but wrong predecessor policy.
+    wrong = _make_successor(first, seq=20, wrong_policy=True)
+    stale = ExpectedPolicyLedgerStateV3.from_ledger(AssumptionPolicyLedgerV3.build(()))
+    with pytest.raises(AssumptionPolicyPublicationConflict) as f:
+        compare_and_append_policy_entry_v3(
+            ledger=ledger,
+            expected_state=stale,
+            candidate=wrong,
+        )
+    assert f.value.code == "ASSUMPTION_POLICY_CHAIN_V3_FORK"
+
+
+def test_stale_state_wrong_predecessor_commit_fork() -> None:
+    first = _entry(seq=10)
+    ledger = AssumptionPolicyLedgerV3.build((first,))
+    wrong = _make_successor(first, seq=20, wrong_commit=True)
+    stale = ExpectedPolicyLedgerStateV3.from_ledger(AssumptionPolicyLedgerV3.build(()))
+    with pytest.raises(AssumptionPolicyPublicationConflict) as f:
+        compare_and_append_policy_entry_v3(
+            ledger=ledger,
+            expected_state=stale,
+            candidate=wrong,
+        )
+    assert f.value.code == "ASSUMPTION_POLICY_CHAIN_V3_FORK"
+
+
+def test_stale_state_both_predecessors_wrong_fork() -> None:
+    first = _entry(seq=10)
+    ledger = AssumptionPolicyLedgerV3.build((first,))
+    wrong = _make_successor(first, seq=20, wrong_policy=True, wrong_commit=True)
+    stale = ExpectedPolicyLedgerStateV3.from_ledger(AssumptionPolicyLedgerV3.build(()))
+    with pytest.raises(AssumptionPolicyPublicationConflict) as f:
+        compare_and_append_policy_entry_v3(
+            ledger=ledger,
+            expected_state=stale,
+            candidate=wrong,
+        )
+    assert f.value.code == "ASSUMPTION_POLICY_CHAIN_V3_FORK"
+
+
+def test_stale_state_correct_predecessors_but_obsolete_root() -> None:
+    """A candidate with the correct predecessor pair but an obsolete expected
+    root/head must produce STATE_MISMATCH, not CHAIN_V3_FORK."""
+
+    first = _entry(seq=10)
+    successor = _successor_entry(first, seq=20)
+    ledger = AssumptionPolicyLedgerV3.build((first,))
+    # The candidate's predecessor pair matches the head, but the expected state
+    # references the empty ledger (wrong root).
+    stale = ExpectedPolicyLedgerStateV3.from_ledger(AssumptionPolicyLedgerV3.build(()))
+    with pytest.raises(AssumptionPolicyPublicationConflict) as f:
+        compare_and_append_policy_entry_v3(
+            ledger=ledger,
+            expected_state=stale,
+            candidate=successor,
+        )
+    assert f.value.code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH"
+
+
+# ===========================================================================
+# Correction 5: real concurrent tests
+# ===========================================================================
+
+
+def test_concurrent_distinct_candidates_one_winner() -> None:
+    """Two threads, two distinct valid genesis candidates, one empty expected
+    state. Exactly one COMMITTED, one PublicationConflict(STATE_MISMATCH)."""
+
+    import queue
+    import threading
+
+    pub = InMemoryAssumptionPolicyPublisher()
+    pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
+    pb = _prepared_activation(("authority:a", "authority:b"), seq=20)
+    state = pub.read_state()
+
+    barrier = threading.Barrier(2)
+    results: queue.Queue = queue.Queue()  # type: ignore[type-arg]
+
+    def worker(prepared):
+        barrier.wait()
+        try:
+            r = pub.publish(prepared=prepared, expected_state=state)
+            results.put(("OK", r))
+        except Exception as exc:
+            results.put(("EXC", exc))
+
+    t1 = threading.Thread(target=worker, args=(pa,))
+    t2 = threading.Thread(target=worker, args=(pb,))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+    assert not t1.is_alive(), "thread 1 hung"
+    assert not t2.is_alive(), "thread 2 hung"
+
+    outcomes = []
+    while not results.empty():
+        outcomes.append(results.get_nowait())
+    assert len(outcomes) == 2
+    oks = [o for o in outcomes if o[0] == "OK"]
+    excs = [o for o in outcomes if o[0] == "EXC"]
+    assert len(oks) == 1, f"expected 1 OK, got {oks}"
+    assert len(excs) == 1, f"expected 1 EXC, got {excs}"
+    assert oks[0][1].append_result == "COMMITTED"
+    assert isinstance(excs[0][1], AssumptionPolicyPublicationConflict)
+    # Losing candidate is not present.
+    ledger = pub.read_ledger()
+    assert len(ledger.entries) == 1
+    assert ledger.entries[0].ledger_entry_digest == oks[0][1].ledger_entry_digest
+
+
+def test_concurrent_exact_retry_one_committed_one_idempotent() -> None:
+    """Two threads, same candidate, same empty state. One COMMITTED, one
+    IDEMPOTENT_APPEND, no conflict."""
+
+    import queue
+    import threading
+
+    pub = InMemoryAssumptionPolicyPublisher()
+    pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
+    state = pub.read_state()
+
+    barrier = threading.Barrier(2)
+    results: queue.Queue = queue.Queue()  # type: ignore[type-arg]
+
+    def worker(prepared):
+        barrier.wait()
+        try:
+            r = pub.publish(prepared=prepared, expected_state=state)
+            results.put(("OK", r))
+        except Exception as exc:
+            results.put(("EXC", exc))
+
+    t1 = threading.Thread(target=worker, args=(pa,))
+    t2 = threading.Thread(target=worker, args=(pa,))
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+    assert not t1.is_alive()
+    assert not t2.is_alive()
+
+    outcomes = []
+    while not results.empty():
+        outcomes.append(results.get_nowait())
+    assert len(outcomes) == 2
+    codes = {o[1].append_result for o in outcomes if o[0] == "OK"}
+    assert codes == {"COMMITTED", "IDEMPOTENT_APPEND"}, f"got {codes}"
+    assert pub.read_ledger().entries[-1].ledger_entry_digest == pa.ledger_entry.ledger_entry_digest
+
+
+# ===========================================================================
+# Correction 6: repeated contention
+# ===========================================================================
+
+
+def test_repeated_contention_25_rounds() -> None:
+    """25 rounds of two distinct candidates. Each round: one winner, one conflict."""
+
+    for _round in range(25):
+        pub = InMemoryAssumptionPolicyPublisher()
+        pa = _prepared_activation(("authority:a", "authority:b"), seq=10)
+        pb = _prepared_activation(("authority:a", "authority:b"), seq=20)
+        state = pub.read_state()
+
+        ra = pub.publish(prepared=pa, expected_state=state)
+        assert ra.append_result == "COMMITTED"
+
+        state_after = pub.read_state()
+        with pytest.raises(AssumptionPolicyPublicationConflict):
+            pub.publish(prepared=pb, expected_state=state)
+
+        # State unchanged after conflict.
+        assert pub.read_state() == state_after
+        # Final root corresponds to winner.
+        assert pub.read_state().ledger_root_digest == ra.resulting_ledger_root
+        assert pub.read_state().head_entry_digest == pa.ledger_entry.ledger_entry_digest
+
+
+# ===========================================================================
+# Correction 7: read_ledger
+# ===========================================================================
+
+
+def test_read_ledger_returns_immutable_snapshot() -> None:
+    pub = InMemoryAssumptionPolicyPublisher()
+    prepared = _prepared_activation(("authority:a", "authority:b"), seq=10)
+    state = pub.read_state()
+    pub.publish(prepared=prepared, expected_state=state)
+    ledger = pub.read_ledger()
+    assert type(ledger) is AssumptionPolicyLedgerV3
+    assert len(ledger.entries) == 1
+    assert ledger.entries[0].ledger_entry_digest == prepared.ledger_entry.ledger_entry_digest
+
+
+# ===========================================================================
+# Correction 8: initial-ledger behavior
+# ===========================================================================
+
+
+def test_initial_ledger_read_state_reflects_exact_root_head() -> None:
+    e = _entry(seq=10)
+    ledger = AssumptionPolicyLedgerV3.build((e,))
+    pub = InMemoryAssumptionPolicyPublisher(initial_ledger=ledger)
+    state = pub.read_state()
+    assert state.ledger_root_digest == ledger.ledger_root_digest
+    assert state.head_entry_digest == e.ledger_entry_digest
+
+
+def test_initial_ledger_valid_successor_commits() -> None:
+    e = _entry(seq=10)
+    ledger = AssumptionPolicyLedgerV3.build((e,))
+    pub = InMemoryAssumptionPolicyPublisher(initial_ledger=ledger)
+    successor = _successor_entry(e, seq=20)
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation as PPA,
+    )
+
+    prepared = PPA.build(successor)
+    state = pub.read_state()
+    result = pub.publish(prepared=prepared, expected_state=state)
+    assert result.append_result == "COMMITTED"
+
+
+def test_initial_ledger_stale_state_conflicts() -> None:
+    e = _entry(seq=10)
+    ledger = AssumptionPolicyLedgerV3.build((e,))
+    pub = InMemoryAssumptionPolicyPublisher(initial_ledger=ledger)
+    successor = _successor_entry(e, seq=20)
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation as PPA,
+    )
+
+    prepared = PPA.build(successor)
+    stale = ExpectedPolicyLedgerStateV3.from_ledger(AssumptionPolicyLedgerV3.build(()))
+    with pytest.raises(AssumptionPolicyPublicationConflict):
+        pub.publish(prepared=prepared, expected_state=stale)
+
+
+def test_initial_ledger_foreign_type_rejects() -> None:
+    with pytest.raises(AssumptionPolicyPublicationConflict) as f:
+        InMemoryAssumptionPolicyPublisher(initial_ledger="not-a-ledger")  # type: ignore[arg-type]
+    assert f.value.code == "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
+
+
+# ===========================================================================
+# Correction 9: state-before/after assertions on existing conflict tests
+# ===========================================================================
+
+
+def test_conflict_leaves_state_unchanged_expected_root_mismatch() -> None:
+    pub = InMemoryAssumptionPolicyPublisher()
+    e = _entry(seq=10)
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation as PPA,
+    )
+
+    prepared = PPA.build(e)
+    state_before = pub.read_state()
+    wrong_state = ExpectedPolicyLedgerStateV3(
+        ledger_root_digest=_digest("f"),
+        head_entry_digest=e.ledger_entry_digest,
+    )
+    with pytest.raises(AssumptionPolicyPublicationConflict):
+        pub.publish(prepared=prepared, expected_state=wrong_state)
+    assert pub.read_state() == state_before
+
+
+def test_conflict_leaves_state_unchanged_genesis_with_predecessor() -> None:
+    pub = InMemoryAssumptionPolicyPublisher()
+    bad = _entry(seq=10, pred_policy=_digest("e"), pred_commit=_digest("c"))
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation as PPA,
+    )
+
+    prepared = PPA.build(bad)
+    state = pub.read_state()
+    state_before = pub.read_state()
+    with pytest.raises(AssumptionPolicyPublicationConflict):
+        pub.publish(prepared=prepared, expected_state=state)
+    assert pub.read_state() == state_before

@@ -6,12 +6,15 @@ non-circular V3 signing envelope. Provides:
 * ``ExpectedPolicyLedgerStateV3`` — exact observed ledger/3 state;
 * ``classify_exact_idempotence_v3`` — V3 exact idempotence;
 * ``compare_and_append_policy_entry_v3`` — pure V3 compare-and-append;
-* ``InMemoryAssumptionPolicyPublisher`` — stateful in-memory atomic publisher;
+* ``InMemoryAssumptionPolicyPublisher`` — thread-safe atomic publisher;
+* ``AssumptionPolicyActivationServiceV3`` — V3 service protocol;
 * ``ReferenceAssumptionPolicyActivationService`` — composes the V3 preparer
   with the V3 publisher.
 
-A1.3-A is in-memory only. Filesystem persistence (A1.3-B) and historical
-resolution / grant selection (A1.3-C) are separate slices.
+A1.3-A provides process-local in-memory atomicity only. A1.3-B will provide
+filesystem persistence, interprocess locking, atomic replace, restart
+reconstruction, and corruption detection. A1.3-C will provide historical
+resolution and grant selection.
 
 Publication precedence:
 
@@ -24,11 +27,22 @@ Publication precedence:
     7. activation result
 
 No failed attempt may claim a resulting root.
+
+Claim boundary:
+
+    thread-safe atomic publication within one Python process
+
+    not:
+    interprocess synchronization
+    durability
+    filesystem atomicity
+    restart reconstruction
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from threading import RLock
 from typing import Protocol
 
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
@@ -164,7 +178,13 @@ def compare_and_append_policy_entry_v3(
     # 1. Exact idempotence: if this candidate is already in the ledger, return
     #    IDEMPOTENT_APPEND without mutating the ledger.
     for existing in ledger.entries:
-        classification = classify_exact_idempotence_v3(existing, candidate)
+        try:
+            classification = classify_exact_idempotence_v3(existing, candidate)
+        except AssumptionPolicyActivationContractError as exc:
+            raise AssumptionPolicyPublicationConflict(
+                exc.code,
+                exc.detail,
+            ) from exc
         if classification == "IDEMPOTENT_APPEND":
             result = AssumptionPolicyActivationResult.build(
                 append_result="IDEMPOTENT_APPEND",
@@ -180,14 +200,15 @@ def compare_and_append_policy_entry_v3(
     if expected_state != actual_state:
         if ledger.entries:
             current_head = ledger.entries[-1]
+            candidate_predecessor_policy = candidate.signing_payload.predecessor_policy_digest
             candidate_predecessor_commit = (
                 candidate.signing_payload.predecessor_commit_receipt_digest
             )
             if (
-                candidate_predecessor_commit is not None
-                and candidate_predecessor_commit != current_head.policy_commit.commit_receipt_digest
+                candidate_predecessor_policy != current_head.policy.policy_digest
+                or candidate_predecessor_commit != current_head.policy_commit.commit_receipt_digest
             ):
-                raise AssumptionPolicyPublicationConflict("ASSUMPTION_POLICY_CHAIN_FORK")
+                raise AssumptionPolicyPublicationConflict("ASSUMPTION_POLICY_CHAIN_V3_FORK")
         raise AssumptionPolicyPublicationConflict("ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH")
 
     # 3+4. Predecessor validation + monotonic sequence.
@@ -216,13 +237,23 @@ def compare_and_append_policy_entry_v3(
     return updated, result
 
 
-# --- 4. In-memory atomic publisher -----------------------------------------
+# --- 4. V3 service protocol ------------------------------------------------
 
 
-class AssumptionPolicyPublisher(Protocol):
-    """V3 atomic publication boundary."""
+class AssumptionPolicyActivationServiceV3(Protocol):
+    """V3 success-only prepare/publish API for the executable A1 implementation."""
 
-    def read_state(self) -> ExpectedPolicyLedgerStateV3: ...
+    def prepare(
+        self,
+        *,
+        policy: AssumptionAuthorityPolicy,
+        signing_payload: AssumptionPolicySigningPayload,
+        commit: AssumptionAuthorityPolicyCommitV3,
+        approval_policy: AssumptionPolicyApprovalPolicy,
+        signature_profile: AssumptionPolicySignatureProfile,
+        challenge_policy: AssumptionChallengeClassificationPolicy,
+        signature_set: SignatureSet,
+    ) -> PreparedPolicyActivation: ...
 
     def publish(
         self,
@@ -232,20 +263,59 @@ class AssumptionPolicyPublisher(Protocol):
     ) -> AssumptionPolicyActivationResult: ...
 
 
-class InMemoryAssumptionPolicyPublisher:
-    """Stateful in-memory publisher holding a single ``AssumptionPolicyLedgerV3``.
+class AssumptionPolicyPublisher(Protocol):
+    """V3 atomic publication boundary."""
 
-    Same-snapshot race: the publisher is not thread-safe; concurrent calls
-    are serialized by the GIL. The first writer wins; the second receives
-    ``ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH`` because the observed state
-    changed between the two calls.
+    def read_state(self) -> ExpectedPolicyLedgerStateV3: ...
+
+    def read_ledger(self) -> AssumptionPolicyLedgerV3: ...
+
+    def publish(
+        self,
+        *,
+        prepared: PreparedPolicyActivation,
+        expected_state: ExpectedPolicyLedgerStateV3,
+    ) -> AssumptionPolicyActivationResult: ...
+
+
+# --- 5. In-memory atomic publisher -----------------------------------------
+
+
+class InMemoryAssumptionPolicyPublisher:
+    """Thread-safe atomic publisher holding a single ``AssumptionPolicyLedgerV3``.
+
+    A reentrant lock protects the complete mutable state. The entire
+    compare-and-append transition — actual-state read, idempotence
+    classification, expected-state comparison, successor validation,
+    updated-ledger construction, activation-result construction, and state
+    assignment — occurs under the lock.
+
+    Claim boundary: thread-safe atomic publication within one Python process.
+    Does not provide interprocess synchronization, durability, filesystem
+    atomicity, or restart reconstruction.
     """
 
-    def __init__(self) -> None:
-        self._ledger = AssumptionPolicyLedgerV3.build(())
+    def __init__(
+        self,
+        initial_ledger: AssumptionPolicyLedgerV3 | None = None,
+    ) -> None:
+        self._lock = RLock()
+        if initial_ledger is not None:
+            if type(initial_ledger) is not AssumptionPolicyLedgerV3:
+                raise AssumptionPolicyPublicationConflict(
+                    "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
+                )
+            self._ledger = initial_ledger
+        else:
+            self._ledger = AssumptionPolicyLedgerV3.build(())
 
     def read_state(self) -> ExpectedPolicyLedgerStateV3:
-        return ExpectedPolicyLedgerStateV3.from_ledger(self._ledger)
+        with self._lock:
+            return ExpectedPolicyLedgerStateV3.from_ledger(self._ledger)
+
+    def read_ledger(self) -> AssumptionPolicyLedgerV3:
+        with self._lock:
+            return self._ledger
 
     def publish(
         self,
@@ -254,22 +324,26 @@ class InMemoryAssumptionPolicyPublisher:
         expected_state: ExpectedPolicyLedgerStateV3,
     ) -> AssumptionPolicyActivationResult:
         entry = prepared.ledger_entry
-        # Runtime version enforcement: only entry/3 is publishable.
+
         if type(entry) is not AssumptionPolicyLedgerEntryV3:
             raise AssumptionPolicyPublicationConflict(
                 "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
             )
-        updated, result = compare_and_append_policy_entry_v3(
-            ledger=self._ledger,
-            expected_state=expected_state,
-            candidate=entry,
-        )
-        if result.append_result == "COMMITTED":
-            self._ledger = updated
-        return result
+
+        with self._lock:
+            updated, result = compare_and_append_policy_entry_v3(
+                ledger=self._ledger,
+                expected_state=expected_state,
+                candidate=entry,
+            )
+
+            if result.append_result == "COMMITTED":
+                self._ledger = updated
+
+            return result
 
 
-# --- 5. Complete service composition ---------------------------------------
+# --- 6. Complete service composition ---------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
