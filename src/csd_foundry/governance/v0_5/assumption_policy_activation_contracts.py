@@ -28,6 +28,7 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
 )
 from csd_foundry.governance.v0_5._assumption_policy_activation_rules import (
     derive_resolution_challenge_materialities,
+    duty_exceptions_overlap,
     grants_overlap,
     validate_activatable_commit_version,
     validate_policy_overlap,
@@ -55,6 +56,7 @@ __all__ = [
     "AssumptionPolicySignatureProfile",
     "classify_exact_idempotence",
     "derive_resolution_challenge_materialities",
+    "duty_exceptions_overlap",
     "grants_overlap",
     "order_policy_entries",
     "validate_activatable_commit_version",
