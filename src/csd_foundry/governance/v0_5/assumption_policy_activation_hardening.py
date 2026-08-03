@@ -375,11 +375,7 @@ def _optional_string(value: Mapping[str, JsonValue], field: str) -> str | None:
 
 def _required_json_integer(value: Mapping[str, JsonValue], field: str) -> int:
     selected = value[field]
-    if (
-        type(selected) is not int
-        or selected < 0
-        or selected > MAX_INTEROPERABLE_JSON_INTEGER
-    ):
+    if type(selected) is not int or selected < 0 or selected > MAX_INTEROPERABLE_JSON_INTEGER:
         raise AssumptionPolicyActivationContractError(
             "ASSUMPTION_POLICY_COMMIT_INTEGER_INVALID",
             field,
