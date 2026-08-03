@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from csd_foundry._platform import fsync_directory
 from csd_foundry.synthesis.v0_4.publication_protocol import PublicationDisposition
 from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes
 
@@ -87,11 +88,7 @@ class ContentAddressedPublicationStore:
 
     @staticmethod
     def _fsync_directory(path: Path) -> None:
-        descriptor = os.open(path, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        fsync_directory(path)
 
     @classmethod
     def _ensure_directory(cls, path: Path) -> None:

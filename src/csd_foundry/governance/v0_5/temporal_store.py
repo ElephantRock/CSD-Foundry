@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -14,6 +13,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
 
+from csd_foundry._platform import advisory_lock, fsync_directory
 from csd_foundry.governance.v0_5.canonicalization import GovernanceContractError
 from csd_foundry.governance.v0_5.contracts import (
     CONTRACT_TYPES,
@@ -366,12 +366,8 @@ class FilesystemTemporalStore:
 
     @contextmanager
     def _lock(self) -> Iterator[None]:
-        with self.lock_path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        with advisory_lock(self.lock_path):
+            yield
 
 
 def _projection_bundle_bytes(
@@ -573,8 +569,4 @@ def _write_fsync(path: Path, payload: bytes, *, exclusive: bool) -> None:
 
 
 def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    fsync_directory(path)
