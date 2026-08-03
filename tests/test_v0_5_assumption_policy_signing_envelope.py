@@ -32,6 +32,10 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
     AssumptionPolicyLedgerEntryV3,
     AssumptionPolicyLedgerV3,
     AssumptionPolicySigningPayload,
+    deterministic_policy_signature_bytes,
+    require_activatable_policy_commit,
+    require_policy_signature_target,
+    validate_successor_position_v3,
 )
 from csd_foundry.governance.v0_5.assumption_governance_contracts import (
     AssumptionAuthorityGrant,
@@ -544,3 +548,519 @@ def test_chain_fork_rejected() -> None:
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         AssumptionPolicyLedgerV3.build((first, succ_a, succ_b))
     assert failure.value.code == "ASSUMPTION_POLICY_LEDGER_V3_CHAIN_FORK"
+
+
+# ===========================================================================
+# Correction 1: exact signature-target validation
+# ===========================================================================
+
+
+def test_signature_target_accepts_signing_payload_digest() -> None:
+    p = _payload()
+    require_policy_signature_target(
+        signed_digest=p.signing_payload_digest,
+        signing_payload_digest=p.signing_payload_digest,
+    )
+
+
+def test_signature_target_over_policy_digest_rejected() -> None:
+    p = _payload()
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        require_policy_signature_target(
+            signed_digest=p.policy_digest,
+            signing_payload_digest=p.signing_payload_digest,
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_SIGNATURE_TARGET_MISMATCH"
+
+
+def test_signature_target_over_commit_receipt_rejected() -> None:
+    p = _payload()
+    c = _commit(payload=p)
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        require_policy_signature_target(
+            signed_digest=c.commit_receipt_digest,
+            signing_payload_digest=p.signing_payload_digest,
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_SIGNATURE_TARGET_MISMATCH"
+
+
+def test_signature_target_over_another_signing_payload_rejected() -> None:
+    p1 = _payload()
+    p2 = _payload(
+        policy=AssumptionAuthorityPolicy.build(
+            policy_id="policy:other-target",
+            authority_root_digest=_digest("a"),
+            grants=(_grant(),),
+        )
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        require_policy_signature_target(
+            signed_digest=p2.signing_payload_digest,
+            signing_payload_digest=p1.signing_payload_digest,
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_SIGNATURE_TARGET_MISMATCH"
+
+
+def test_signature_target_over_arbitrary_digest_rejected() -> None:
+    p = _payload()
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        require_policy_signature_target(
+            signed_digest=_digest("f"),
+            signing_payload_digest=p.signing_payload_digest,
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_SIGNATURE_TARGET_MISMATCH"
+
+
+def test_signature_target_case_sensitive() -> None:
+    p = _payload()
+    upper = p.signing_payload_digest.upper()
+    # SHA-256 hex is lowercase; uppercasing changes the string but may not be
+    # a valid digest format. Either way, it must not equal the original.
+    if upper != p.signing_payload_digest:
+        with pytest.raises(AssumptionPolicyActivationContractError):
+            require_policy_signature_target(
+                signed_digest=upper,
+                signing_payload_digest=p.signing_payload_digest,
+            )
+
+
+# ===========================================================================
+# Correction 2: message-binding conformance vector
+# ===========================================================================
+
+
+def test_conformance_bytes_change_when_signed_digest_changes() -> None:
+    sig_a = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"public-key-a",
+        signed_digest=_digest("a"),
+    )
+    sig_b = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"public-key-a",
+        signed_digest=_digest("b"),
+    )
+    assert sig_a != sig_b
+
+
+def test_conformance_bytes_change_when_public_key_changes() -> None:
+    sig_a = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"public-key-a",
+        signed_digest=_digest("a"),
+    )
+    sig_b = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"public-key-b",
+        signed_digest=_digest("a"),
+    )
+    assert sig_a != sig_b
+
+
+def test_conformance_bytes_change_when_algorithm_changes() -> None:
+    sig_a = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
+    )
+    sig_b = deterministic_policy_signature_bytes(
+        algorithm="ecdsa-p256-sha256",
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
+    )
+    assert sig_a != sig_b
+
+
+def test_conformance_bytes_change_when_profile_changes() -> None:
+    sig_a = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/1",
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
+    )
+    sig_b = deterministic_policy_signature_bytes(
+        algorithm="ed25519",
+        verification_profile="ed25519-rfc8032-strict/2",
+        public_key_bytes=b"pk",
+        signed_digest=_digest("a"),
+    )
+    assert sig_a != sig_b
+
+
+# ===========================================================================
+# Correction 3: executable commit-version gate
+# ===========================================================================
+
+
+def test_activatable_commit_accepts_v3() -> None:
+    c = _commit()
+    assert require_activatable_policy_commit(c) is c
+
+
+def test_activatable_commit_rejects_v2() -> None:
+    from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
+        AssumptionAuthorityPolicyCommitV2,
+    )
+
+    commit_v2 = AssumptionAuthorityPolicyCommitV2.build(
+        policy=_policy(),
+        predecessor_policy_digest=None,
+        predecessor_commit_receipt_digest=None,
+        effective_from_sequence=10,
+        approval_policy_digest=_approval_policy().approval_policy_digest,
+        signature_profile_digest=_signature_profile().profile_digest,
+        challenge_classification_policy_digest=_challenge_policy().policy_digest,
+        signature_set_digest=_digest("b"),
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        require_activatable_policy_commit(commit_v2)
+    assert failure.value.code == "ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE"
+
+
+def test_activatable_commit_rejects_foreign_object() -> None:
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        require_activatable_policy_commit("not-a-commit")
+    assert failure.value.code == "ASSUMPTION_POLICY_COMMIT_VERSION_NOT_ACTIVATABLE"
+
+
+# ===========================================================================
+# Correction 4: runtime ledger-entry version enforcement
+# ===========================================================================
+
+
+def test_v2_entry_rejected_from_ledger_v3_at_runtime() -> None:
+    from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
+        AssumptionAuthorityPolicyCommitV2,
+        AssumptionPolicyActivationProof,
+        AssumptionPolicyLedgerEntryV2,
+    )
+
+    # Construct a real V2 entry (it is still parseable/constructible).
+    policy = _policy()
+    approval = _approval_policy()
+    profile = _signature_profile()
+    challenge = _challenge_policy()
+    commit_v2 = AssumptionAuthorityPolicyCommitV2.build(
+        policy=policy,
+        predecessor_policy_digest=None,
+        predecessor_commit_receipt_digest=None,
+        effective_from_sequence=10,
+        approval_policy_digest=approval.approval_policy_digest,
+        signature_profile_digest=profile.profile_digest,
+        challenge_classification_policy_digest=challenge.policy_digest,
+        signature_set_digest=_digest("b"),
+    )
+    rule = approval.rule_for(commit_v2.approval_class)
+    proof_v1 = AssumptionPolicyActivationProof.build(
+        policy_commit_receipt_digest=commit_v2.commit_receipt_digest,
+        approval_policy_digest=approval.approval_policy_digest,
+        approval_rule_digest=rule.rule_digest,
+        signature_profile_digest=profile.profile_digest,
+        challenge_classification_policy_digest=challenge.policy_digest,
+        authority_root_digest=policy.authority_root_digest,
+        signature_set_digest=commit_v2.signature_set_digest,
+        valid_signer_ids=("authority:a", "authority:b"),
+    )
+    entry_v2 = AssumptionPolicyLedgerEntryV2.build(
+        policy=policy,
+        policy_commit=commit_v2,
+        approval_policy=approval,
+        signature_profile=profile,
+        challenge_classification_policy=challenge,
+        activation_proof=proof_v1,
+    )
+    # Attempting to insert it into ledger/3 must reject with the stable code,
+    # not an AttributeError.
+    ledger = AssumptionPolicyLedgerV3.build(())
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        AssumptionPolicyLedgerV3(
+            entries=(entry_v2,),  # type: ignore[arg-type]
+            ledger_root_digest=ledger.ledger_root_digest,
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
+
+
+# ===========================================================================
+# Correction 5: authority-root binding mutation tests
+# ===========================================================================
+
+
+def test_wrong_approval_policy_root_rejected_in_payload_build() -> None:
+    wrong_root_approval = AssumptionPolicyApprovalPolicy.build(
+        approval_policy_id="approval:wrong-root",
+        authority_root_digest=_digest("c"),  # differs from policy root _digest("a")
+        rules=(
+            AssumptionPolicyApprovalRule.build(
+                approval_class="STANDARD",
+                eligible_signer_ids=("authority:a", "authority:b", "authority:c"),
+                required_signature_count=2,
+                required_signer_ids=("authority:a",),
+            ),
+            AssumptionPolicyApprovalRule.build(
+                approval_class="DUTY_EXCEPTION",
+                eligible_signer_ids=("authority:a", "authority:b", "authority:c"),
+                required_signature_count=3,
+                required_signer_ids=("authority:a",),
+            ),
+        ),
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        AssumptionPolicySigningPayload.build(
+            policy=_policy(),
+            predecessor_policy_digest=None,
+            predecessor_commit_receipt_digest=None,
+            effective_from_sequence=10,
+            approval_policy=wrong_root_approval,
+            signature_profile=_signature_profile(),
+            challenge_policy=_challenge_policy(),
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_SIGNING_PAYLOAD_APPROVAL_ROOT_MISMATCH"
+
+
+def test_wrong_signature_key_authority_root_rejected_in_payload_build() -> None:
+    wrong_root_profile = AssumptionPolicySignatureProfile.build(
+        algorithm_profiles=(
+            AssumptionPolicyAlgorithmProfile(
+                algorithm="ed25519",
+                verification_profile="ed25519-rfc8032-strict/1",
+            ),
+        ),
+        required_authority_scope="ASSUMPTION_POLICY_APPROVAL",
+        key_authority_root_digest=_digest("c"),  # differs from policy root _digest("a")
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        AssumptionPolicySigningPayload.build(
+            policy=_policy(),
+            predecessor_policy_digest=None,
+            predecessor_commit_receipt_digest=None,
+            effective_from_sequence=10,
+            approval_policy=_approval_policy(),
+            signature_profile=wrong_root_profile,
+            challenge_policy=_challenge_policy(),
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_SIGNING_PAYLOAD_SIGNATURE_ROOT_MISMATCH"
+
+
+# ===========================================================================
+# Correction 6: validate_successor_position_v3
+# ===========================================================================
+
+
+def test_successor_wrong_predecessor_policy_digest_rejected() -> None:
+    first = _entry(effective_from_sequence=10)
+    # Build a successor that references the right commit receipt but wrong policy digest.
+    wrong_policy_payload = _payload(
+        effective_from_sequence=20,
+        predecessor_policy_digest=_digest("c"),  # wrong policy digest
+        predecessor_commit_receipt_digest=first.policy_commit.commit_receipt_digest,
+    )
+    c_wrong = _commit(payload=wrong_policy_payload)
+    proof_wrong = _proof(payload=wrong_policy_payload, commit=c_wrong)
+    wrong_successor = AssumptionPolicyLedgerEntryV3.build(
+        policy=_policy(),
+        signing_payload=wrong_policy_payload,
+        policy_commit=c_wrong,
+        approval_policy=_approval_policy(),
+        signature_profile=_signature_profile(),
+        challenge_classification_policy=_challenge_policy(),
+        activation_proof=proof_wrong,
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        validate_successor_position_v3(first, wrong_successor)
+    assert failure.value.code == "ASSUMPTION_POLICY_CHAIN_V3_FORK"
+
+
+def test_successor_wrong_predecessor_commit_receipt_rejected() -> None:
+    first = _entry(effective_from_sequence=10)
+    wrong_commit_payload = _payload(
+        effective_from_sequence=20,
+        predecessor_policy_digest=first.signing_payload.policy_digest,  # correct policy
+        predecessor_commit_receipt_digest=_digest("d"),  # wrong commit receipt
+    )
+    c_wrong = _commit(payload=wrong_commit_payload)
+    proof_wrong = _proof(payload=wrong_commit_payload, commit=c_wrong)
+    wrong_successor = AssumptionPolicyLedgerEntryV3.build(
+        policy=_policy(),
+        signing_payload=wrong_commit_payload,
+        policy_commit=c_wrong,
+        approval_policy=_approval_policy(),
+        signature_profile=_signature_profile(),
+        challenge_classification_policy=_challenge_policy(),
+        activation_proof=proof_wrong,
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        validate_successor_position_v3(first, wrong_successor)
+    assert failure.value.code == "ASSUMPTION_POLICY_CHAIN_V3_FORK"
+
+
+def test_successor_equal_or_lower_sequence_rejected() -> None:
+    first = _entry(effective_from_sequence=20)
+    equal_payload = _payload(
+        effective_from_sequence=20,
+        predecessor_policy_digest=first.signing_payload.policy_digest,
+        predecessor_commit_receipt_digest=first.policy_commit.commit_receipt_digest,
+    )
+    c_equal = _commit(payload=equal_payload)
+    proof_equal = _proof(payload=equal_payload, commit=c_equal)
+    equal_successor = AssumptionPolicyLedgerEntryV3.build(
+        policy=_policy(),
+        signing_payload=equal_payload,
+        policy_commit=c_equal,
+        approval_policy=_approval_policy(),
+        signature_profile=_signature_profile(),
+        challenge_classification_policy=_challenge_policy(),
+        activation_proof=proof_equal,
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        validate_successor_position_v3(first, equal_successor)
+    assert failure.value.code == "ASSUMPTION_POLICY_LEDGER_V3_EFFECTIVE_SEQUENCE_NOT_INCREASING"
+
+
+# ===========================================================================
+# Correction 7: additional missing vectors
+# ===========================================================================
+
+
+def test_signature_profile_change_changes_payload_digest() -> None:
+    other_profile = AssumptionPolicySignatureProfile.build(
+        algorithm_profiles=(
+            AssumptionPolicyAlgorithmProfile(
+                algorithm="ecdsa-p256-sha256",
+                verification_profile="ecdsa-p256-sha256-strict/1",
+            ),
+        ),
+        required_authority_scope="ASSUMPTION_POLICY_APPROVAL",
+        key_authority_root_digest=_digest("a"),
+    )
+    p1 = _payload()
+    p2 = _payload(signature_profile=other_profile)
+    assert p1.signing_payload_digest != p2.signing_payload_digest
+
+
+def test_challenge_policy_change_changes_payload_digest() -> None:
+    other_challenge = AssumptionChallengeClassificationPolicy.build(
+        reason_rules=(
+            AssumptionChallengeClassificationRule(
+                reason_code="DIFFERENT_REASON",
+                materiality="ADVISORY",
+            ),
+        )
+    )
+    p1 = _payload()
+    p2 = _payload(challenge_policy=other_challenge)
+    assert p1.signing_payload_digest != p2.signing_payload_digest
+
+
+def test_wrong_proof_commit_receipt_rejected_in_entry() -> None:
+    p = _payload()
+    c_real = _commit(payload=p)
+    # Build a proof for a different commit.
+    other_payload = _payload(
+        policy=AssumptionAuthorityPolicy.build(
+            policy_id="policy:proof-mismatch",
+            authority_root_digest=_digest("a"),
+            grants=(_grant(),),
+        )
+    )
+    other_commit = _commit(payload=other_payload)
+    wrong_proof = _proof(payload=other_payload, commit=other_commit)
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        AssumptionPolicyLedgerEntryV3.build(
+            policy=_policy(),
+            signing_payload=p,
+            policy_commit=c_real,
+            approval_policy=_approval_policy(),
+            signature_profile=_signature_profile(),
+            challenge_classification_policy=_challenge_policy(),
+            activation_proof=wrong_proof,
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_LEDGER_ENTRY_V3_BINDING_MISMATCH"
+
+
+def test_wrong_proof_signing_payload_digest_rejected_in_entry() -> None:
+    p1 = _payload()
+    p2 = _payload(
+        policy=AssumptionAuthorityPolicy.build(
+            policy_id="policy:payload-mismatch",
+            authority_root_digest=_digest("a"),
+            grants=(_grant(),),
+        )
+    )
+    c1 = _commit(payload=p1)
+    wrong_proof = _proof(payload=p2)  # proof references p2, not p1
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        AssumptionPolicyLedgerEntryV3.build(
+            policy=_policy(),
+            signing_payload=p1,
+            policy_commit=c1,
+            approval_policy=_approval_policy(),
+            signature_profile=_signature_profile(),
+            challenge_classification_policy=_challenge_policy(),
+            activation_proof=wrong_proof,
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_LEDGER_ENTRY_V3_BINDING_MISMATCH"
+
+
+def test_v2_entry_remains_parseable() -> None:
+    from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
+        AssumptionAuthorityPolicyCommitV2,
+        AssumptionPolicyActivationProof,
+    )
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        AssumptionPolicyLedgerEntryV2,
+    )
+
+    policy = _policy()
+    approval = _approval_policy()
+    profile = _signature_profile()
+    challenge = _challenge_policy()
+    commit_v2 = AssumptionAuthorityPolicyCommitV2.build(
+        policy=policy,
+        predecessor_policy_digest=None,
+        predecessor_commit_receipt_digest=None,
+        effective_from_sequence=10,
+        approval_policy_digest=approval.approval_policy_digest,
+        signature_profile_digest=profile.profile_digest,
+        challenge_classification_policy_digest=challenge.policy_digest,
+        signature_set_digest=_digest("b"),
+    )
+    rule = approval.rule_for(commit_v2.approval_class)
+    proof_v1 = AssumptionPolicyActivationProof.build(
+        policy_commit_receipt_digest=commit_v2.commit_receipt_digest,
+        approval_policy_digest=approval.approval_policy_digest,
+        approval_rule_digest=rule.rule_digest,
+        signature_profile_digest=profile.profile_digest,
+        challenge_classification_policy_digest=challenge.policy_digest,
+        authority_root_digest=policy.authority_root_digest,
+        signature_set_digest=commit_v2.signature_set_digest,
+        valid_signer_ids=("authority:a", "authority:b"),
+    )
+    entry_v2 = AssumptionPolicyLedgerEntryV2.build(
+        policy=policy,
+        policy_commit=commit_v2,
+        approval_policy=approval,
+        signature_profile=profile,
+        challenge_classification_policy=challenge,
+        activation_proof=proof_v1,
+    )
+    assert entry_v2.ledger_entry_digest
+
+
+def test_identical_inputs_produce_byte_identical_everything() -> None:
+    e1 = _entry()
+    e2 = _entry()
+    assert e1.signing_payload.canonical_bytes == e2.signing_payload.canonical_bytes
+    assert e1.policy_commit.canonical_bytes == e2.policy_commit.canonical_bytes
+    assert (
+        e1.activation_proof.activation_proof_digest == e2.activation_proof.activation_proof_digest
+    )
+    assert e1.ledger_entry_digest == e2.ledger_entry_digest
+    ledger_a = AssumptionPolicyLedgerV3.build((e1,))
+    ledger_b = AssumptionPolicyLedgerV3.build((e2,))
+    assert ledger_a.ledger_root_digest == ledger_b.ledger_root_digest
