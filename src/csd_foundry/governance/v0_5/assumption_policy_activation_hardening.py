@@ -18,10 +18,12 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
 from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
     AssumptionAuthorityPolicyCommitV2,
     AssumptionPolicyActivationResult,
-    AssumptionPolicyLedgerEntryV2 as _BaseAssumptionPolicyLedgerEntryV2,
     AssumptionPolicyLedgerV2,
     classify_exact_idempotence,
     validate_successor_position,
+)
+from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
+    AssumptionPolicyLedgerEntryV2 as _BaseAssumptionPolicyLedgerEntryV2,
 )
 from csd_foundry.governance.v0_5.assumption_governance_contracts import (
     AssumptionAuthorityPolicy,
