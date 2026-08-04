@@ -1,8 +1,11 @@
 # CSD Foundry Distributional Assurance v0.1
 
-**Status:** PROPOSED FOR CONTRACT DESIGN  
+**Status:** APPROVED FOR CONTRACT DESIGN  
 **Version:** 0.1  
 **Date:** 2026-08-04  
+**Approved:** 2026-08-04  
+**Approval PR:** #61  
+**Approval commit:** `f61a1ef4e95a988d943a9e0dce58e1553ae82d32`  
 **Issue:** #57  
 **Parent epic:** #54  
 **Constitutional authority:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`  
@@ -671,7 +674,7 @@ Each experiment requires:
 
 ## 18. Required implementation artifacts
 
-After this doctrine is approved, future implementation shall add separately versioned:
+Under this approved doctrine, future implementation shall add separately versioned:
 
 - scenario-world schema;
 - generation-process schema;
@@ -689,12 +692,12 @@ No implementation version number is frozen by this document.
 
 ## 19. Completion boundary
 
-Distributional Assurance v0.1 doctrine is complete when:
+Distributional Assurance v0.1 doctrine documentation is complete because:
 
-- AP-001 is approved;
-- Platform Charter v1.1 is published;
-- this document is reviewed and accepted;
-- the roadmap and README are integrated;
+- AP-001 was approved through PR #59;
+- Platform Charter v1.1 was published through PR #60;
+- this document was accepted through PR #61;
+- the roadmap and README were integrated through PR #62;
 - exact executable schemas remain explicitly deferred to a future contract freeze.
 
 Distributional Assurance as an implemented subsystem is not complete until the vertical slice, reports, optimizer exposure, and empirical transfer gates pass.
