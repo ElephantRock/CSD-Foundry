@@ -92,13 +92,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from csd_foundry._platform import advisory_lock, fsync_directory
+from csd_foundry._platform import _open_lock_file, fsync_directory, lock_file, unlock_file
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION,
     SIGNATURE_PROFILE_SCHEMA_VERSION,
@@ -312,16 +313,58 @@ _CHALLENGE_POLICY_FIELDS = frozenset(
 _CHALLENGE_RULE_FIELDS = frozenset({"reason_code", "materiality"})
 
 # Managed temporary-file naming pattern. Every temp file the publisher writes
-# matches this prefix so that orphan cleanup at open() is both safe (only files
-# the publisher could have created are touched) and complete.
+# matches the exact pattern ``.policy-ledger.<32-lowercase-hex>.tmp`` so that
+# orphan cleanup at open() is both safe (only files the publisher could have
+# created are touched) and complete. The middle segment is exactly 32 lowercase
+# hex characters (``uuid.uuid4().hex``).
 _TEMP_PREFIX = ".policy-ledger."
 _TEMP_SUFFIX = ".tmp"
+# Exact middle pattern: 32 lowercase hex characters. Orphan cleanup matches the
+# whole name against this compiled pattern so that an unrelated file can never
+# be mistaken for a managed temp.
+_TEMP_NAME_PATTERN = re.compile(
+    r"^" + re.escape(_TEMP_PREFIX) + r"[0-9a-f]{32}" + re.escape(_TEMP_SUFFIX) + r"$"
+)
 
 # Deterministic fault-injection checkpoints. Tests may install a callback via
 # ``with_fault_injection`` that raises at a named checkpoint to verify pre- and
-# post-commit failure behavior.
-_CHECKPOINT_PRE_COMMIT = "pre-commit"
-_CHECKPOINT_POST_COMMIT = "post-commit"
+# post-commit failure behavior. The first four checkpoints are PRE-replace: a
+# fault there leaves the old authoritative ledger intact. The last four are
+# POST-replace: the replacement may or may not have landed, so any fault is
+# reported as ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN``.
+_CHECKPOINT_BEFORE_TEMP_CREATE = "BEFORE_TEMP_CREATE"
+_CHECKPOINT_AFTER_PARTIAL_TEMP_WRITE = "AFTER_PARTIAL_TEMP_WRITE"
+_CHECKPOINT_AFTER_TEMP_FLUSH = "AFTER_TEMP_FLUSH"
+_CHECKPOINT_BEFORE_REPLACE = "BEFORE_REPLACE"
+# --- commit point (os.replace) crosses here ---
+_CHECKPOINT_AFTER_REPLACE = "AFTER_REPLACE"
+_CHECKPOINT_BEFORE_DIRECTORY_FSYNC = "BEFORE_DIRECTORY_FSYNC"
+_CHECKPOINT_BEFORE_POST_WRITE_READ = "BEFORE_POST_WRITE_READ"
+_CHECKPOINT_DURING_POST_WRITE_READ = "DURING_POST_WRITE_READ"
+
+# The set of all checkpoint names, grouped by commit side. ``_commit`` and
+# ``create`` rely on the invariant that the first four names are pre-replace
+# (old ledger intact on any fault) and the last four are post-replace (outcome
+# uncertain on any fault). The assertion below preserves the split at import.
+_PRE_REPLACE_CHECKPOINTS = frozenset(
+    {
+        _CHECKPOINT_BEFORE_TEMP_CREATE,
+        _CHECKPOINT_AFTER_PARTIAL_TEMP_WRITE,
+        _CHECKPOINT_AFTER_TEMP_FLUSH,
+        _CHECKPOINT_BEFORE_REPLACE,
+    }
+)
+_POST_REPLACE_CHECKPOINTS = frozenset(
+    {
+        _CHECKPOINT_AFTER_REPLACE,
+        _CHECKPOINT_BEFORE_DIRECTORY_FSYNC,
+        _CHECKPOINT_BEFORE_POST_WRITE_READ,
+        _CHECKPOINT_DURING_POST_WRITE_READ,
+    }
+)
+assert len(_PRE_REPLACE_CHECKPOINTS) == 4
+assert len(_POST_REPLACE_CHECKPOINTS) == 4
+assert _PRE_REPLACE_CHECKPOINTS.isdisjoint(_POST_REPLACE_CHECKPOINTS)
 
 
 class PolicyStoreError(RuntimeError):
@@ -333,12 +376,17 @@ class PolicyStoreError(RuntimeError):
 
     * ``ASSUMPTION_POLICY_STORE_ROOT_INVALID`` -- constructor root argument was
       not a ``pathlib.Path``.
+    * ``ASSUMPTION_POLICY_STORE_ROOT_MISSING`` -- ``open()`` was called against
+      a root directory that does not exist. Only ``create()`` may create the
+      root; ``open()`` never does.
     * ``ASSUMPTION_POLICY_STORE_ROOT_NOT_DIRECTORY`` -- root exists but is not
-      a directory.
+      a directory (or is an unusable path shape such as a symlink to a file).
     * ``ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED`` -- the root directory or
       its parent could not be created or synced.
     * ``ASSUMPTION_POLICY_STORE_LOCK_FAILED`` -- the publication lock could not
-      be acquired (raised by the lock helper as ``OSError``).
+      be acquired (raised by the lock helper as ``OSError`` during acquisition
+      only; an ``OSError`` raised by a protected operation is never mislabeled
+      as ``LOCK_FAILED``).
     * ``ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED`` -- ``create()`` was called
       against a store that already holds a valid authoritative ledger.
     * ``ASSUMPTION_POLICY_STORED_BYTES_MISSING`` -- the authoritative ledger
@@ -348,6 +396,8 @@ class PolicyStoreError(RuntimeError):
       valid UTF-8 JSON, or the top-level value is not a JSON object.
     * ``ASSUMPTION_POLICY_STORED_BYTES_NONCANONICAL`` -- the stored bytes are
       valid JSON but not the canonical byte sequence the contract would emit.
+    * ``ASSUMPTION_POLICY_STORED_DUPLICATE_KEY`` -- the stored JSON contains a
+      duplicate key at any depth (rejected by the closed parser).
     * ``ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED`` -- a stored object's
       ``schema_version`` is not the version this publisher activates.
     * ``ASSUMPTION_POLICY_STORED_FIELD_INVALID`` -- a stored object is missing
@@ -359,8 +409,19 @@ class PolicyStoreError(RuntimeError):
       digest does not match the rebuilt root.
     * ``ASSUMPTION_POLICY_STORED_VERIFICATION_FAILED`` -- post-write
       verification did not observe the exact ledger the publisher intended.
+    * ``ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED`` -- a failure occurred
+      before the atomic replace while writing or fsyncing the managed temp
+      file. The old authoritative ledger is intact.
+    * ``ASSUMPTION_POLICY_STORE_REPLACE_FAILED`` -- the atomic ``os.replace``
+      itself failed. This is a pre-commit failure: the old authoritative
+      ledger is intact (the temp file is removed).
     * ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` -- a failure occurred
       after ``os.replace``; the publication may or may not have landed.
+
+    No error code carries ``str(exc)`` or ``repr(exc)`` of an underlying
+    backend exception as its ``detail``: the observable behavior depends only
+    on the operation stage, the pre/post-commit status, and the stable storage
+    code, never on backend diagnostic text.
     """
 
     def __init__(self, code: str, detail: str | None = None) -> None:
@@ -376,6 +437,8 @@ class PolicyStoreError(RuntimeError):
 # Every value entering the typed contract layer from canonical stored bytes
 # passes through these helpers. They enforce, in order:
 #
+#   0. no duplicate keys at any depth (via ``object_pairs_hook`` at the
+#      ``json.loads`` boundary);
 #   1. the value is exactly a JSON object (``dict``);
 #   2. the object's field set is exactly the closed schema's field set (no
 #      missing fields, no unknown fields);
@@ -383,8 +446,29 @@ class PolicyStoreError(RuntimeError):
 #   4. each scalar field is the exact Python type the contract expects;
 #   5. each list field is a list of the exact expected element type.
 #
-# Only after a value passes all five gates is it handed to the frozen contract
+# Only after a value passes all six gates is it handed to the frozen contract
 # constructor, which performs digest self-validation.
+
+
+def _reject_duplicate_pairs(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    """``json.loads`` ``object_pairs_hook`` that rejects duplicate keys.
+
+    Applied at the JSON boundary so a stored object carrying a duplicate key at
+    any depth (e.g. two ``schema_version`` fields, or a duplicate digest inside
+    a nested grant) is rejected with the stable
+    ``ASSUMPTION_POLICY_STORED_DUPLICATE_KEY`` code before any structural
+    validation runs. The duplicate-key name is reported as ``detail`` so a test
+    can assert which key collided, but no backend exception text is exposed.
+    """
+
+    seen: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in seen:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORED_DUPLICATE_KEY", key)
+        seen[key] = value
+    return seen
 
 
 def _require_object(value: object, code: str, detail: str | None = None) -> dict[str, Any]:
@@ -644,13 +728,19 @@ def parse_ledger_v3(payload: bytes) -> AssumptionPolicyLedgerV3:
     Every nested contract is re-parsed through its hardened parser, which
     enforces exact object type, exact closed field set, exact schema version,
     and exact scalar/list types before handing the value to the frozen
-    contract constructor for digest self-validation.
+    contract constructor for digest self-validation. Duplicate keys at any
+    depth are rejected at the ``json.loads`` boundary via
+    ``object_pairs_hook=_reject_duplicate_pairs``.
     """
 
     try:
-        value = json.loads(payload.decode("utf-8"))
+        value = json.loads(payload.decode("utf-8"), object_pairs_hook=_reject_duplicate_pairs)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID") from exc
+    except PolicyStoreError:
+        # A duplicate-key rejection raised inside the object_pairs_hook: it
+        # already carries the stable DUPLICATE_KEY code, so re-raise unchanged.
+        raise
     top = _require_object(value, "ASSUMPTION_POLICY_STORED_BYTES_INVALID")
     _require_closed_object(top, _LEDGER_FIELDS, _FIELD_INVALID)
     _require_schema_version(top, _LEDGER_SCHEMA_VERSION)
@@ -980,49 +1070,78 @@ class FilesystemAssumptionPolicyPublisher:
         regular file (or otherwise unusable) surfaces the precise
         ``ROOT_NOT_DIRECTORY`` code rather than being masked as a lock
         acquisition failure (the lock helper would try to create the lock
-        file's parent, which is the bad root).
+        file's parent, which is the bad root). Does NOT require the root to
+        exist: ``create()`` may create it.
         """
 
         if self.root.exists() and not self.root.is_dir():
             raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_NOT_DIRECTORY")
 
+    def _require_existing_root(self) -> None:
+        """Require the root to exist and be a directory.
+
+        Used by ``open()``, ``read_state()`` and ``read_ledger()`` so the read
+        path never creates the root (only ``create()`` may). A missing root
+        surfaces as ``ROOT_MISSING``; an existing non-directory surfaces as
+        ``ROOT_NOT_DIRECTORY``.
+        """
+
+        if not self.root.exists():
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_MISSING")
+        if not self.root.is_dir():
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_NOT_DIRECTORY")
+
     def _ensure_root(self) -> None:
         """Create the store root directory if needed and sync it.
 
-        Performed under the publication lock by both ``create()`` and
-        ``open()`` so that concurrent first-openers do not race on directory
-        creation. The lock file is created by ``advisory_lock`` itself when it
-        opens the lock path.
+        Performed under the publication lock by ``create()`` only. The lock
+        file is created by ``advisory_lock`` itself when it opens the lock
+        path.
         """
 
         try:
             self.root.mkdir(parents=True, exist_ok=True)
             fsync_directory(self.root)
         except OSError as exc:
-            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED", str(exc)) from exc
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED") from exc
 
     def _cleanup_orphans(self) -> None:
         """Remove any managed temporary files left by a previous crash.
 
-        Only files matching the exact managed pattern
-        ``.policy-ledger.<uuid>.tmp`` are removed, so unrelated files in the
-        store root are never touched.
+        Only files matching the *exact* managed pattern
+        ``.policy-ledger.<32-lowercase-hex>.tmp`` are removed, so unrelated
+        files in the store root are never touched. Directories and symlinks
+        are never removed: a directory (even one matching the name pattern) is
+        skipped, and a symlink is never followed. On POSIX the store directory
+        is fsynced after a successful deletion so the orphan removal is
+        durable.
         """
 
-        if not self.root.exists():
+        if not self.root.exists() or not self.root.is_dir():
             return
+        removed_any = False
         for candidate in self.root.iterdir():
             name = candidate.name
-            if (
-                name.startswith(_TEMP_PREFIX)
-                and name.endswith(_TEMP_SUFFIX)
-                and name != _TEMP_PREFIX + _TEMP_SUFFIX
-            ):
-                middle = name[len(_TEMP_PREFIX) : -len(_TEMP_SUFFIX)]
-                # The middle segment must be a non-empty hex uuid string.
-                if middle and all(c in "0123456789abcdef" for c in middle):
-                    with suppress(OSError):
-                        candidate.unlink(missing_ok=True)
+            if not _TEMP_NAME_PATTERN.match(name):
+                continue
+            # Never follow symlinks and never remove directories. A managed
+            # temp is always a regular file; anything else matching the name
+            # pattern is left untouched (and surfaces later as a publish
+            # failure if it blocks the atomic replace).
+            if candidate.is_symlink():
+                continue
+            if candidate.is_dir():
+                continue
+            try:
+                candidate.unlink()
+            except OSError:
+                # An orphan that cannot be removed is best-effort: it does not
+                # corrupt the authoritative ledger. Leave it for the operator.
+                continue
+            removed_any = True
+        if removed_any:
+            with suppress(OSError):
+                fsync_directory(self.root)
 
     def create(self) -> None:
         """Initialize an empty authoritative ledger, exactly once.
@@ -1032,6 +1151,12 @@ class FilesystemAssumptionPolicyPublisher:
         rather than clobbering it. If a corrupt or partial ledger exists,
         surfaces the reconstruction error so the operator can decide rather
         than silently re-initializing.
+
+        ``create()`` is the *only* lifecycle entry point that may create the
+        store root directory. After writing the canonical empty ledger it
+        rereads the authoritative bytes and verifies them exactly, so a
+        post-replace failure here surfaces as
+        ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN``.
         """
 
         self._validate_root()
@@ -1045,20 +1170,50 @@ class FilesystemAssumptionPolicyPublisher:
                 self._reconstruct()
                 raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED")
             empty = AssumptionPolicyLedgerV3.build(())
-            self._write_atomic(empty.canonical_bytes)
+            intended_bytes = empty.canonical_bytes
+            temp = self._write_and_fsync_temp(intended_bytes)
+            try:
+                self._checkpoint(_CHECKPOINT_BEFORE_REPLACE)
+                os.replace(temp, self.ledger_path)
+            except OSError as exc:
+                self._cleanup_own_temp(temp)
+                raise PolicyStoreError("ASSUMPTION_POLICY_STORE_REPLACE_FAILED") from exc
+            except Exception:
+                self._cleanup_own_temp(temp)
+                raise
+            # Commit point passed: the empty ledger may now be authoritative.
+            # Any failure here is outcome-uncertain.
+            try:
+                self._checkpoint(_CHECKPOINT_AFTER_REPLACE)
+                self._checkpoint(_CHECKPOINT_BEFORE_DIRECTORY_FSYNC)
+                fsync_directory(self.root)
+                self._checkpoint(_CHECKPOINT_BEFORE_POST_WRITE_READ)
+                self._checkpoint(_CHECKPOINT_DURING_POST_WRITE_READ)
+                stored_bytes = self._read_ledger_bytes()
+                self._verify_create_post_write(intended_bytes, stored_bytes)
+            except PolicyStoreError as exc:
+                if exc.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN":
+                    raise
+                raise PolicyStoreError(
+                    "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN", exc.code
+                ) from exc
+            except Exception as exc:
+                raise PolicyStoreError("ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN") from exc
 
     def open(self) -> None:
         """Open an existing store. Never initializes.
 
-        Reconstructs the authoritative ledger under the publication lock to
-        fail fast on corruption and to remove any orphan temp files. A missing
-        authoritative ledger raises
+        ``open()`` does not create the store root: a missing root raises
+        ``ASSUMPTION_POLICY_STORE_ROOT_MISSING`` so a caller cannot accidentally
+        create a fresh store through the read path. Only ``create()`` may
+        create the root. Reconstructs the authoritative ledger under the
+        publication lock to fail fast on corruption and to remove any orphan
+        temp files. A missing authoritative ledger raises
         ``ASSUMPTION_POLICY_STORED_BYTES_MISSING``.
         """
 
-        self._validate_root()
+        self._require_existing_root()
         with self._locked():
-            self._ensure_root()
             self._cleanup_orphans()
             self._reconstruct()
 
@@ -1068,13 +1223,37 @@ class FilesystemAssumptionPolicyPublisher:
 
     @contextmanager
     def _locked(self) -> Iterator[None]:
-        """Context manager wrapping the publication lock, normalizing failures."""
+        """Acquire the publication lock, normalizing *acquisition* failures.
+
+        Only an ``OSError`` raised while acquiring the lock (opening or locking
+        the lock file, before the protected operation begins) is translated to
+        ``LOCK_FAILED``. Any exception -- including an ``OSError`` -- raised by
+        the protected operation inside the ``with`` body propagates unchanged:
+        it must never be mislabeled as a lock failure, because the observable
+        recovery action differs. The lock is released (best-effort) on exit
+        even if the body raises.
+
+        This drives the lock primitives directly rather than using the
+        ``advisory_lock`` context manager, because ``advisory_lock`` performs
+        its open+lock during ``__enter__``: a caller cannot otherwise
+        distinguish an acquisition-time ``OSError`` (lock failure) from a
+        body-time ``OSError`` (operation failure). By performing the open+lock
+        here, outside the body, the attribution is exact.
+        """
 
         try:
-            with advisory_lock(self.lock_path):
-                yield
+            handle = _open_lock_file(self.lock_path)
         except OSError as exc:
-            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED", str(exc)) from exc
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED") from exc
+        try:
+            try:
+                lock_file(handle)
+            except OSError as exc:
+                raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED") from exc
+            yield
+        finally:
+            unlock_file(handle)
+            handle.close()
 
     # ------------------------------------------------------------------
     # Fault injection
@@ -1095,7 +1274,13 @@ class FilesystemAssumptionPolicyPublisher:
         Invoked at well-defined points in the publication sequence so tests
         can assert pre- and post-commit failure behavior without arbitrary
         monkey-patching of internal methods. A no-op in production (the hook
-        is ``None``).
+        is ``None``). The eight checkpoints, in commit order, are:
+
+        ``BEFORE_TEMP_CREATE``, ``AFTER_PARTIAL_TEMP_WRITE``,
+        ``AFTER_TEMP_FLUSH``, ``BEFORE_REPLACE`` (all pre-commit: old ledger
+        intact), then ``AFTER_REPLACE``, ``BEFORE_DIRECTORY_FSYNC``,
+        ``BEFORE_POST_WRITE_READ``, ``DURING_POST_WRITE_READ`` (all
+        post-commit: outcome uncertain).
         """
 
         hook = cls._fault_hook
@@ -1135,31 +1320,72 @@ class FilesystemAssumptionPolicyPublisher:
         try:
             return self.ledger_path.read_bytes()
         except OSError as exc:
-            raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID", str(exc)) from exc
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID") from exc
 
-    def _write_atomic(self, payload: bytes) -> None:
-        """Write ``payload`` to the authoritative file via atomic replace.
+    def _new_temp_path(self) -> Path:
+        """Return a fresh managed temp path (not yet created)."""
 
-        The temporary file is named ``.policy-ledger.<uuid>.tmp`` in the store
-        root (same filesystem as the destination, so ``os.replace`` is atomic).
-        The temp file is fsynced before the replace so the replacement is
-        durable up to the supported durability boundary.
+        return self.root / f"{_TEMP_PREFIX}{uuid.uuid4().hex}{_TEMP_SUFFIX}"
+
+    def _cleanup_own_temp(self, temp: Path) -> None:
+        """Best-effort unlink of a temp file this publisher created.
+
+        Used on the pre-replace failure path only: if ``os.replace`` failed,
+        the temp file is still owned by this publisher and the old
+        authoritative ledger is intact, so removing the temp is always safe.
         """
 
-        temp = self.root / f"{_TEMP_PREFIX}{uuid.uuid4().hex}{_TEMP_SUFFIX}"
+        with suppress(OSError):
+            temp.unlink(missing_ok=True)
+
+    def _write_and_fsync_temp(self, payload: bytes) -> Path:
+        """Write ``payload`` to a managed temp file and fsync it; return path.
+
+        This is the pre-commit half of the atomic write. It performs no
+        ``os.replace``: the caller owns the commit decision. The temp file is
+        named ``.policy-ledger.<32-hex>.tmp`` in the store root (same
+        filesystem as the destination, so the subsequent ``os.replace`` is
+        atomic). The payload write is split so the
+        ``AFTER_PARTIAL_TEMP_WRITE`` checkpoint fires after a partial payload
+        has been written (and ``AFTER_TEMP_FLUSH`` after the full fsync). Any
+        failure here is a pre-commit failure: the old authoritative ledger is
+        intact and ``PUBLICATION_WRITE_FAILED`` is raised.
+        """
+
+        temp = self._new_temp_path()
         try:
+            self._checkpoint(_CHECKPOINT_BEFORE_TEMP_CREATE)
+            # ``os.replace`` refuses to overwrite a directory or follow a
+            # symlink at the destination, but we additionally refuse to create
+            # our temp on top of an existing directory/symlink shape so the
+            # pre-commit error is precise.
+            if temp.exists() and (temp.is_dir() or temp.is_symlink()):
+                raise PolicyStoreError("ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED")
             with open(temp, "wb") as handle:
-                handle.write(payload)
+                # Split the write so AFTER_PARTIAL_TEMP_WRITE fires after a
+                # real partial payload is on disk (the first byte plus half of
+                # the remainder), proving that a crash between the partial
+                # write and the flush leaves only a partial temp -- which is
+                # never visible as the authoritative ledger and is cleaned up
+                # by the next open()'s orphan sweep.
+                midpoint = max(1, len(payload) // 2)
+                handle.write(payload[:midpoint])
+                handle.flush()
+                self._checkpoint(_CHECKPOINT_AFTER_PARTIAL_TEMP_WRITE)
+                handle.write(payload[midpoint:])
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, self.ledger_path)
-            fsync_directory(self.root)
+            self._checkpoint(_CHECKPOINT_AFTER_TEMP_FLUSH)
         except OSError as exc:
-            # Best-effort cleanup of the temp file on any write-side failure.
-            # A post-replace failure is handled by the caller, not here.
-            with suppress(OSError):
-                temp.unlink(missing_ok=True)
-            raise PolicyStoreError("ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED", str(exc)) from exc
+            self._cleanup_own_temp(temp)
+            raise PolicyStoreError("ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED") from exc
+        except PolicyStoreError:
+            self._cleanup_own_temp(temp)
+            raise
+        except Exception:
+            self._cleanup_own_temp(temp)
+            raise
+        return temp
 
     def _reconstruct(self) -> AssumptionPolicyLedgerV3:
         payload = self._read_ledger_bytes()
@@ -1170,12 +1396,12 @@ class FilesystemAssumptionPolicyPublisher:
     # ------------------------------------------------------------------
 
     def read_state(self) -> ExpectedPolicyLedgerStateV3:
-        self._validate_root()
+        self._require_existing_root()
         with self._locked():
             return ExpectedPolicyLedgerStateV3.from_ledger(self._reconstruct())
 
     def read_ledger(self) -> AssumptionPolicyLedgerV3:
-        self._validate_root()
+        self._require_existing_root()
         with self._locked():
             return self._reconstruct()
 
@@ -1205,33 +1431,68 @@ class FilesystemAssumptionPolicyPublisher:
                 candidate=entry,
             )
             if result.append_result == "COMMITTED":
-                self._commit(updated)
+                self._commit(old_ledger=ledger, updated=updated, result=result)
             return result
 
-    def _commit(self, updated: AssumptionPolicyLedgerV3) -> None:
+    def _commit(
+        self,
+        *,
+        old_ledger: AssumptionPolicyLedgerV3,
+        updated: AssumptionPolicyLedgerV3,
+        result: AssumptionPolicyActivationResult,
+    ) -> None:
         """Write ``updated`` atomically and verify the write landed.
 
-        Pre-commit checkpoint is before the atomic replace: a failure there
-        leaves the old ledger intact and the caller sees a normal error. The
-        post-commit checkpoint is after the atomic replace: any failure there
-        (including verification failure) raises
-        ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` and never attempts
-        a rollback, because the replacement may have partially or fully landed
-        and a rollback could destroy a successful publication.
+        The real commit point is ``os.replace``: before it, the old
+        authoritative ledger is intact and any failure raises a normal
+        pre-commit error (``PUBLICATION_WRITE_FAILED`` or
+        ``STORE_REPLACE_FAILED``) and cleans up the temp. After it, the new
+        ledger may be authoritative, so any failure (directory fsync,
+        reread, verification mismatch, or a fault-hook exception) is
+        normalized to ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` and
+        no rollback is attempted -- a rollback could destroy a successful
+        publication.
+
+        Post-write verification is bound to the oracle's
+        ``AssumptionPolicyActivationResult``: the stored bytes, reconstructed
+        ledger, root, head digest, predecessor root, and commit-receipt
+        binding must all agree with the oracle's ``updated`` ledger and
+        ``result``.
         """
 
         intended_bytes = updated.canonical_bytes
-        self._checkpoint(_CHECKPOINT_PRE_COMMIT)
-        self._write_atomic(intended_bytes)
+        # --- pre-replace: old authoritative ledger intact on any failure ---
+        temp = self._write_and_fsync_temp(intended_bytes)
+        try:
+            self._checkpoint(_CHECKPOINT_BEFORE_REPLACE)
+            os.replace(temp, self.ledger_path)
+        except OSError as exc:
+            self._cleanup_own_temp(temp)
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_REPLACE_FAILED") from exc
+        except Exception:
+            self._cleanup_own_temp(temp)
+            raise
+        # --- commit point crossed: os.replace returned ---
         # Everything from here on runs after os.replace: the publication may
         # have landed, so any failure (including a fault-hook exception or a
         # verification mismatch) is normalized to OUTCOME_UNCERTAIN. No
         # rollback is attempted: a rollback could destroy a successful
         # publication, and the caller must reconcile the uncertain outcome.
         try:
-            self._checkpoint(_CHECKPOINT_POST_COMMIT)
-            verified = self._reconstruct()
-            self._verify_post_write(updated, intended_bytes, verified)
+            self._checkpoint(_CHECKPOINT_AFTER_REPLACE)
+            self._checkpoint(_CHECKPOINT_BEFORE_DIRECTORY_FSYNC)
+            fsync_directory(self.root)
+            self._checkpoint(_CHECKPOINT_BEFORE_POST_WRITE_READ)
+            stored_bytes = self._read_ledger_bytes()
+            self._checkpoint(_CHECKPOINT_DURING_POST_WRITE_READ)
+            verified = parse_ledger_v3(stored_bytes)
+            self._verify_post_write(
+                old_ledger=old_ledger,
+                updated=updated,
+                intended_bytes=intended_bytes,
+                verified=verified,
+                result=result,
+            )
         except PolicyStoreError as exc:
             # A verification failure that already carries the uncertain code
             # is re-raised unchanged; any other PolicyStoreError (e.g. a
@@ -1242,43 +1503,98 @@ class FilesystemAssumptionPolicyPublisher:
                 "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN", exc.code
             ) from exc
         except Exception as exc:
-            # A fault-hook RuntimeError or any other post-commit surprise.
+            # A fault-hook RuntimeError or any other post-commit surprise. The
+            # detail is the exception's stable code if it has one, else None:
+            # never ``repr(exc)`` (which would leak backend diagnostics).
+            detail = getattr(exc, "code", None)
             raise PolicyStoreError(
-                "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN", repr(exc)
+                "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN", detail
             ) from exc
 
     @staticmethod
     def _verify_post_write(
+        *,
+        old_ledger: AssumptionPolicyLedgerV3,
         updated: AssumptionPolicyLedgerV3,
         intended_bytes: bytes,
         verified: AssumptionPolicyLedgerV3,
+        result: AssumptionPolicyActivationResult,
     ) -> None:
-        """Strengthened post-write verification: bytes + entries + root + head
-        + predecessor binding.
+        """Strengthened post-write verification bound to the oracle result.
 
-        Every check here raises ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN``
+        Verifies ALL of:
+
+        * the stored bytes equal ``updated.canonical_bytes``;
+        * the reconstructed canonical bytes equal ``updated.canonical_bytes``;
+        * the reconstructed entries equal ``updated.entries``;
+        * the reconstructed root equals ``updated.ledger_root_digest`` and
+          equals ``result.resulting_ledger_root``;
+        * the reconstructed head digest equals ``result.ledger_entry_digest``;
+        * ``result.predecessor_ledger_root`` equals
+          ``old_ledger.ledger_root_digest``;
+        * ``result.policy_commit_receipt_digest`` equals the updated head's
+          commit receipt digest.
+
+        Every check raises ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN``
         so that any divergence after ``os.replace`` surfaces as the uncertain
-        outcome rather than a successful return.
+        outcome rather than a successful return. No check inspects exception
+        text.
         """
 
         _uncertain = "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+        _failed = "STORED_VERIFICATION_FAILED"
         if verified.canonical_bytes != intended_bytes:
-            raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+            raise PolicyStoreError(_uncertain, _failed)
+        if verified.canonical_bytes != updated.canonical_bytes:
+            raise PolicyStoreError(_uncertain, _failed)
         if tuple(verified.entries) != tuple(updated.entries):
-            raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+            raise PolicyStoreError(_uncertain, _failed)
+        # Root binding: reconstructed == updated == oracle resulting root.
         if verified.ledger_root_digest != updated.ledger_root_digest:
-            raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
-        # Head + predecessor binding: if there is a head entry, its digest and
-        # the (predecessor -> head) chain position must match the oracle.
+            raise PolicyStoreError(_uncertain, _failed)
+        if verified.ledger_root_digest != result.resulting_ledger_root:
+            raise PolicyStoreError(_uncertain, _failed)
+        if updated.ledger_root_digest != result.resulting_ledger_root:
+            raise PolicyStoreError(_uncertain, _failed)
+        # Head digest binding: reconstructed head == updated head == oracle
+        # activation result's ledger_entry_digest.
         if updated.entries:
             head = updated.entries[-1]
             verified_head = verified.entries[-1]
             if verified_head.ledger_entry_digest != head.ledger_entry_digest:
-                raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+                raise PolicyStoreError(_uncertain, _failed)
+            if head.ledger_entry_digest != result.ledger_entry_digest:
+                raise PolicyStoreError(_uncertain, _failed)
+            # Predecessor root + commit receipt binding to the oracle result.
+            if result.predecessor_ledger_root != old_ledger.ledger_root_digest:
+                raise PolicyStoreError(_uncertain, _failed)
+            if result.policy_commit_receipt_digest != head.policy_commit.commit_receipt_digest:
+                raise PolicyStoreError(_uncertain, _failed)
             if (
                 head.signing_payload.predecessor_commit_receipt_digest
                 != verified_head.signing_payload.predecessor_commit_receipt_digest
             ):
-                raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
-        # Directory fsync is invoked inside _write_atomic; on POSIX it makes
-        # the rename durable. On Windows it is a no-op (see claim boundary).
+                raise PolicyStoreError(_uncertain, _failed)
+        else:
+            # Empty ledger: the result must claim the empty ledger's root as
+            # both predecessor and resulting root, and no head digest.
+            if result.ledger_entry_digest != "":
+                # An empty updated ledger has no head; the result must not
+                # claim one. (The contract never produces an empty-ledger
+                # COMMITTED result, so this is a defense-in-depth guard.)
+                raise PolicyStoreError(_uncertain, _failed)
+
+    @staticmethod
+    def _verify_create_post_write(intended_bytes: bytes, stored_bytes: bytes) -> None:
+        """Post-write verification for the canonical empty ledger written by
+        ``create()``.
+
+        The empty ledger is self-validating through ``parse_ledger_v3``, so
+        the additional binding here is that the reread authoritative bytes are
+        byte-for-byte the canonical empty ledger the publisher intended.
+        """
+
+        _uncertain = "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+        _failed = "STORED_VERIFICATION_FAILED"
+        if stored_bytes != intended_bytes:
+            raise PolicyStoreError(_uncertain, _failed)
