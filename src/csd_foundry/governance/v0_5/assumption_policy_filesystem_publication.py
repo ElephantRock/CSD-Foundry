@@ -185,7 +185,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from csd_foundry._platform import (
     LockInitializationError,
@@ -243,6 +243,15 @@ from csd_foundry.governance.v0_5.assumption_policy_activation_publication import
     ExpectedPolicyLedgerStateV3,
     compare_and_append_policy_entry_v3,
 )
+
+if TYPE_CHECKING:
+    # Type-only import to avoid a runtime cycle: the resolution module is
+    # lower-level than the filesystem publisher and is imported at call time
+    # inside ``resolve_at``. This import exists solely so the
+    # ``resolve_at`` return annotation resolves under ``mypy``.
+    from csd_foundry.governance.v0_5.assumption_policy_resolution import (
+        ResolvedPolicyAtSequence,
+    )
 
 # Stable field-set and schema-version constants for every closed object the
 # publisher must parse from canonical stored bytes. These are kept here (rather
@@ -1649,6 +1658,77 @@ class FilesystemAssumptionPolicyPublisher:
         self._require_existing_root()
         with self._locked():
             return self._reconstruct()
+
+    def resolve_at(self, event_sequence: int) -> ResolvedPolicyAtSequence:
+        """Read-only historical V3 policy resolution at ``event_sequence``.
+
+        Acquires the publication lock, reconstructs the authoritative ledger
+        from stored bytes (full revalidation), runs the pure
+        :func:`resolve_policy_at_v3` resolver, and releases the lock. Performs
+        NO writes: no temp file, no atomic replace, no orphan cleanup sweep.
+        The authoritative ``ledger.json`` bytes are proven unchanged across the
+        locked region (captured at the start and end of the SAME lock scope and
+        compared byte-for-byte).
+
+        The lock scope is identical to ``publish`` so a concurrent publisher
+        cannot append while this read reconstructs: the resolver sees a single
+        consistent ledger snapshot. A reader and a concurrent publisher are
+        serialized by the lock; the reader observes either the complete old or
+        the complete new ledger, never a torn read.
+
+        Raises ``PolicyStoreError`` for filesystem / reconstruction failures
+        (same codes as ``read_ledger``) and
+        ``AssumptionPolicyActivationContractError`` for resolution failures
+        (``ASSUMPTION_POLICY_NOT_ACTIVE``, bad sequence, V2 ledger). The
+        resolution errors propagate unchanged: they are deterministic contract
+        outcomes a caller may switch on.
+        """
+
+        # Local import to keep the dependency direction one-way: the
+        # resolution module is lower-level than the filesystem publisher and
+        # must not import it. Importing at call time also avoids any module-
+        # init cycle if the resolution module is extended in a later milestone.
+        from csd_foundry.governance.v0_5.assumption_policy_resolution import (
+            resolve_policy_at_v3,
+        )
+
+        self._require_existing_root()
+        with self._locked():
+            # Capture the authoritative bytes at the START of the locked
+            # region. The non-mutation proof compares this to a second capture
+            # at the END of the same locked region. Because both captures are
+            # under the lock, a concurrent publisher (which also needs the
+            # lock) cannot intervene: if the bytes differ, this read-only call
+            # itself wrote something, which is impossible by construction.
+            before_bytes = self._read_authoritative_bytes_in_lock()
+            ledger = self._reconstruct()
+            resolved = resolve_policy_at_v3(ledger, event_sequence)
+            after_bytes = self._read_authoritative_bytes_in_lock()
+        if before_bytes != after_bytes:
+            # The authoritative bytes changed across a read-only locked
+            # region. This is impossible by construction (no writes occur
+            # here), so a divergence indicates the store was mutated by this
+            # call path or by external tampering that bypassed the lock. Fail
+            # closed.
+            raise PolicyStoreError("ASSUMPTION_POLICY_RESOLVE_AT_BYTES_MUTATED")
+        return resolved
+
+    def _read_authoritative_bytes_in_lock(self) -> bytes:
+        """Read authoritative bytes while the publication lock is already held.
+
+        Used by :meth:`resolve_at` for the in-lock non-mutation proof. The
+        caller MUST already hold the publication lock. Raises
+        ``BYTES_MISSING`` if the file is absent (so a missing store surfaces
+        the same code as ``read_ledger``); any read failure is normalized to
+        ``BYTES_INVALID``.
+        """
+
+        if not self.ledger_path.exists():
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_MISSING")
+        try:
+            return self.ledger_path.read_bytes()
+        except OSError as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID") from exc
 
     # ------------------------------------------------------------------
     # Publish API
