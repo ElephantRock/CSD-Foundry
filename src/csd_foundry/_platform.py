@@ -20,6 +20,21 @@ codebase: both implementations provide process-wide exclusive advisory
 locking on the lock file, which is sufficient for single-writer registry
 mutators. The lock file is opened in binary append+read mode so it is
 created on first use.
+
+Strict opener (:func:`open_lock_file_strict`) provides acquisition-time
+validation against cooperating store operators:
+
+    lstat path
+    reject symlink/non-regular shape
+    open/create without truncation
+    fstat opened descriptor
+    lstat path again
+    require same regular-file identity
+    seed only after validation
+
+The strict opener never seeds or locks through a symlink detected during
+acquisition. A noncooperating actor replacing directory entries after
+validation is outside the cooperative single-host claim.
 """
 
 from __future__ import annotations
@@ -65,14 +80,7 @@ def lock_file(handle: IO[bytes]) -> None:
 
     fileno = handle.fileno()
     if sys.platform == "win32":
-        # msvcrt.locking locks `nbytes` starting at the current file position.
-        # Seek to 0 so lock and unlock always target the same byte (byte 0),
-        # regardless of prior reads/writes on this handle.
         os.lseek(fileno, 0, os.SEEK_SET)
-        # LK_LOCK blocks (retrying) until the lock is held or the OS gives up;
-        # LK_NBLCK would raise immediately. The byte range we lock is arbitrary
-        # but must be consistent across lock/unlock and must exist in the file
-        # (see _open_lock_file).
         try:
             msvcrt.locking(fileno, msvcrt.LK_LOCK, 1)
         except OSError as exc:
@@ -92,9 +100,6 @@ def unlock_file(handle: IO[bytes]) -> None:
     try:
         if sys.platform == "win32":
             try:
-                # Seek back to byte 0 before releasing; msvcrt.locking unlocks
-                # the range starting at the current file position, and lock_file
-                # locks byte 0.
                 os.lseek(fileno, 0, os.SEEK_SET)
                 msvcrt.locking(fileno, msvcrt.LK_UNLCK, 1)
             except OSError:
@@ -137,67 +142,124 @@ class LockInvalidError(OSError):
     """
 
 
+def _open_windows_lock_file_strict(lock_path: Path) -> IO[bytes]:
+    """Windows strict lock-file opener with acquisition-time validation.
+
+    Algorithm:
+      1. lstat the path; reject symlink or non-regular.
+      2. Open/create without truncation.
+      3. fstat the opened descriptor; require regular.
+      4. lstat the path again; reject symlink or non-regular.
+      5. Require same identity (st_dev, st_ino) between descriptor and path.
+      6. Seed only after all validation passes.
+    """
+
+    binary = getattr(os, "O_BINARY", 0)
+    append = getattr(os, "O_APPEND", 0)
+    fd: int | None = None
+
+    while True:
+        try:
+            before = os.lstat(lock_path)
+        except FileNotFoundError:
+            try:
+                fd = os.open(
+                    lock_path,
+                    os.O_RDWR | os.O_CREAT | os.O_EXCL | append | binary,
+                    _LOCK_FILE_MODE,
+                )
+            except FileExistsError:
+                continue
+            break
+
+        if stat.S_ISLNK(before.st_mode):
+            raise LockInvalidError("lock path is a symlink")
+        if not stat.S_ISREG(before.st_mode):
+            raise LockInvalidError("lock path is not a regular file")
+
+        try:
+            fd = os.open(lock_path, os.O_RDWR | append | binary)
+        except OSError as exc:
+            raise LockInvalidError("lock path could not be opened") from exc
+        break
+
+    assert fd is not None
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise LockInvalidError("opened lock object is not regular")
+        after = os.lstat(lock_path)
+        if stat.S_ISLNK(after.st_mode):
+            raise LockInvalidError("lock path became a symlink")
+        if not stat.S_ISREG(after.st_mode):
+            raise LockInvalidError("lock path became non-regular")
+        if (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino):
+            raise LockInvalidError("lock path changed during acquisition")
+        handle = os.fdopen(fd, "a+b")  # noqa: SIM115
+    except Exception:
+        os.close(fd)
+        raise
+
+    if opened.st_size == 0:
+        handle.write(b"\0")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return handle
+
+
+def _open_posix_lock_file_strict(lock_path: Path) -> IO[bytes]:
+    """POSIX strict lock-file opener using O_NOFOLLOW + descriptor validation."""
+
+    flags = os.O_RDWR | os.O_CREAT | os.O_APPEND
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    flags |= no_follow
+    try:
+        fd = os.open(lock_path, flags, _LOCK_FILE_MODE)
+    except OSError as exc:
+        raise LockInvalidError("lock path could not be opened") from exc
+
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise LockInvalidError("opened lock object is not regular")
+        handle = os.fdopen(fd, "a+b")  # noqa: SIM115
+    except Exception:
+        os.close(fd)
+        raise
+
+    if opened.st_size == 0:
+        handle.write(b"\0")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return handle
+
+
 def open_lock_file_strict(lock_path: Path) -> IO[bytes]:
     """Open (creating if necessary) the lock file, refusing symlinks.
 
     This is the strict variant of :func:`_open_lock_file` used by the
-    assumption-policy publisher. It guarantees the lock path is a regular file
-    by the time a handle is returned, so a malicious or accidental symlink at
-    ``publication.lock`` can never be followed into an attacker-controlled file
-    or a directory.
+    assumption-policy publisher.
 
-    * **POSIX:** ``os.open`` with ``O_RDWR | O_CREAT | O_APPEND | O_NOFOLLOW``.
-      ``O_NOFOLLOW`` causes the kernel to reject a symlink at ``lock_path``
-      with ``ELOOP`` before any handle is handed out. On success the descriptor
-      is wrapped in a Python file object.
-    * **Windows:** ``msvcrt.locking`` has no ``O_NOFOLLOW`` equivalent, so the
-      path is opened ``a+b`` (the existing, Windows-compatible approach) and
-      then ``os.fstat`` is consulted: if the opened descriptor is not a regular
-      file (``S_ISREG`` is false) -- which happens when ``lock_path`` is a
-      directory or a symlink the runtime transparently dereferenced -- the
-      handle is closed and ``LockInvalidError`` is raised.
+    * **POSIX:** ``os.open`` with ``O_NOFOLLOW`` rejects symlinks at the kernel
+      level. After opening, ``fstat`` on the descriptor confirms a regular
+      file. Descriptor-based size check avoids path-based ``stat`` races.
+    * **Windows:** No ``O_NOFOLLOW`` equivalent exists. The opener performs
+      acquisition-time validation: ``lstat`` the path (rejects symlinks and
+      non-regular shapes), open without truncation, ``fstat`` the descriptor
+      (confirms regular), ``lstat`` again (detects concurrent replacement),
+      and verify descriptor/path identity match (``st_dev`` + ``st_ino``).
 
-    Like :func:`_open_lock_file`, the file is seeded with one byte on first
-    use so the Windows byte-range lock is well-defined regardless of platform.
+    The strict opener never seeds or locks through a symlink detected during
+    acquisition. A noncooperating actor replacing directory entries after
+    validation is outside the cooperative single-host claim.
 
     The caller owns the returned handle's lifetime.
     """
 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if sys.platform == "win32":
-        # Intentionally not a `with`: the handle is returned to the caller.
-        handle = open(lock_path, "a+b", _LOCK_FILE_MODE)  # noqa: SIM115
-        try:
-            info = os.fstat(handle.fileno())
-        except OSError as exc:
-            handle.close()
-            raise LockInvalidError(f"lock path not statable: {exc}") from exc
-        if not stat.S_ISREG(info.st_mode):
-            # The opened descriptor is a directory or (if the runtime
-            # dereferenced a symlink) anything other than a regular file.
-            handle.close()
-            raise LockInvalidError("lock path is not a regular file")
-        if lock_path.stat().st_size == 0:
-            handle.write(b"\0")
-            handle.flush()
-            os.fsync(handle.fileno())
-        return handle
-    # POSIX: O_NOFOLLOW rejects a symlink at the path itself with ELOOP before
-    # any file is opened or followed. A directory or other non-regular shape at
-    # the path surfaces as a different errno. Every open() failure here is a
-    # shape/open failure: the publisher normalizes it to LOCK_INVALID.
-    flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW
-    try:
-        fd = os.open(lock_path, flags, _LOCK_FILE_MODE)
-    except OSError as exc:
-        raise LockInvalidError(f"lock path could not be opened: {exc}") from exc
-    # Intentionally not a `with`: the handle is returned to the caller.
-    handle = os.fdopen(fd, "a+b")  # noqa: SIM115
-    if lock_path.stat().st_size == 0:
-        handle.write(b"\0")
-        handle.flush()
-        os.fsync(handle.fileno())
-    return handle
+        return _open_windows_lock_file_strict(lock_path)
+    return _open_posix_lock_file_strict(lock_path)
 
 
 @contextmanager
