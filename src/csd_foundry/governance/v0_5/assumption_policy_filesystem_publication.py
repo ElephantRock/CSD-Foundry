@@ -247,9 +247,10 @@ from csd_foundry.governance.v0_5.assumption_policy_activation_publication import
 if TYPE_CHECKING:
     # Type-only import to avoid a runtime cycle: the resolution module is
     # lower-level than the filesystem publisher and is imported at call time
-    # inside ``resolve_at``. This import exists solely so the
-    # ``resolve_at`` return annotation resolves under ``mypy``.
+    # inside ``resolve_at`` and ``resolve_policy_and_select_grant_at``. This
+    # import exists solely so the return annotations resolve under ``mypy``.
     from csd_foundry.governance.v0_5.assumption_policy_resolution import (
+        GrantSelectionDecision,
         ResolvedPolicyAtSequence,
     )
 
@@ -1662,13 +1663,13 @@ class FilesystemAssumptionPolicyPublisher:
     def resolve_at(self, event_sequence: int) -> ResolvedPolicyAtSequence:
         """Read-only historical V3 policy resolution at ``event_sequence``.
 
-        Acquires the publication lock, reconstructs the authoritative ledger
-        from stored bytes (full revalidation), runs the pure
-        :func:`resolve_policy_at_v3` resolver, and releases the lock. Performs
-        NO writes: no temp file, no atomic replace, no orphan cleanup sweep.
-        The authoritative ``ledger.json`` bytes are proven unchanged across the
-        locked region (captured at the start and end of the SAME lock scope and
-        compared byte-for-byte).
+        Acquires the publication lock, reads a single authoritative byte
+        snapshot, reconstructs and fully revalidates the ledger, runs the pure
+        :func:`resolve_policy_at_v3` resolver against it, rereads the bytes
+        and requires they are unchanged, then releases the lock. Performs
+        NO writes: no temp file, no atomic replace, no orphan cleanup sweep,
+        no fsync. The authoritative ``ledger.json`` bytes are proven
+        byte-identical across the locked region.
 
         The lock scope is identical to ``publish`` so a concurrent publisher
         cannot append while this read reconstructs: the resolver sees a single
@@ -1684,26 +1685,7 @@ class FilesystemAssumptionPolicyPublisher:
         outcomes a caller may switch on.
         """
 
-        # Local import to keep the dependency direction one-way: the
-        # resolution module is lower-level than the filesystem publisher and
-        # must not import it. Importing at call time also avoids any module-
-        # init cycle if the resolution module is extended in a later milestone.
-        from csd_foundry.governance.v0_5.assumption_policy_resolution import (
-            resolve_policy_at_v3,
-        )
-
-        self._require_existing_root()
-        with self._locked():
-            # Capture the authoritative bytes at the START of the locked
-            # region. The non-mutation proof compares this to a second capture
-            # at the END of the same locked region. Because both captures are
-            # under the lock, a concurrent publisher (which also needs the
-            # lock) cannot intervene: if the bytes differ, this read-only call
-            # itself wrote something, which is impossible by construction.
-            before_bytes = self._read_authoritative_bytes_in_lock()
-            ledger = self._reconstruct()
-            resolved = resolve_policy_at_v3(ledger, event_sequence)
-            after_bytes = self._read_authoritative_bytes_in_lock()
+        resolved, before_bytes, after_bytes = self._resolve_at_snapshot(event_sequence)
         if before_bytes != after_bytes:
             # The authoritative bytes changed across a read-only locked
             # region. This is impossible by construction (no writes occur
@@ -1713,14 +1695,116 @@ class FilesystemAssumptionPolicyPublisher:
             raise PolicyStoreError("ASSUMPTION_POLICY_RESOLVE_AT_BYTES_MUTATED")
         return resolved
 
+    def resolve_policy_and_select_grant_at(
+        self,
+        *,
+        event_sequence: int,
+        action: str,
+        authority_id: str,
+        scope_id: str,
+        assumption_materiality: str,
+        challenge_materiality: str | None,
+    ) -> GrantSelectionDecision:
+        """Authoritative composite: resolve AND select under one locked snapshot.
+
+        Sequence (all under a single strict lock acquisition, no writes):
+
+        1. require an existing initialized root (no creation);
+        2. acquire the strict publication lock;
+        3. read ONE authoritative byte snapshot;
+        4. reconstruct and fully revalidate the ledger from those bytes;
+        5. resolve the policy generation at ``event_sequence``;
+        6. verify the resolution against the SAME reconstructed ledger
+           (re-bind the source entry);
+        7. select the applicable grant from that source entry's digested
+           grants (no caller-carried tuple);
+        8. reread the authoritative bytes and require they are unchanged;
+        9. release the lock;
+        10. return the decision.
+
+        No writes, no temp, no replace, no fsync, no orphan cleanup. The
+        resolution and the grant selection share the same ledger snapshot:
+        selection re-binds the resolution to the SAME reconstructed ledger
+        (the resolution's ``ledger_root_digest`` must equal the ledger's
+        root), so a concurrent append cannot split the read across two
+        generations. The decision's ``ledger_root_digest`` is therefore the
+        root the reader observed under the lock.
+
+        Raises ``PolicyStoreError`` for filesystem / reconstruction failures
+        (including ``ASSUMPTION_POLICY_RESOLVE_AT_BYTES_MUTATED`` if the bytes
+        changed across the locked region) and
+        ``AssumptionPolicyActivationContractError`` for resolution / selection
+        contract failures. Denials (NO_APPLICABLE_GRANT, AMBIGUOUS_GRANTS) are
+        returned as decisions, not raised.
+        """
+
+        resolved, before_bytes, after_bytes = self._resolve_at_snapshot(event_sequence)
+        # Select against the SAME ledger that produced the resolution. The
+        # selector re-binds the resolution to this ledger's source entry.
+        from csd_foundry.governance.v0_5.assumption_policy_resolution import (
+            select_applicable_grant_v3,
+        )
+
+        ledger = parse_ledger_v3(before_bytes)
+        decision = select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=resolved,
+            action=action,
+            authority_id=authority_id,
+            scope_id=scope_id,
+            assumption_materiality=assumption_materiality,
+            challenge_materiality=challenge_materiality,
+        )
+        if before_bytes != after_bytes:
+            raise PolicyStoreError("ASSUMPTION_POLICY_RESOLVE_AT_BYTES_MUTATED")
+        return decision
+
+    def _resolve_at_snapshot(
+        self,
+        event_sequence: int,
+    ) -> tuple[ResolvedPolicyAtSequence, bytes, bytes]:
+        """Shared read-only snapshot helper for the resolution read path.
+
+        Acquires the strict publication lock, reads one authoritative byte
+        snapshot, reconstructs and fully revalidates the ledger, resolves the
+        policy generation at ``event_sequence``, rereads the bytes, and
+        returns ``(resolved, before_bytes, after_bytes)``. The caller MUST
+        compare ``before_bytes`` and ``after_bytes`` and raise
+        ``ASSUMPTION_POLICY_RESOLVE_AT_BYTES_MUTATED`` on any divergence (this
+        is split out so the composite can run selection between the two reads
+        while still proving non-mutation).
+
+        Performs NO writes: no temp, no replace, no fsync, no orphan cleanup.
+        The lock scope is identical to ``publish``.
+        """
+
+        from csd_foundry.governance.v0_5.assumption_policy_resolution import (
+            resolve_policy_at_v3,
+        )
+
+        self._require_existing_root()
+        with self._locked():
+            # Read ONE authoritative byte snapshot at the START of the locked
+            # region. The non-mutation proof compares this to a second read at
+            # the END of the same locked region. Because both reads are under
+            # the lock, a concurrent publisher (which also needs the lock)
+            # cannot intervene: if the bytes differ, this read-only call
+            # itself wrote something, which is impossible by construction.
+            before_bytes = self._read_authoritative_bytes_in_lock()
+            ledger = parse_ledger_v3(before_bytes)
+            resolved = resolve_policy_at_v3(ledger, event_sequence)
+            after_bytes = self._read_authoritative_bytes_in_lock()
+        return resolved, before_bytes, after_bytes
+
     def _read_authoritative_bytes_in_lock(self) -> bytes:
         """Read authoritative bytes while the publication lock is already held.
 
-        Used by :meth:`resolve_at` for the in-lock non-mutation proof. The
-        caller MUST already hold the publication lock. Raises
-        ``BYTES_MISSING`` if the file is absent (so a missing store surfaces
-        the same code as ``read_ledger``); any read failure is normalized to
-        ``BYTES_INVALID``.
+        Used by :meth:`_resolve_at_snapshot` (the shared snapshot helper for
+        :meth:`resolve_at` and :meth:`resolve_policy_and_select_grant_at`) for
+        the in-lock non-mutation proof. The caller MUST already hold the
+        publication lock. Raises ``BYTES_MISSING`` if the file is absent (so a
+        missing store surfaces the same code as ``read_ledger``); any read
+        failure is normalized to ``BYTES_INVALID``.
         """
 
         if not self.ledger_path.exists():

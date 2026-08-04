@@ -10,28 +10,36 @@ answer the question:
 
 The public API is:
 
-* :class:`ResolvedPolicyAtSequence` — frozen binding of the resolved policy
+* :class:`ResolvedPolicyAtSequence` -- frozen binding of the resolved policy
   generation and its activation envelope at the queried sequence. The binding
-  identity is its digest fields; it additionally carries the resolved entry's
-  grant set (a non-digested reference) so grant selection can scan it without
-  a second ledger lookup;
-* :func:`resolve_policy_at_v3` — pure historical policy resolution over a
+  carries ONLY digest and sequence fields: its canonical bytes are a digest
+  receipt, never hidden authorization material. A resolution object alone is
+  NOT an authoritative source for grant selection -- grant selection must
+  re-bind the resolution to its source ledger entry via
+  :func:`_source_entry_for_resolution` and scan that entry's digested grants;
+* :func:`resolve_policy_at_v3` -- pure historical policy resolution over a
   validated ``AssumptionPolicyLedgerV3`` using half-open ``[s_i, s_{i+1})``
   intervals keyed on each entry's ``effective_from_sequence``;
-* :class:`GrantSelectionDecision` — frozen fail-closed decision binding the
+* :class:`GrantSelectionDecision` -- frozen fail-closed decision binding the
   selected grant (or denial) to the resolved policy, the request, and the
   sequence;
-* :func:`select_applicable_grant_v3` — pure exact grant selection matching
+* :func:`select_applicable_grant_v3` -- pure exact grant selection matching
   the request against every dimension (action, authority, scope,
   materialities, effective interval) with deterministic fail-closed ambiguity
-  handling;
-* :func:`resolve_policy_and_select_grant` — composite: reconstruct -> resolve
-  -> select.
+  handling. The selector takes BOTH the ledger and the resolved policy: the
+  resolution binds the generation; the ledger re-binds the source entry whose
+  ``policy.grants`` are scanned. There is no independently supplied event
+  sequence -- the resolved policy's ``event_sequence`` governs all grant
+  interval evaluation;
+* :func:`resolve_policy_and_select_grant` -- composite: resolve -> select.
 
 A read-only :meth:`FilesystemAssumptionPolicyPublisher.resolve_at` is added to
 the durable publisher: it acquires the publication lock, reconstructs the
 ledger from authoritative bytes, runs the pure resolver, releases the lock, and
-performs NO writes.
+performs NO writes. The publisher additionally offers the composite
+:meth:`FilesystemAssumptionPolicyPublisher.resolve_policy_and_select_grant_at`
+which resolves AND selects under a single locked snapshot, proving the bytes
+are unchanged across the read.
 
 Claim boundary
 ==============
@@ -40,11 +48,15 @@ A1.3-C claims, on every supported platform:
 
 * pure, deterministic historical resolution: the policy that governed an event
   sequence ``s`` depends only on the ledger entries whose
-  ``effective_from_sequence <= s``; future entries never affect an earlier
-  query, and an earlier result is byte-identical after a later append;
+  ``effective_from_sequence <= s``; future entries never change the resolved
+  generation bindings (policy ID/digest, effective sequence, signing-payload
+  digest, commit-receipt digest, ledger-entry digest). The complete resolution
+  receipt is snapshot-bound and changes when the observed authoritative ledger
+  root changes;
 * exact, fail-closed grant selection: at most one grant may match a request;
   zero matches deny, two or more matches deny, exactly one matches and is
-  selected;
+  selected. The grants scanned are the source entry's digested grants -- never
+  a caller-carried tuple -- so a substituted tuple cannot authorize;
 * V3-only resolution: a V2 ``AssumptionPolicyLedgerV2`` (or any non-V3 ledger
   object) is rejected by an exact type check before any field is read, so the
   stable ``ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE`` code is
@@ -52,9 +64,10 @@ A1.3-C claims, on every supported platform:
 * strict sequence typing: a ``bool`` sequence is rejected even though
   ``bool`` subclasses ``int`` in Python, so a stored ``true`` cannot
   masquerade as ``1``;
-* read-only lock scope on the durable publisher: ``resolve_at`` acquires the
-  same strict publication lock used by publish, but performs no writes and
-  proves the authoritative bytes are unchanged on exit.
+* read-only lock scope on the durable publisher: ``resolve_at`` and the
+  composite ``resolve_policy_and_select_grant_at`` acquire the same strict
+  publication lock used by publish, but perform no writes and prove the
+  authoritative bytes are unchanged on exit.
 
 A1.3-C explicitly does NOT claim (deferred to A2 / A3):
 
@@ -87,17 +100,15 @@ i.e. the half-open interval ``[s_i, s_{i+1})`` contains ``q``. Concretely:
 * ``q >= s_{n-1}``         -> ``e_{n-1}`` (after the latest activation is the
   latest policy)
 
-Future entries (those with ``s_i > q``) never affect the resolution of ``q``.
-Consequently, appending a new entry ``e_n`` after a query of ``q < s_n``
-returns byte-identical results: the resolver walks the chain in reverse and
-stops at the first entry with ``s_i <= q``.
+Future entries (those with ``s_i > q``) never change the resolved generation
+bindings.
 
 Grant applicability dimensions
 ==============================
 
 Given a resolved policy and a request ``(action, authority_id, scope_id,
-assumption_materiality, challenge_materiality, event_sequence)``, a grant is
-applicable if and only if ALL of the following hold:
+assumption_materiality, challenge_materiality)``, a grant is applicable if and
+only if ALL of the following hold:
 
 * ``grant.action == action`` (exact, case-sensitive);
 * ``grant.authority_id == authority_id`` (exact, case-sensitive);
@@ -108,7 +119,7 @@ applicable if and only if ALL of the following hold:
 * ``assumption_materiality in grant.assumption_materialities`` (exact);
 * ``challenge_materiality in grant.challenge_materialities`` (exact; for
   non-resolution actions this is empty and the request must supply ``None``);
-* the request ``event_sequence`` falls in the grant's half-open
+* the resolved policy's ``event_sequence`` falls in the grant's half-open
   ``[effective_from_sequence, effective_until_sequence)`` interval, where
   ``effective_until_sequence`` of ``None`` denotes an unbounded upper bound.
 
@@ -135,6 +146,7 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
     AssumptionPolicyLedgerV3,
 )
 from csd_foundry.governance.v0_5.assumption_governance_contracts import (
+    ASSUMPTION_AUTHORITY_ACTIONS,
     ASSUMPTION_MATERIALITIES,
     GLOBAL_ASSUMPTION_SCOPE,
     RESOLUTION_AUTHORITY_ACTIONS,
@@ -144,25 +156,6 @@ from csd_foundry.governance.v0_5.assumption_governance_contracts import (
 RESOLVED_POLICY_AT_SEQUENCE_SCHEMA_VERSION = "assumption-resolved-policy-at-sequence/1"
 GRANT_SELECTION_DECISION_SCHEMA_VERSION = "assumption-grant-selection-decision/1"
 
-#: The complete, closed set of assumption-authority actions a grant may cover.
-#: Mirrors ``ASSUMPTION_AUTHORITY_ACTIONS`` from the contracts module but is
-#: inlined here so the selection gate is auditable in one place and does not
-#: import the constant (which the contracts module does not export as a name
-#: re-exported here -- the tuple literal is the stable gate).
-_GRANT_ACTIONS = (
-    "ADMIT",
-    "CHALLENGE",
-    "CONFIRM",
-    "EXPIRE",
-    "PROPOSE",
-    "REJECT",
-    "RESOLVE_TO_ADMITTED",
-    "RESOLVE_TO_CONFIRMED",
-    "RESOLVE_TO_REJECTED",
-    "RESOLVE_TO_SUPERSEDED",
-    "SUPERSEDE",
-)
-
 #: Stable decision-type enumeration. Exactly one of these is produced on every
 #: call to :func:`select_applicable_grant_v3`. ``NO_APPLICABLE_GRANT`` and
 #: ``AMBIGUOUS_GRANTS`` are denials (the caller is not authorized), not errors:
@@ -170,6 +163,18 @@ _GRANT_ACTIONS = (
 #: input-contract violation (unknown action, bad materiality, negative
 #: sequence) raises ``AssumptionPolicyActivationContractError`` instead.
 DECISION_TYPES = ("SELECTED", "NO_APPLICABLE_GRANT", "AMBIGUOUS_GRANTS")
+
+#: Stable decision-code enumeration (one per decision type). The decision code
+#: is bound into the ``selection_digest`` so a SELECTED, NO_APPLICABLE_GRANT,
+#: and AMBIGUOUS_GRANTS outcome for the same (resolved policy, request) triple
+#: produce distinct, distinguishable digests. The action vocabulary is the one
+#: normative enumeration imported from the contracts module
+#: (``ASSUMPTION_AUTHORITY_ACTIONS``); this module defines no local action set.
+DECISION_CODES = {
+    "SELECTED": "ASSUMPTION_GRANT_SELECTED",
+    "NO_APPLICABLE_GRANT": "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",
+    "AMBIGUOUS_GRANTS": "ASSUMPTION_POLICY_AMBIGUOUS_GRANTS",
+}
 
 
 # ===========================================================================
@@ -181,18 +186,18 @@ DECISION_TYPES = ("SELECTED", "NO_APPLICABLE_GRANT", "AMBIGUOUS_GRANTS")
 class ResolvedPolicyAtSequence:
     """Frozen binding of the resolved policy generation at a queried sequence.
 
-    The binding identity is the digest and sequence fields listed below: two
-    resolutions of the same ``(ledger, event_sequence)`` pair produce
+    The binding carries ONLY digest, id, and sequence fields. Its canonical
+    bytes are a digest receipt: they are fully determined by the digested
+    envelope of the resolved ledger entry plus the queried event sequence.
+    The class carries NO authorization material (no grant tuple): a resolution
+    object alone is therefore NOT an authoritative source for grant selection.
+    Grant selection re-binds this resolution to its source ledger entry via
+    :func:`_source_entry_for_resolution` and scans that entry's digested
+    grants, so a caller cannot substitute a grant tuple to authorize.
+
+    Two resolutions of the same ``(ledger, event_sequence)`` pair produce
     byte-identical ``resolution_digest`` values. The ``resolution_digest`` is
     a domain-separated self-digest over the complete unsigned value.
-
-    The ``grants`` field is a non-digested carry-through of the resolved
-    entry's grant set, present so that :func:`select_applicable_grant_v3` can
-    scan grants without a second ledger lookup. It is excluded from the digest
-    because it is fully determined by ``ledger_entry_digest`` (the grant set
-    is part of the entry's canonical bytes, which the digest already covers).
-    This mirrors how ``AssumptionPolicyLedgerEntryV3`` carries the full
-    ``policy`` object alongside its ``ledger_entry_digest``.
     """
 
     event_sequence: int
@@ -204,10 +209,6 @@ class ResolvedPolicyAtSequence:
     ledger_entry_digest: str
     ledger_root_digest: str
     resolution_digest: str
-    # Non-digested carry-through for grant selection. Defaulted to the empty
-    # tuple so a caller who constructs the binding directly (without going
-    # through ``from_entry``) still gets a valid, denial-producing selection.
-    grants: tuple[AssumptionAuthorityGrant, ...] = ()
 
     def __post_init__(self) -> None:
         # Strict sequence typing: reject bool even though bool subclasses int.
@@ -228,6 +229,13 @@ class ResolvedPolicyAtSequence:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_POLICY_RESOLUTION_EFFECTIVE_SEQUENCE_INVALID"
             )
+        # Closed contract invariant: the queried event sequence must fall at or
+        # after the resolved policy's effective_from_sequence. An event below
+        # the policy's activation cannot be governed by that policy.
+        if self.event_sequence < self.effective_from_sequence:
+            raise AssumptionPolicyActivationContractError(
+                "ASSUMPTION_POLICY_RESOLUTION_EVENT_BEFORE_EFFECTIVE"
+            )
         require_token(self.policy_id, "ASSUMPTION_POLICY_RESOLUTION_POLICY_ID_INVALID")
         digest_fields = (
             (self.policy_digest, "ASSUMPTION_POLICY_RESOLUTION_POLICY_DIGEST_INVALID"),
@@ -247,18 +255,6 @@ class ResolvedPolicyAtSequence:
         )
         for value, code in digest_fields:
             require_digest(value, code)
-        # The grants carry-through must be a tuple of exactly-typed grants.
-        # It is NOT part of the digest (it is determined by the entry digest),
-        # but its type is validated so a foreign object cannot sneak in here.
-        if type(self.grants) is not tuple:
-            raise AssumptionPolicyActivationContractError(
-                "ASSUMPTION_POLICY_RESOLUTION_GRANTS_INVALID"
-            )
-        for grant in self.grants:
-            if type(grant) is not AssumptionAuthorityGrant:
-                raise AssumptionPolicyActivationContractError(
-                    "ASSUMPTION_POLICY_RESOLUTION_GRANTS_INVALID"
-                )
         require_self_digest(
             "ASSUMPTION_RESOLVED_POLICY_AT_SEQUENCE",
             self._unsigned_value(),
@@ -276,8 +272,10 @@ class ResolvedPolicyAtSequence:
     ) -> ResolvedPolicyAtSequence:
         """Build a ``ResolvedPolicyAtSequence`` from a resolved ledger entry.
 
-        Carries the entry's grant set so the returned binding is directly
-        usable by :func:`select_applicable_grant_v3` without a second lookup.
+        The returned binding carries only digest and sequence fields. The
+        grant set is NOT carried: grant selection must re-bind the binding to
+        its source entry (via :func:`_source_entry_for_resolution`) and scan
+        that entry's digested grants.
         """
 
         payload = entry.signing_payload
@@ -302,7 +300,6 @@ class ResolvedPolicyAtSequence:
             ledger_entry_digest=entry.ledger_entry_digest,
             ledger_root_digest=ledger.ledger_root_digest,
             resolution_digest=domain_digest("ASSUMPTION_RESOLVED_POLICY_AT_SEQUENCE", unsigned),
-            grants=entry.policy.grants,
         )
 
     def _unsigned_value(self) -> dict[str, object]:
@@ -397,7 +394,102 @@ def resolve_policy_at_v3(
 
 
 # ===========================================================================
-# 3. GrantSelectionDecision
+# 3. Source-entry re-binding for grant selection
+# ===========================================================================
+
+
+def _source_entry_for_resolution(
+    *,
+    ledger: AssumptionPolicyLedgerV3,
+    resolved_policy: ResolvedPolicyAtSequence,
+) -> AssumptionPolicyLedgerEntryV3:
+    """Re-bind a resolved policy to its exact source ledger entry.
+
+    Grant selection scans ``source_entry.policy.grants`` -- the digested grant
+    set carried by the resolved entry -- never a caller-carried tuple. This
+    helper locates that entry and verifies it is the exact entry the
+    resolution bound.
+
+    Requirements (each surfaced with a distinct stable code, never an
+    ``AttributeError``):
+
+    * ``ledger`` is exactly ``AssumptionPolicyLedgerV3`` ->
+      ``ASSUMPTION_GRANT_SELECTION_LEDGER_VERSION_NOT_ACTIVATABLE``;
+    * ``resolved_policy`` is exactly ``ResolvedPolicyAtSequence`` ->
+      ``ASSUMPTION_GRANT_SELECTION_RESOLUTION_TYPE_INVALID``;
+    * ``resolved_policy.ledger_root_digest == ledger.ledger_root_digest`` ->
+      ``ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH`` (the resolution and
+      the ledger do not describe the same authoritative snapshot);
+    * exactly one ledger entry has ``ledger_entry_digest == resolved's`` ->
+      ``ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_MISSING`` (zero) or
+      ``ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_AMBIGUOUS`` (two or more);
+    * that entry matches the resolved policy's ``policy_id``,
+      ``policy_digest``, ``effective_from_sequence``,
+      ``signing_payload_digest``, ``commit_receipt_digest``, and
+      ``ledger_entry_digest`` -> ``ASSUMPTION_GRANT_SELECTION_SOURCE_BINDING_MISMATCH``.
+
+    A foreign object passed as ``resolved_policy`` (lacking the digest fields)
+    produces ``ASSUMPTION_GRANT_SELECTION_RESOLUTION_TYPE_INVALID`` rather
+    than an ``AttributeError``, because the exact type check runs before any
+    field access.
+    """
+
+    # Exact type checks before any field access so foreign objects surface
+    # stable codes rather than AttributeError.
+    if type(ledger) is not AssumptionPolicyLedgerV3:
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_GRANT_SELECTION_LEDGER_VERSION_NOT_ACTIVATABLE"
+        )
+    if type(resolved_policy) is not ResolvedPolicyAtSequence:
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_GRANT_SELECTION_RESOLUTION_TYPE_INVALID"
+        )
+    # The resolution and the ledger must describe the same authoritative
+    # snapshot: their ledger root digests must agree. A resolution from a
+    # different generation of the same chain has a different root.
+    if resolved_policy.ledger_root_digest != ledger.ledger_root_digest:
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH"
+        )
+    # Locate the unique source entry by ledger_entry_digest. There must be
+    # exactly one (the ledger chain is strictly increasing on commit-receipt
+    # digests, and ledger_entry_digest is derived from the entry's canonical
+    # bytes which include that commit-receipt digest, so collisions are
+    # impossible in a well-formed ledger -- but fail closed on zero or many).
+    matches = [
+        entry
+        for entry in ledger.entries
+        if entry.ledger_entry_digest == resolved_policy.ledger_entry_digest
+    ]
+    if not matches:
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_MISSING"
+        )
+    if len(matches) > 1:
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_AMBIGUOUS"
+        )
+    source_entry = matches[0]
+    # Verify the located entry matches the resolution on every binding. Any
+    # divergence means the resolution does not describe this entry.
+    payload = source_entry.signing_payload
+    bindings = (
+        (source_entry.policy.policy_id, resolved_policy.policy_id),
+        (source_entry.policy.policy_digest, resolved_policy.policy_digest),
+        (payload.effective_from_sequence, resolved_policy.effective_from_sequence),
+        (payload.signing_payload_digest, resolved_policy.signing_payload_digest),
+        (source_entry.policy_commit.commit_receipt_digest, resolved_policy.commit_receipt_digest),
+        (source_entry.ledger_entry_digest, resolved_policy.ledger_entry_digest),
+    )
+    if any(left != right for left, right in bindings):
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_GRANT_SELECTION_SOURCE_BINDING_MISMATCH"
+        )
+    return source_entry
+
+
+# ===========================================================================
+# 4. GrantSelectionDecision
 # ===========================================================================
 
 
@@ -408,9 +500,10 @@ class GrantSelectionDecision:
     The decision binds the resolved policy generation, the request, and the
     selected grant (or the denial reason) at the queried sequence. The
     ``selection_digest`` is a domain-separated self-digest over the complete
-    unsigned value, so two selections of the same ``(resolved_policy,
-    request)`` pair produce byte-identical digests regardless of whether the
-    outcome was a selection or a denial.
+    unsigned value (including ``decision_code``), so two selections of the
+    same ``(resolved_policy, request)`` pair produce byte-identical digests
+    only when the outcome (selected / no-applicable-grant / ambiguous) also
+    agrees.
     """
 
     # --- resolved-policy bindings (mirrors of ResolvedPolicyAtSequence) ---
@@ -429,6 +522,7 @@ class GrantSelectionDecision:
     assumption_materiality: str
     challenge_materiality: str | None
     decision_type: str
+    decision_code: str
     selected_grant_id: str | None
     grant_digest: str | None
     selection_digest: str
@@ -438,13 +532,24 @@ class GrantSelectionDecision:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_GRANT_SELECTION_DECISION_TYPE_INVALID"
             )
+        # The decision code is the frozen vocabulary: one per decision type.
+        expected_code = DECISION_CODES[self.decision_type]
+        if self.decision_code != expected_code:
+            raise AssumptionPolicyActivationContractError(
+                "ASSUMPTION_GRANT_SELECTION_DECISION_CODE_INVALID"
+            )
         # Selection consistency: a SELECTED decision must carry both grant
-        # bindings; a denial must carry neither.
+        # bindings and a valid selected_grant_id token; a denial must carry
+        # neither and no grant id.
         if self.decision_type == "SELECTED":
             if self.selected_grant_id is None or self.grant_digest is None:
                 raise AssumptionPolicyActivationContractError(
                     "ASSUMPTION_GRANT_SELECTION_SELECTED_GRANT_MISSING"
                 )
+            require_token(
+                self.selected_grant_id,
+                "ASSUMPTION_GRANT_SELECTION_SELECTED_GRANT_ID_INVALID",
+            )
         else:
             if self.selected_grant_id is not None or self.grant_digest is not None:
                 raise AssumptionPolicyActivationContractError(
@@ -459,10 +564,16 @@ class GrantSelectionDecision:
                 raise AssumptionPolicyActivationContractError(
                     "ASSUMPTION_GRANT_SELECTION_SEQUENCE_INVALID"
                 )
+        # Closed contract invariant: the queried event sequence must fall at
+        # or after the resolved policy's effective_from_sequence.
+        if self.event_sequence < self.effective_from_sequence:
+            raise AssumptionPolicyActivationContractError(
+                "ASSUMPTION_GRANT_SELECTION_EVENT_BEFORE_POLICY_EFFECTIVE"
+            )
         require_token(self.policy_id, "ASSUMPTION_GRANT_SELECTION_POLICY_ID_INVALID")
         require_token(self.authority_id, "ASSUMPTION_GRANT_SELECTION_AUTHORITY_INVALID")
         require_token(self.scope_id, "ASSUMPTION_GRANT_SELECTION_SCOPE_INVALID")
-        if self.action not in _GRANT_ACTIONS:
+        if self.action not in ASSUMPTION_AUTHORITY_ACTIONS:
             raise AssumptionPolicyActivationContractError(
                 "ASSUMPTION_GRANT_SELECTION_ACTION_INVALID"
             )
@@ -524,6 +635,7 @@ class GrantSelectionDecision:
             "authority_id": self.authority_id,
             "challenge_materiality": self.challenge_materiality,
             "commit_receipt_digest": self.commit_receipt_digest,
+            "decision_code": self.decision_code,
             "decision_type": self.decision_type,
             "effective_from_sequence": self.effective_from_sequence,
             "event_sequence": self.event_sequence,
@@ -546,7 +658,7 @@ class GrantSelectionDecision:
 
 
 # ===========================================================================
-# 4. select_applicable_grant_v3
+# 5. select_applicable_grant_v3
 # ===========================================================================
 
 
@@ -617,7 +729,6 @@ def _build_decision(
     scope_id: str,
     assumption_materiality: str,
     challenge_materiality: str | None,
-    event_sequence: int,
     decision_type: str,
     grant: AssumptionAuthorityGrant | None,
 ) -> GrantSelectionDecision:
@@ -630,9 +741,10 @@ def _build_decision(
         "authority_id": authority_id,
         "challenge_materiality": challenge_materiality,
         "commit_receipt_digest": resolved_policy.commit_receipt_digest,
+        "decision_code": DECISION_CODES[decision_type],
         "decision_type": decision_type,
         "effective_from_sequence": resolved_policy.effective_from_sequence,
-        "event_sequence": event_sequence,
+        "event_sequence": resolved_policy.event_sequence,
         "grant_digest": grant.grant_digest if grant is not None else None,
         "ledger_entry_digest": resolved_policy.ledger_entry_digest,
         "ledger_root_digest": resolved_policy.ledger_root_digest,
@@ -650,13 +762,14 @@ def _build_decision(
         commit_receipt_digest=resolved_policy.commit_receipt_digest,
         ledger_entry_digest=resolved_policy.ledger_entry_digest,
         ledger_root_digest=resolved_policy.ledger_root_digest,
-        event_sequence=event_sequence,
+        event_sequence=resolved_policy.event_sequence,
         action=action,
         authority_id=authority_id,
         scope_id=scope_id,
         assumption_materiality=assumption_materiality,
         challenge_materiality=challenge_materiality,
         decision_type=decision_type,
+        decision_code=DECISION_CODES[decision_type],
         selected_grant_id=grant.grant_id if grant is not None else None,
         grant_digest=grant.grant_digest if grant is not None else None,
         selection_digest=domain_digest("ASSUMPTION_GRANT_SELECTION_DECISION", unsigned),
@@ -668,8 +781,6 @@ def _validate_selection_request(
     action: str,
     assumption_materiality: str,
     challenge_materiality: str | None,
-    event_sequence: int,
-    resolved_policy: ResolvedPolicyAtSequence,
 ) -> None:
     """Validate the request inputs (raises on contract violations).
 
@@ -679,7 +790,7 @@ def _validate_selection_request(
     same code regardless of which gate fires first.
     """
 
-    if action not in _GRANT_ACTIONS:
+    if action not in ASSUMPTION_AUTHORITY_ACTIONS:
         raise AssumptionPolicyActivationContractError("ASSUMPTION_GRANT_SELECTION_ACTION_INVALID")
     if assumption_materiality not in ASSUMPTION_MATERIALITIES:
         raise AssumptionPolicyActivationContractError(
@@ -698,33 +809,29 @@ def _validate_selection_request(
         raise AssumptionPolicyActivationContractError(
             "ASSUMPTION_GRANT_SELECTION_CHALLENGE_MATERIALITY_UNEXPECTED"
         )
-    if type(event_sequence) is not int or isinstance(event_sequence, bool) or event_sequence < 0:
-        raise AssumptionPolicyActivationContractError("ASSUMPTION_GRANT_SELECTION_SEQUENCE_INVALID")
-    # The resolved policy's effective_from_sequence bounds the event_sequence:
-    # the event must be at or after the policy's activation. This is a
-    # defense-in-depth check; resolve_policy_at_v3 already ensures
-    # event_sequence >= effective_from_sequence for the resolved entry.
-    if event_sequence < resolved_policy.effective_from_sequence:
-        raise AssumptionPolicyActivationContractError(
-            "ASSUMPTION_GRANT_SELECTION_EVENT_BEFORE_POLICY_EFFECTIVE"
-        )
 
 
 def select_applicable_grant_v3(
-    resolved_policy: ResolvedPolicyAtSequence,
     *,
+    ledger: AssumptionPolicyLedgerV3,
+    resolved_policy: ResolvedPolicyAtSequence,
     action: str,
     authority_id: str,
     scope_id: str,
     assumption_materiality: str,
     challenge_materiality: str | None,
-    event_sequence: int,
 ) -> GrantSelectionDecision:
     """Pure exact grant selection against the resolved policy.
 
-    Scans ``resolved_policy.grants`` (the grant set carried from the resolved
-    ledger entry) for every grant applicable to the request and returns exactly
-    one of:
+    Re-binds ``resolved_policy`` to its source ledger entry via
+    :func:`_source_entry_for_resolution` and scans THAT entry's digested grant
+    set (``source_entry.policy.grants``) -- never a caller-carried tuple -- so
+    a substituted grant tuple cannot authorize. The single event sequence used
+    for all grant-interval evaluation is ``resolved_policy.event_sequence``:
+    there is no independently supplied event sequence, so the sequence cannot
+    be rebound to a different generation.
+
+    Returns exactly one of:
 
     * ``SELECTED`` -- exactly one grant is applicable; ``selected_grant_id``
       and ``grant_digest`` carry its bindings.
@@ -734,25 +841,40 @@ def select_applicable_grant_v3(
       request, so this is a configuration error the operator must reconcile).
 
     Raises ``AssumptionPolicyActivationContractError`` for genuine
-    input-contract violations (bad action, bad materiality, negative sequence,
-    action/materiality inconsistency, event before the policy's effective
-    sequence). Denials (zero or multiple matches) are returned as decisions,
-    not raised.
+    input-contract violations (bad ledger type, foreign resolution object,
+    ledger-root mismatch, missing/ambiguous source entry, source binding
+    mismatch, bad action, bad materiality, bad authority/scope token, wrong
+    decision code, event before the policy's effective sequence). Denials
+    (zero or multiple matches) are returned as decisions, not raised.
 
-    The scan is deterministic because ``resolved_policy.grants`` is the
+    The scan is deterministic because ``source_entry.policy.grants`` is the
     canonical (grant_id-sorted) grant tuple from the resolved entry's policy.
     """
 
+    # Re-bind the resolution to its source entry. This validates the ledger
+    # type, the resolution type, the ledger-root agreement, the uniqueness of
+    # the source entry, and every binding. A foreign resolution object or a
+    # ledger from a different generation surfaces a stable code here, before
+    # any request input is read.
+    source_entry = _source_entry_for_resolution(ledger=ledger, resolved_policy=resolved_policy)
+    # Validate the request inputs BEFORE scanning grants, mirroring the
+    # decision-dataclass post-init order.
     _validate_selection_request(
         action=action,
         assumption_materiality=assumption_materiality,
         challenge_materiality=challenge_materiality,
-        event_sequence=event_sequence,
-        resolved_policy=resolved_policy,
     )
+    # Validate the authority and scope tokens before scanning. A bad token
+    # raises the stable contract code, never an AttributeError from a foreign
+    # resolution object.
+    require_token(authority_id, "ASSUMPTION_GRANT_SELECTION_AUTHORITY_INVALID")
+    require_token(scope_id, "ASSUMPTION_GRANT_SELECTION_SCOPE_INVALID")
+    # The single event sequence for all grant-interval evaluation is the
+    # resolved policy's. It cannot be rebound.
+    event_sequence = resolved_policy.event_sequence
     matches = [
         grant
-        for grant in resolved_policy.grants
+        for grant in source_entry.policy.grants
         if _grant_covers_request(
             grant=grant,
             action=action,
@@ -771,7 +893,6 @@ def select_applicable_grant_v3(
             scope_id=scope_id,
             assumption_materiality=assumption_materiality,
             challenge_materiality=challenge_materiality,
-            event_sequence=event_sequence,
             decision_type="NO_APPLICABLE_GRANT",
             grant=None,
         )
@@ -783,14 +904,13 @@ def select_applicable_grant_v3(
             scope_id=scope_id,
             assumption_materiality=assumption_materiality,
             challenge_materiality=challenge_materiality,
-            event_sequence=event_sequence,
             decision_type="SELECTED",
             grant=matches[0],
         )
     # Two or more applicable grants: fail closed. The decision carries no
     # grant bindings (it is a denial), but the operator can reconcile by
     # inspecting the policy. The scan is stable because
-    # ``resolved_policy.grants`` is canonical (sorted by grant_id).
+    # ``source_entry.policy.grants`` is canonical (sorted by grant_id).
     return _build_decision(
         resolved_policy=resolved_policy,
         action=action,
@@ -798,14 +918,13 @@ def select_applicable_grant_v3(
         scope_id=scope_id,
         assumption_materiality=assumption_materiality,
         challenge_materiality=challenge_materiality,
-        event_sequence=event_sequence,
         decision_type="AMBIGUOUS_GRANTS",
         grant=None,
     )
 
 
 # ===========================================================================
-# 5. Composite: resolve_policy_and_select_grant
+# 6. Composite: resolve_policy_and_select_grant
 # ===========================================================================
 
 
@@ -819,37 +938,34 @@ def resolve_policy_and_select_grant(
     assumption_materiality: str,
     challenge_materiality: str | None,
 ) -> GrantSelectionDecision:
-    """Composite: reconstruct (no-op for an in-memory ledger) -> resolve -> select.
+    """Composite: resolve -> select.
 
     Order of operations:
 
     1. ``resolve_policy_at_v3(ledger, event_sequence)`` -- pure resolution,
-       yielding the resolved policy binding (which carries the grant set);
-    2. ``select_applicable_grant_v3(resolved, ...)`` -- pure exact grant
-       selection against the resolved binding's carried grant set.
+       yielding the resolved policy binding (a digest receipt, no grants);
+    2. ``select_applicable_grant_v3(ledger=ledger, resolved_policy=resolved,
+       ...)`` -- pure exact grant selection that re-binds the resolution to
+       its source entry and scans that entry's digested grants.
 
     The composite performs no I/O and no locking: it is the pure read path
     over an already-validated in-memory ``AssumptionPolicyLedgerV3``. For the
     durable filesystem path, use
-    :meth:`FilesystemAssumptionPolicyPublisher.resolve_at` to obtain the
-    resolved policy (which carries the grants), then call
-    :func:`select_applicable_grant_v3`.
+    :meth:`FilesystemAssumptionPolicyPublisher.resolve_policy_and_select_grant_at`.
 
     The composite guarantees the resolution and selection share the same
-    entry: the binding returned by resolution carries the grants of the
-    located entry, so a concurrent append cannot split the read across two
-    generations (for the in-memory ledger the whole call is over a single
-    immutable snapshot; for the filesystem publisher, ``resolve_at`` holds the
-    lock across reconstruction).
+    snapshot: selection re-binds the resolution to the SAME ledger (the
+    resolution's ``ledger_root_digest`` must equal the ledger's root), so a
+    concurrent append cannot split the read across two generations.
     """
 
     resolved = resolve_policy_at_v3(ledger, event_sequence)
     return select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action=action,
         authority_id=authority_id,
         scope_id=scope_id,
         assumption_materiality=assumption_materiality,
         challenge_materiality=challenge_materiality,
-        event_sequence=event_sequence,
     )
