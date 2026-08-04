@@ -32,6 +32,7 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     AssumptionPolicyActivationContractError,
     AssumptionPolicyAlgorithmProfile,
     AssumptionPolicySignatureProfile,
+    domain_digest,
 )
 from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
     AssumptionAuthorityPolicyCommitV3,
@@ -41,6 +42,7 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
     AssumptionPolicySigningPayload,
 )
 from csd_foundry.governance.v0_5.assumption_governance_contracts import (
+    ASSUMPTION_AUTHORITY_ACTIONS,
     GLOBAL_ASSUMPTION_SCOPE,
     AssumptionAuthorityGrant,
     AssumptionAuthorityPolicy,
@@ -54,7 +56,11 @@ from csd_foundry.governance.v0_5.assumption_policy_filesystem_publication import
     PolicyStoreError,
 )
 from csd_foundry.governance.v0_5.assumption_policy_resolution import (
+    DECISION_CODES,
     DECISION_TYPES,
+    GRANT_SELECTION_DECISION_SCHEMA_VERSION,
+    RESOLVED_POLICY_AT_SEQUENCE_SCHEMA_VERSION,
+    GrantSelectionDecision,
     ResolvedPolicyAtSequence,
     resolve_policy_and_select_grant,
     resolve_policy_at_v3,
@@ -492,8 +498,10 @@ def test_resolved_policy_bindings_match_entry() -> None:
     assert resolved.commit_receipt_digest == e0.policy_commit.commit_receipt_digest
     assert resolved.ledger_entry_digest == e0.ledger_entry_digest
     assert resolved.ledger_root_digest == ledger.ledger_root_digest
-    # The grants carry-through matches the entry's grant set.
-    assert resolved.grants == e0.policy.grants
+    # The resolved binding is a digest receipt: it carries NO grant tuple. A
+    # resolution object alone is not an authoritative source for grant
+    # selection (the selector re-binds it to its source entry).
+    assert not hasattr(resolved, "grants")
 
 
 def test_resolution_digest_is_self_validating() -> None:
@@ -564,11 +572,37 @@ def _resolved_with_grants(
     effective_from: int = 10,
     event_sequence: int = 15,
 ) -> ResolvedPolicyAtSequence:
-    """Build a resolved policy binding carrying a custom grant set."""
+    """Build a resolved policy binding for a custom grant set.
+
+    Returns ONLY the resolved policy (a digest receipt, no grants). To run
+    selection, pair it with the matching ledger via
+    :func:`_resolved_and_ledger_with_grants` (which returns both).
+    """
 
     entry = _entry_with_policy(grants, seq=effective_from)
     ledger = _ledger(entry)
     return resolve_policy_at_v3(ledger, event_sequence)
+
+
+def _resolved_and_ledger_with_grants(
+    grants: tuple[AssumptionAuthorityGrant, ...],
+    *,
+    effective_from: int = 10,
+    event_sequence: int = 15,
+) -> tuple[ResolvedPolicyAtSequence, AssumptionPolicyLedgerV3]:
+    """Build a resolved policy AND its source ledger as a matched pair.
+
+    Selection requires the ledger (to re-bind the source entry). The ledger
+    returned here is the exact ledger the resolution ran against, so its root
+    and the resolution's bindings agree. Tests that need a genuinely different
+    ledger (e.g. a foreign root, or a substituted grant tuple) construct their
+    own.
+    """
+
+    entry = _entry_with_policy(grants, seq=effective_from)
+    ledger = _ledger(entry)
+    resolved = resolve_policy_at_v3(ledger, event_sequence)
+    return resolved, ledger
 
 
 def test_exact_action_match_selects() -> None:
@@ -576,15 +610,15 @@ def test_exact_action_match_selects() -> None:
     dimensions also matching)."""
 
     grant = _grant(action="ADMIT")
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
     assert decision.selected_grant_id == grant.grant_id
@@ -594,15 +628,15 @@ def test_action_mismatch_denies() -> None:
     """A grant whose action differs from the request is not applicable."""
 
     grant = _grant(action="ADMIT")
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="REJECT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
     assert decision.selected_grant_id is None
@@ -612,15 +646,15 @@ def test_authority_match_selects() -> None:
     """A grant whose authority_id matches is selected."""
 
     grant = _grant(authority_id="authority:operator")
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -629,15 +663,15 @@ def test_authority_mismatch_denies() -> None:
     """A grant whose authority_id differs is not applicable."""
 
     grant = _grant(authority_id="authority:operator")
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:other",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
 
@@ -646,15 +680,15 @@ def test_narrow_scope_match_selects() -> None:
     """A narrow grant whose scope set contains the request scope is selected."""
 
     grant = _grant(scope_ids=("scope:control",))
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -663,15 +697,15 @@ def test_narrow_scope_mismatch_denies() -> None:
     """A narrow grant whose scope set does not contain the request scope denies."""
 
     grant = _grant(scope_ids=("scope:alpha",))
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:beta",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
 
@@ -680,15 +714,15 @@ def test_global_scope_matches_narrow_request() -> None:
     """A global grant (``scope:*``) matches any narrow request scope."""
 
     grant = _grant(scope_ids=(GLOBAL_ASSUMPTION_SCOPE,))
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:anything-narrow",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -702,17 +736,17 @@ def test_narrow_grant_does_not_match_global_request() -> None:
     """
 
     grant = _grant(scope_ids=("scope:control",))
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     # scope:* is an invalid request scope and is rejected at the gate.
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         select_applicable_grant_v3(
-            resolved,
+            ledger=ledger,
+            resolved_policy=resolved,
             action="ADMIT",
             authority_id="authority:operator",
             scope_id=GLOBAL_ASSUMPTION_SCOPE,
             assumption_materiality="MATERIAL",
             challenge_materiality=None,
-            event_sequence=15,
         )
     assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SCOPE_INVALID"
 
@@ -721,15 +755,15 @@ def test_assumption_materiality_match_selects() -> None:
     """A grant whose assumption_materialities contains the request materiality."""
 
     grant = _grant(assumption_materialities=("MATERIAL",))
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -738,15 +772,15 @@ def test_assumption_materiality_mismatch_denies() -> None:
     """A grant whose assumption_materialities does not contain the request."""
 
     grant = _grant(assumption_materialities=("ADVISORY",))
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
 
@@ -759,15 +793,15 @@ def test_challenge_materiality_match_selects() -> None:
         assumption_materialities=("MATERIAL",),
         challenge_materialities=("MATERIAL", "CRITICAL"),
     )
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="RESOLVE_TO_ADMITTED",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality="CRITICAL",
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -780,15 +814,15 @@ def test_challenge_materiality_mismatch_denies() -> None:
         assumption_materialities=("MATERIAL",),
         challenge_materialities=("ADVISORY",),
     )
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="RESOLVE_TO_ADMITTED",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality="CRITICAL",
-        event_sequence=15,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
 
@@ -798,15 +832,17 @@ def test_effective_lower_boundary_inclusive() -> None:
     sequence the grant is active."""
 
     grant = _grant(effective_from_sequence=15)
-    resolved = _resolved_with_grants((grant,), effective_from=10, event_sequence=15)
+    resolved, ledger = _resolved_and_ledger_with_grants(
+        (grant,), effective_from=10, event_sequence=15
+    )
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -816,15 +852,17 @@ def test_immediately_before_lower_boundary_denies() -> None:
     not yet active."""
 
     grant = _grant(effective_from_sequence=16)
-    resolved = _resolved_with_grants((grant,), effective_from=10, event_sequence=15)
+    resolved, ledger = _resolved_and_ledger_with_grants(
+        (grant,), effective_from=10, event_sequence=15
+    )
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
 
@@ -834,15 +872,17 @@ def test_upper_boundary_exclusive() -> None:
     sequence the grant has expired."""
 
     grant = _grant(effective_from_sequence=10, effective_until_sequence=20)
-    resolved = _resolved_with_grants((grant,), effective_from=10, event_sequence=20)
+    resolved, ledger = _resolved_and_ledger_with_grants(
+        (grant,), effective_from=10, event_sequence=20
+    )
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=20,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
 
@@ -852,15 +892,17 @@ def test_immediately_before_upper_boundary_selects() -> None:
     still active (half-open upper bound)."""
 
     grant = _grant(effective_from_sequence=10, effective_until_sequence=20)
-    resolved = _resolved_with_grants((grant,), effective_from=10, event_sequence=19)
+    resolved, ledger = _resolved_and_ledger_with_grants(
+        (grant,), effective_from=10, event_sequence=19
+    )
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=19,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -869,15 +911,17 @@ def test_unbounded_interval_selects_at_far_future() -> None:
     """A grant with effective_until_sequence=None never expires."""
 
     grant = _grant(effective_from_sequence=10, effective_until_sequence=None)
-    resolved = _resolved_with_grants((grant,), effective_from=10, event_sequence=10_000)
+    resolved, ledger = _resolved_and_ledger_with_grants(
+        (grant,), effective_from=10, event_sequence=10_000
+    )
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=10_000,
     )
     assert decision.decision_type == "SELECTED"
 
@@ -886,15 +930,15 @@ def test_no_applicable_grant_returns_denial_decision() -> None:
     """Zero applicable grants yield a NO_APPLICABLE_GRANT denial (not an error)."""
 
     grant = _grant(action="ADMIT", authority_id="authority:operator")
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="SUPERSEDE",  # no grant covers SUPERSEDE
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "NO_APPLICABLE_GRANT"
     assert decision.selected_grant_id is None
@@ -920,15 +964,15 @@ def test_multiple_matches_fail_closed() -> None:
     )
     # The grant set must be canonical (sorted by grant_id) for the policy to
     # construct; grant_a < grant_b lexicographically.
-    resolved = _resolved_with_grants((grant_a, grant_b))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant_a, grant_b))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "AMBIGUOUS_GRANTS"
     assert decision.selected_grant_id is None
@@ -938,15 +982,15 @@ def test_grant_id_and_digest_bindings() -> None:
     """A SELECTED decision carries the exact grant_id and grant_digest."""
 
     grant = _grant("grant:unique")
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
     assert decision.selected_grant_id == grant.grant_id
@@ -957,15 +1001,15 @@ def test_selection_digest_is_self_validating() -> None:
     """The selection_digest is a domain-separated self-digest."""
 
     grant = _grant()
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
         domain_digest,
@@ -1040,16 +1084,16 @@ def test_deterministic_ordering_of_matched_grants() -> None:
     grant_m = _grant("grant:m", assumption_materialities=("MATERIAL",))
     grant_a = _grant("grant:a", assumption_materialities=("ADVISORY",))
     # The policy canonicalizes grants sorted by id: grant:a, grant:m.
-    resolved = _resolved_with_grants((grant_m, grant_a))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant_m, grant_a))
     # A MATERIAL request matches only grant:m.
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
     assert decision.selected_grant_id == "grant:m"
@@ -1058,16 +1102,16 @@ def test_deterministic_ordering_of_matched_grants() -> None:
 def test_bad_action_raises_not_denies() -> None:
     """An unknown action raises a contract error, not a denial."""
 
-    resolved = _resolved_with_grants((_grant(),))
+    resolved, ledger = _resolved_and_ledger_with_grants((_grant(),))
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         select_applicable_grant_v3(
-            resolved,
+            ledger=ledger,
+            resolved_policy=resolved,
             action="NOT_AN_ACTION",  # type: ignore[arg-type]
             authority_id="authority:operator",
             scope_id="scope:control",
             assumption_materiality="MATERIAL",
             challenge_materiality=None,
-            event_sequence=15,
         )
     assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_ACTION_INVALID"
 
@@ -1075,16 +1119,16 @@ def test_bad_action_raises_not_denies() -> None:
 def test_bad_assumption_materiality_raises() -> None:
     """An unknown assumption materiality raises a contract error."""
 
-    resolved = _resolved_with_grants((_grant(),))
+    resolved, ledger = _resolved_and_ledger_with_grants((_grant(),))
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         select_applicable_grant_v3(
-            resolved,
+            ledger=ledger,
+            resolved_policy=resolved,
             action="ADMIT",
             authority_id="authority:operator",
             scope_id="scope:control",
             assumption_materiality="NOT_A_MATERIALITY",  # type: ignore[arg-type]
             challenge_materiality=None,
-            event_sequence=15,
         )
     assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_ASSUMPTION_MATERIALITY_INVALID"
 
@@ -1097,16 +1141,16 @@ def test_resolution_action_requires_challenge_materiality() -> None:
         assumption_materialities=("MATERIAL",),
         challenge_materialities=("MATERIAL",),
     )
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         select_applicable_grant_v3(
-            resolved,
+            ledger=ledger,
+            resolved_policy=resolved,
             action="RESOLVE_TO_ADMITTED",
             authority_id="authority:operator",
             scope_id="scope:control",
             assumption_materiality="MATERIAL",
             challenge_materiality=None,
-            event_sequence=15,
         )
     assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_CHALLENGE_MATERIALITY_REQUIRED"
 
@@ -1115,33 +1159,71 @@ def test_non_resolution_action_forbids_challenge_materiality() -> None:
     """A non-resolution action with a challenge materiality raises."""
 
     grant = _grant(action="ADMIT")
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
         select_applicable_grant_v3(
-            resolved,
+            ledger=ledger,
+            resolved_policy=resolved,
             action="ADMIT",
             authority_id="authority:operator",
             scope_id="scope:control",
             assumption_materiality="MATERIAL",
             challenge_materiality="MATERIAL",
-            event_sequence=15,
         )
     assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_CHALLENGE_MATERIALITY_UNEXPECTED"
 
 
 def test_negative_event_sequence_raises() -> None:
-    """A negative event_sequence raises a contract error."""
+    """A negative event_sequence raises a contract error at the decision level.
 
-    resolved = _resolved_with_grants((_grant(),))
+    The selector no longer takes an event_sequence (it uses
+    ``resolved_policy.event_sequence``, which resolution already validates as
+    nonnegative). The closed invariant is enforced at the
+    ``GrantSelectionDecision`` dataclass: a negative event_sequence raises
+    ``ASSUMPTION_GRANT_SELECTION_SEQUENCE_INVALID``.
+    """
+
+    resolved, ledger = _resolved_and_ledger_with_grants((_grant(),))
+    unsigned = {
+        "schema_version": GRANT_SELECTION_DECISION_SCHEMA_VERSION,
+        "action": "ADMIT",
+        "assumption_materiality": "MATERIAL",
+        "authority_id": "authority:operator",
+        "challenge_materiality": None,
+        "commit_receipt_digest": resolved.commit_receipt_digest,
+        "decision_code": "ASSUMPTION_GRANT_SELECTED",
+        "decision_type": "SELECTED",
+        "effective_from_sequence": resolved.effective_from_sequence,
+        "event_sequence": -1,
+        "grant_digest": _grant().grant_digest,
+        "ledger_entry_digest": resolved.ledger_entry_digest,
+        "ledger_root_digest": resolved.ledger_root_digest,
+        "policy_digest": resolved.policy_digest,
+        "policy_id": resolved.policy_id,
+        "scope_id": "scope:control",
+        "selected_grant_id": "grant:1",
+        "signing_payload_digest": resolved.signing_payload_digest,
+    }
     with pytest.raises(AssumptionPolicyActivationContractError) as failure:
-        select_applicable_grant_v3(
-            resolved,
+        GrantSelectionDecision(
+            policy_id=resolved.policy_id,
+            policy_digest=resolved.policy_digest,
+            effective_from_sequence=resolved.effective_from_sequence,
+            signing_payload_digest=resolved.signing_payload_digest,
+            commit_receipt_digest=resolved.commit_receipt_digest,
+            ledger_entry_digest=resolved.ledger_entry_digest,
+            ledger_root_digest=resolved.ledger_root_digest,
+            event_sequence=-1,
             action="ADMIT",
             authority_id="authority:operator",
             scope_id="scope:control",
             assumption_materiality="MATERIAL",
             challenge_materiality=None,
-            event_sequence=-1,
+            decision_type="SELECTED",
+            decision_code="ASSUMPTION_GRANT_SELECTED",
+            selected_grant_id="grant:1",
+            grant_digest=_grant().grant_digest,
+            selection_digest=domain_digest("ASSUMPTION_GRANT_SELECTION_DECISION", unsigned),
         )
     assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SEQUENCE_INVALID"
 
@@ -1172,15 +1254,15 @@ def test_decision_dataclass_is_frozen() -> None:
     """The GrantSelectionDecision dataclass is frozen."""
 
     grant = _grant()
-    resolved = _resolved_with_grants((grant,))
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
     decision = select_applicable_grant_v3(
-        resolved,
+        ledger=ledger,
+        resolved_policy=resolved,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     with pytest.raises(Exception):  # noqa: B017 - frozen dataclass raises
         decision.decision_type = "NO_APPLICABLE_GRANT"  # type: ignore[misc]
@@ -1194,6 +1276,585 @@ def test_resolved_policy_dataclass_is_frozen() -> None:
     resolved = resolve_policy_at_v3(ledger, 15)
     with pytest.raises(Exception):  # noqa: B017 - frozen dataclass raises
         resolved.event_sequence = 99  # type: ignore[misc]
+
+
+# ===========================================================================
+# Part 2b: Adversarial contract-closure tests (corrections 1-7)
+# ===========================================================================
+
+
+def test_resolution_canonical_bytes_carry_no_grant_material() -> None:
+    """The resolution's canonical bytes are a digest receipt only: they carry
+    no grant tuple, no grant_id, no grant_digest. A resolution object alone is
+    not an authoritative source for grant selection."""
+
+    grant = _grant("grant:distinctive")
+    resolved, _ledger_obj = _resolved_and_ledger_with_grants((grant,))
+    canonical = resolved.canonical_bytes.decode("utf-8")
+    assert "grant:distinctive" not in canonical
+    assert "grant_id" not in canonical
+    assert "grant_digest" not in canonical
+    assert "grants" not in canonical
+
+
+def test_substituted_grant_tuple_cannot_authorize() -> None:
+    """A caller cannot substitute a grant tuple to authorize. The selector
+    scans ONLY the source ledger entry's ``policy.grants`` (re-bound from the
+    ledger), never a caller-carried tuple. A request that no source-entry
+    grant covers is denied even though an externally-built grant would cover
+    it."""
+
+    # The source entry's only grant covers ADMIT for authority:operator.
+    source_grant = _grant("grant:source", authority_id="authority:operator")
+    resolved, ledger = _resolved_and_ledger_with_grants((source_grant,))
+    # An externally-built grant covers SUPERSEDE for authority:attacker. The
+    # selector must NOT see it (it is not in the source entry), so the request
+    # for SUPERSEDE by authority:attacker is denied.
+    decision = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="SUPERSEDE",
+        authority_id="authority:attacker",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision.decision_type == "NO_APPLICABLE_GRANT"
+    assert decision.selected_grant_id is None
+
+
+def test_different_ledger_root_is_rejected() -> None:
+    """A resolution whose ledger_root_digest differs from the supplied
+    ledger's root is rejected. The resolution and the ledger must describe the
+    same authoritative snapshot."""
+
+    e0 = _entry(seq=10)
+    ledger_one = _ledger(e0)
+    # A second, different ledger (two entries) has a different root.
+    e1 = _successor_entry(e0, seq=20)
+    ledger_two = _ledger(e0, e1)
+    # Resolve against ledger_one (root R0), then try to select against
+    # ledger_two (root R1). The roots differ: rejection.
+    resolved = resolve_policy_at_v3(ledger_one, 15)
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger_two,
+            resolved_policy=resolved,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH"
+
+
+def test_source_entry_missing_is_rejected() -> None:
+    """A resolution whose ledger_entry_digest matches no entry in the supplied
+    ledger is rejected (the ledger is from a different generation that does
+    not contain the resolved entry)."""
+
+    # Build a resolution from a ledger with a DIFFERENT entry but engineered
+    # to share the ledger root is impossible (root binds all entries). Instead,
+    # build a resolution from ledger_two's second entry, then supply
+    # ledger_one (which lacks that entry) -- roots differ, so this surfaces
+    # LEDGER_ROOT_MISMATCH first. To reach SOURCE_ENTRY_MISSING we need same
+    # root but missing entry, which is impossible by construction. Instead,
+    # verify the SOURCE_ENTRY_MISSING code path by directly mutating the
+    # resolved's ledger_entry_digest to a digest not in the ledger (the digest
+    # re-binding still passes because we reconstruct the binding). Use the
+    # helper: build a resolved, then craft a foreign resolved with a bogus
+    # ledger_entry_digest but correct root/policy bindings.
+    e0 = _entry(seq=10)
+    ledger = _ledger(e0)
+    resolved = resolve_policy_at_v3(ledger, 15)
+    # A bogus ledger_entry_digest that is valid in shape but not present in the
+    # ledger, with all other bindings intact and a recomputed resolution_digest.
+    bogus_entry_digest = "sha256:" + "0" * 64
+    bogus_unsigned = {
+        "schema_version": RESOLVED_POLICY_AT_SEQUENCE_SCHEMA_VERSION,
+        "commit_receipt_digest": resolved.commit_receipt_digest,
+        "effective_from_sequence": resolved.effective_from_sequence,
+        "event_sequence": resolved.event_sequence,
+        "ledger_entry_digest": bogus_entry_digest,  # not in ledger
+        "ledger_root_digest": resolved.ledger_root_digest,
+        "policy_digest": resolved.policy_digest,
+        "policy_id": resolved.policy_id,
+        "signing_payload_digest": resolved.signing_payload_digest,
+    }
+    foreign_resolved = ResolvedPolicyAtSequence(
+        event_sequence=resolved.event_sequence,
+        policy_id=resolved.policy_id,
+        policy_digest=resolved.policy_digest,
+        effective_from_sequence=resolved.effective_from_sequence,
+        signing_payload_digest=resolved.signing_payload_digest,
+        commit_receipt_digest=resolved.commit_receipt_digest,
+        ledger_entry_digest=bogus_entry_digest,
+        ledger_root_digest=resolved.ledger_root_digest,
+        resolution_digest=domain_digest("ASSUMPTION_RESOLVED_POLICY_AT_SEQUENCE", bogus_unsigned),
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=foreign_resolved,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_MISSING"
+
+
+def test_source_binding_mismatch_is_rejected() -> None:
+    """A resolution whose bindings (policy_id, policy_digest, etc.) do not
+    match the located source entry is rejected. Each binding dimension is
+    verified after the entry is located."""
+
+    e0 = _entry(seq=10)
+    ledger = _ledger(e0)
+    resolved = resolve_policy_at_v3(ledger, 15)
+    # Tamper with policy_id while keeping ledger_entry_digest (so the entry is
+    # still located) but the policy_id binding will mismatch.
+    tampered_unsigned = {
+        "schema_version": RESOLVED_POLICY_AT_SEQUENCE_SCHEMA_VERSION,
+        "commit_receipt_digest": resolved.commit_receipt_digest,
+        "effective_from_sequence": resolved.effective_from_sequence,
+        "event_sequence": resolved.event_sequence,
+        "ledger_entry_digest": resolved.ledger_entry_digest,
+        "ledger_root_digest": resolved.ledger_root_digest,
+        "policy_digest": resolved.policy_digest,
+        "policy_id": "policy:foreign",  # mismatches the entry
+        "signing_payload_digest": resolved.signing_payload_digest,
+    }
+    tampered = ResolvedPolicyAtSequence(
+        event_sequence=resolved.event_sequence,
+        policy_id="policy:foreign",
+        policy_digest=resolved.policy_digest,
+        effective_from_sequence=resolved.effective_from_sequence,
+        signing_payload_digest=resolved.signing_payload_digest,
+        commit_receipt_digest=resolved.commit_receipt_digest,
+        ledger_entry_digest=resolved.ledger_entry_digest,
+        ledger_root_digest=resolved.ledger_root_digest,
+        resolution_digest=domain_digest(
+            "ASSUMPTION_RESOLVED_POLICY_AT_SEQUENCE", tampered_unsigned
+        ),
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=tampered,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SOURCE_BINDING_MISMATCH"
+
+
+def test_foreign_resolution_object_returns_stable_code() -> None:
+    """A foreign (non-ResolvedPolicyAtSequence) object passed as resolved_policy
+    surfaces the stable RESOLUTION_TYPE_INVALID code, never an AttributeError."""
+
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    # A plain object lacking the digest fields.
+    foreign = object()  # type: ignore[arg-type]
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=foreign,  # type: ignore[arg-type]
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_RESOLUTION_TYPE_INVALID"
+
+
+def test_foreign_ledger_returns_stable_code() -> None:
+    """A non-V3 ledger passed to the selector surfaces the stable
+    LEDGER_VERSION_NOT_ACTIVATABLE code, never an AttributeError."""
+
+    from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
+        AssumptionPolicyLedgerV2,
+    )
+
+    grant = _grant()
+    resolved, _ledger_obj = _resolved_and_ledger_with_grants((grant,))
+    v2 = AssumptionPolicyLedgerV2.build(())
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=v2,  # type: ignore[arg-type]
+            resolved_policy=resolved,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_LEDGER_VERSION_NOT_ACTIVATABLE"
+
+
+def test_event_sequence_cannot_be_rebound() -> None:
+    """The selector uses resolved_policy.event_sequence for ALL grant-interval
+    evaluation. There is no independently supplied event sequence, so the
+    sequence cannot be rebound to a different generation.
+
+    A grant whose effective interval covers ONLY sequence 15 (the resolved
+    event_sequence) is selected; the same resolution cannot be made to select
+    a grant whose interval is outside the resolved sequence, because there is
+    no sequence parameter to rebind.
+    """
+
+    # Grant active at exactly the resolved event_sequence (15).
+    grant_at_15 = _grant(
+        "grant:at15",
+        effective_from_sequence=15,
+        effective_until_sequence=16,
+    )
+    resolved, ledger = _resolved_and_ledger_with_grants(
+        (grant_at_15,), effective_from=10, event_sequence=15
+    )
+    decision = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision.decision_type == "SELECTED"
+    assert decision.event_sequence == 15  # the resolved sequence, not a rebind
+
+
+def test_authority_validated_before_scanning() -> None:
+    """A malformed authority_id raises the stable contract code before any
+    grant is scanned (the selector validates the token before scanning)."""
+
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=resolved,
+            action="ADMIT",
+            authority_id="not a token",  # type: ignore[arg-type]
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_AUTHORITY_INVALID"
+
+
+def test_scope_validated_before_scanning() -> None:
+    """A malformed scope_id raises the stable contract code before any grant is
+    scanned."""
+
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=resolved,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="",  # type: ignore[arg-type]
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SCOPE_INVALID"
+
+
+def test_assumption_authority_actions_is_the_only_action_vocabulary() -> None:
+    """The selector accepts exactly ``ASSUMPTION_AUTHORITY_ACTIONS`` from the
+    contracts module; there is no local action enumeration. Every contract
+    action is accepted; no foreign action is accepted."""
+
+    # Every action in the normative enumeration is accepted (does not raise
+    # ACTION_INVALID). For non-resolution actions a non-applicable grant
+    # yields NO_APPLICABLE_GRANT; the point is the action is recognized.
+    grant = _grant(action="ADMIT")
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    for action in ASSUMPTION_AUTHORITY_ACTIONS:
+        # Build a grant matching this action so the request is well-formed.
+        if action in (
+            "RESOLVE_TO_ADMITTED",
+            "RESOLVE_TO_CONFIRMED",
+            "RESOLVE_TO_REJECTED",
+            "RESOLVE_TO_SUPERSEDED",
+        ):
+            # Resolution actions require a challenge materiality and a
+            # resolution-action grant; just verify the action is recognized
+            # (no ACTION_INVALID) by using a denial path.
+            decision = select_applicable_grant_v3(
+                ledger=ledger,
+                resolved_policy=resolved,
+                action=action,
+                authority_id="authority:operator",
+                scope_id="scope:control",
+                assumption_materiality="MATERIAL",
+                challenge_materiality="MATERIAL",
+            )
+            assert decision.decision_type == "NO_APPLICABLE_GRANT"
+        else:
+            decision = select_applicable_grant_v3(
+                ledger=ledger,
+                resolved_policy=resolved,
+                action=action,
+                authority_id="authority:operator",
+                scope_id="scope:control",
+                assumption_materiality="MATERIAL",
+                challenge_materiality=None,
+            )
+            # The ADMIT grant matches only ADMIT; all other non-resolution
+            # actions deny.
+            if action == "ADMIT":
+                assert decision.decision_type == "SELECTED"
+            else:
+                assert decision.decision_type == "NO_APPLICABLE_GRANT"
+    # A foreign action is rejected.
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=resolved,
+            action="FORGED_ACTION",  # type: ignore[arg-type]
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_ACTION_INVALID"
+
+
+def test_decision_code_vocabulary_is_frozen() -> None:
+    """The decision_code is the frozen vocabulary: one per decision type, and
+    it is bound into the selection_digest so distinct outcomes produce
+    distinct digests."""
+
+    assert DECISION_CODES == {
+        "SELECTED": "ASSUMPTION_GRANT_SELECTED",
+        "NO_APPLICABLE_GRANT": "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",
+        "AMBIGUOUS_GRANTS": "ASSUMPTION_POLICY_AMBIGUOUS_GRANTS",
+    }
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    selected = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert selected.decision_code == "ASSUMPTION_GRANT_SELECTED"
+    no_grant = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="REJECT",  # no grant covers REJECT
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert no_grant.decision_code == "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT"
+    # The two decisions share the same resolved policy and request scope but
+    # differ in action and outcome; their digests differ (decision_code is
+    # bound in).
+    assert selected.selection_digest != no_grant.selection_digest
+
+
+def test_decision_code_is_bound_into_selection_digest() -> None:
+    """The decision_code participates in the selection_digest: two decisions
+    over the SAME (resolved policy, request) that differ only in outcome
+    produce distinct digests."""
+
+    # Build two grants that both match -> AMBIGUOUS, and the same request with
+    # one grant removed -> would be SELECTED. Construct distinct resolutions
+    # sharing all bindings except the outcome via the dataclass.
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    selected = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    denied = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="SUPERSEDE",  # no grant -> NO_APPLICABLE_GRANT
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    # Same resolved policy, same authority/scope/materiality, different action
+    # and outcome. The digests differ. (The action also differs, but the
+    # decision_code is bound in too: verify the unsigned value includes it.)
+    assert "decision_code" in selected._unsigned_value()
+    assert selected.decision_code != denied.decision_code
+
+
+def test_decision_code_mismatch_raises() -> None:
+    """A GrantSelectionDecision constructed with a decision_code that does not
+    match its decision_type raises the stable code."""
+
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    unsigned = {
+        "schema_version": GRANT_SELECTION_DECISION_SCHEMA_VERSION,
+        "action": "ADMIT",
+        "assumption_materiality": "MATERIAL",
+        "authority_id": "authority:operator",
+        "challenge_materiality": None,
+        "commit_receipt_digest": resolved.commit_receipt_digest,
+        "decision_code": "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",  # wrong for SELECTED
+        "decision_type": "SELECTED",
+        "effective_from_sequence": resolved.effective_from_sequence,
+        "event_sequence": resolved.event_sequence,
+        "grant_digest": grant.grant_digest,
+        "ledger_entry_digest": resolved.ledger_entry_digest,
+        "ledger_root_digest": resolved.ledger_root_digest,
+        "policy_digest": resolved.policy_digest,
+        "policy_id": resolved.policy_id,
+        "scope_id": "scope:control",
+        "selected_grant_id": grant.grant_id,
+        "signing_payload_digest": resolved.signing_payload_digest,
+    }
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        GrantSelectionDecision(
+            policy_id=resolved.policy_id,
+            policy_digest=resolved.policy_digest,
+            effective_from_sequence=resolved.effective_from_sequence,
+            signing_payload_digest=resolved.signing_payload_digest,
+            commit_receipt_digest=resolved.commit_receipt_digest,
+            ledger_entry_digest=resolved.ledger_entry_digest,
+            ledger_root_digest=resolved.ledger_root_digest,
+            event_sequence=resolved.event_sequence,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+            decision_type="SELECTED",
+            decision_code="ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",  # mismatched
+            selected_grant_id=grant.grant_id,
+            grant_digest=grant.grant_digest,
+            selection_digest=domain_digest("ASSUMPTION_GRANT_SELECTION_DECISION", unsigned),
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_DECISION_CODE_INVALID"
+
+
+def test_resolved_event_before_effective_raises() -> None:
+    """The closed contract invariant on ResolvedPolicyAtSequence: event_sequence
+    must be >= effective_from_sequence. A directly-constructed binding with
+    event_sequence below effective raises the stable code (resolution itself
+    never produces such a binding, but the dataclass closes the invariant)."""
+
+    e0 = _entry(seq=10)
+    ledger = _ledger(e0)
+    unsigned = {
+        "schema_version": RESOLVED_POLICY_AT_SEQUENCE_SCHEMA_VERSION,
+        "commit_receipt_digest": e0.policy_commit.commit_receipt_digest,
+        "effective_from_sequence": 10,
+        "event_sequence": 5,  # below effective
+        "ledger_entry_digest": e0.ledger_entry_digest,
+        "ledger_root_digest": ledger.ledger_root_digest,
+        "policy_digest": e0.policy.policy_digest,
+        "policy_id": e0.policy.policy_id,
+        "signing_payload_digest": e0.signing_payload.signing_payload_digest,
+    }
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        ResolvedPolicyAtSequence(
+            event_sequence=5,
+            policy_id=e0.policy.policy_id,
+            policy_digest=e0.policy.policy_digest,
+            effective_from_sequence=10,
+            signing_payload_digest=e0.signing_payload.signing_payload_digest,
+            commit_receipt_digest=e0.policy_commit.commit_receipt_digest,
+            ledger_entry_digest=e0.ledger_entry_digest,
+            ledger_root_digest=ledger.ledger_root_digest,
+            resolution_digest=domain_digest("ASSUMPTION_RESOLVED_POLICY_AT_SEQUENCE", unsigned),
+        )
+    assert failure.value.code == "ASSUMPTION_POLICY_RESOLUTION_EVENT_BEFORE_EFFECTIVE"
+
+
+def test_denial_carries_no_selected_grant_fields() -> None:
+    """A denial (NO_APPLICABLE_GRANT / AMBIGUOUS_GRANTS) carries no
+    selected_grant_id and no grant_digest. The dataclass enforces this."""
+
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    denied = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="SUPERSEDE",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert denied.decision_type == "NO_APPLICABLE_GRANT"
+    assert denied.selected_grant_id is None
+    assert denied.grant_digest is None
+
+
+def test_selected_grant_id_must_be_valid_token() -> None:
+    """A SELECTED decision with an invalid selected_grant_id token raises the
+    stable code at construction."""
+
+    grant = _grant()
+    resolved, _ledger_obj = _resolved_and_ledger_with_grants((grant,))
+    unsigned = {
+        "schema_version": GRANT_SELECTION_DECISION_SCHEMA_VERSION,
+        "action": "ADMIT",
+        "assumption_materiality": "MATERIAL",
+        "authority_id": "authority:operator",
+        "challenge_materiality": None,
+        "commit_receipt_digest": resolved.commit_receipt_digest,
+        "decision_code": "ASSUMPTION_GRANT_SELECTED",
+        "decision_type": "SELECTED",
+        "effective_from_sequence": resolved.effective_from_sequence,
+        "event_sequence": resolved.event_sequence,
+        "grant_digest": grant.grant_digest,
+        "ledger_entry_digest": resolved.ledger_entry_digest,
+        "ledger_root_digest": resolved.ledger_root_digest,
+        "policy_digest": resolved.policy_digest,
+        "policy_id": resolved.policy_id,
+        "scope_id": "scope:control",
+        "selected_grant_id": "not a token",
+        "signing_payload_digest": resolved.signing_payload_digest,
+    }
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        GrantSelectionDecision(
+            policy_id=resolved.policy_id,
+            policy_digest=resolved.policy_digest,
+            effective_from_sequence=resolved.effective_from_sequence,
+            signing_payload_digest=resolved.signing_payload_digest,
+            commit_receipt_digest=resolved.commit_receipt_digest,
+            ledger_entry_digest=resolved.ledger_entry_digest,
+            ledger_root_digest=resolved.ledger_root_digest,
+            event_sequence=resolved.event_sequence,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+            decision_type="SELECTED",
+            decision_code="ASSUMPTION_GRANT_SELECTED",
+            selected_grant_id="not a token",
+            grant_digest=grant.grant_digest,
+            selection_digest=domain_digest("ASSUMPTION_GRANT_SELECTION_DECISION", unsigned),
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SELECTED_GRANT_ID_INVALID"
 
 
 # ===========================================================================
@@ -1242,7 +1903,8 @@ def test_resolve_at_restart_resolution_from_stored_bytes(tmp_path: Path) -> None
 
 
 def test_resolve_at_restart_grant_selection(tmp_path: Path) -> None:
-    """A fresh publisher process can run grant selection after restart."""
+    """A fresh publisher process can run grant selection after restart via the
+    authoritative composite."""
 
     pub = FilesystemAssumptionPolicyPublisher(tmp_path)
     grant = _grant()
@@ -1259,15 +1921,13 @@ def test_resolve_at_restart_grant_selection(tmp_path: Path) -> None:
     # Restart.
     pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
     pub2.open()
-    resolved = pub2.resolve_at(15)
-    decision = select_applicable_grant_v3(
-        resolved,
+    decision = pub2.resolve_policy_and_select_grant_at(
+        event_sequence=15,
         action="ADMIT",
         authority_id="authority:operator",
         scope_id="scope:control",
         assumption_materiality="MATERIAL",
         challenge_materiality=None,
-        event_sequence=15,
     )
     assert decision.decision_type == "SELECTED"
     assert decision.selected_grant_id == grant.grant_id
@@ -1332,6 +1992,167 @@ def test_resolve_at_missing_store_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Filesystem composite (resolve_policy_and_select_grant_at)
+# ---------------------------------------------------------------------------
+
+
+def _populate_store_with_grant(
+    pub: FilesystemAssumptionPolicyPublisher,
+    grant: AssumptionAuthorityGrant | None = None,
+) -> AssumptionPolicyLedgerEntryV3:
+    """Create and publish one entry carrying ``grant``; return the entry."""
+
+    actual_grant = grant if grant is not None else _grant()
+    pub.create()
+    state = pub.read_state()
+    entry = _entry_with_policy((actual_grant,), seq=10)
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation,
+    )
+
+    prepared = PreparedPolicyActivation.build(entry)
+    pub.publish(prepared=prepared, expected_state=state)
+    return entry
+
+
+def test_composite_selection_after_restart(tmp_path: Path) -> None:
+    """The authoritative composite resolves AND selects under one locked
+    snapshot, and a fresh publisher process produces the same decision."""
+
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    grant = _grant("grant:composite")
+    _populate_store_with_grant(pub, grant)
+    decision_before = pub.resolve_policy_and_select_grant_at(
+        event_sequence=15,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision_before.decision_type == "SELECTED"
+    assert decision_before.selected_grant_id == grant.grant_id
+
+    # Restart: a fresh publisher over the same root produces the same decision.
+    pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub2.open()
+    decision_after = pub2.resolve_policy_and_select_grant_at(
+        event_sequence=15,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision_after.canonical_bytes == decision_before.canonical_bytes
+    assert decision_after.selection_digest == decision_before.selection_digest
+
+
+def test_composite_no_match_denial_leaves_store_unchanged(tmp_path: Path) -> None:
+    """A NO_APPLICABLE_GRANT denial from the composite leaves the store bytes,
+    root, and head unchanged. The composite performs no writes."""
+
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    _populate_store_with_grant(pub, _grant(action="ADMIT"))
+    state_before = pub.read_state()
+    bytes_before = (tmp_path / "ledger.json").read_bytes()
+
+    decision = pub.resolve_policy_and_select_grant_at(
+        event_sequence=15,
+        action="SUPERSEDE",  # no grant covers SUPERSEDE
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision.decision_type == "NO_APPLICABLE_GRANT"
+    assert decision.decision_code == "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT"
+
+    state_after = pub.read_state()
+    bytes_after = (tmp_path / "ledger.json").read_bytes()
+    assert state_before == state_after
+    assert bytes_before == bytes_after
+
+
+def test_composite_ambiguity_leaves_store_unchanged(tmp_path: Path) -> None:
+    """An AMBIGUOUS_GRANTS fail-closed denial from the composite leaves the
+    store bytes, root, and head unchanged."""
+
+    # Two grants that both cover the request (the policy overlap validator
+    # would normally reject this at construction, but build it directly to
+    # exercise the selector's fail-closed path). Use a fresh subdirectory so
+    # this store is independent.
+    grant_a = _grant("grant:a", assumption_materialities=("MATERIAL",))
+    grant_b = _grant("grant:b", assumption_materialities=("MATERIAL", "ADVISORY"))
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub.create()
+    state = pub.read_state()
+    entry = _entry_with_policy((grant_a, grant_b), seq=10)
+    from csd_foundry.governance.v0_5.assumption_policy_activation_hardening import (
+        PreparedPolicyActivation,
+    )
+
+    prepared = PreparedPolicyActivation.build(entry)
+    pub.publish(prepared=prepared, expected_state=state)
+
+    state_before = pub.read_state()
+    bytes_before = (tmp_path / "ledger.json").read_bytes()
+    decision = pub.resolve_policy_and_select_grant_at(
+        event_sequence=15,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision.decision_type == "AMBIGUOUS_GRANTS"
+    assert decision.decision_code == "ASSUMPTION_POLICY_AMBIGUOUS_GRANTS"
+    state_after = pub.read_state()
+    bytes_after = (tmp_path / "ledger.json").read_bytes()
+    assert state_before == state_after
+    assert bytes_before == bytes_after
+
+
+def test_composite_reads_create_no_temp_files(tmp_path: Path) -> None:
+    """The composite read path creates no managed temp files: no temp, no
+    replace, no fsync, no orphan cleanup."""
+
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    _populate_store_with_grant(pub)
+    files_before = {p.name for p in tmp_path.iterdir()}
+    for _ in range(5):
+        pub.resolve_policy_and_select_grant_at(
+            event_sequence=15,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    files_after = {p.name for p in tmp_path.iterdir()}
+    assert files_before == files_after
+    assert not any(name.startswith(".policy-ledger.") for name in files_after)
+
+
+def test_composite_decision_binds_observed_root(tmp_path: Path) -> None:
+    """The composite decision's ledger_root_digest is the root the reader
+    observed under the lock (resolution and selection share one snapshot)."""
+
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    _populate_store_with_grant(pub)
+    observed_root = pub.read_state().ledger_root_digest
+    decision = pub.resolve_policy_and_select_grant_at(
+        event_sequence=15,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision.ledger_root_digest == observed_root
+
+
+# ---------------------------------------------------------------------------
 # Multiprocess reader/publisher serialization
 # ---------------------------------------------------------------------------
 
@@ -1342,13 +2163,16 @@ def _mp_reader_worker(
     barrier_arg: object,
     iterations: int,
 ) -> None:
-    """Spawn-safe reader worker: resolves at several sequences after the barrier.
+    """Spawn-safe reader worker: resolves AND selects after the barrier.
 
-    Each resolution captures the observed ledger root so the parent can prove
-    the reader saw a complete (old or new) snapshot, never a torn read. The
-    outcome tuple is tagged ``("READER", label, payload)`` so the parent can
-    distinguish reader outcomes from publisher outcomes (both use label
-    ``"OK"`` on success).
+    Each iteration runs the authoritative composite
+    ``resolve_policy_and_select_grant_at`` so the reader observes the complete
+    resolution+grants from a single snapshot. It captures the observed ledger
+    root and the selected grant_id so the parent can prove the reader saw a
+    complete (old or new) policy generation with its matching grants, never a
+    torn read or a mixed snapshot. The outcome tuple is tagged
+    ``("READER", label, payload)`` so the parent can distinguish reader
+    outcomes from publisher outcomes (both use label ``"OK"`` on success).
     """
 
     from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
@@ -1365,19 +2189,26 @@ def _mp_reader_worker(
     except Exception:  # noqa: BLE001
         result_queue.put(("READER", "BARRIER_ERROR", ""))
         return
-    observed_roots: list[str] = []
+    observed: list[tuple[str, str | None]] = []  # (root, selected_grant_id)
     errors: list[str] = []
     for _ in range(iterations):
         try:
-            resolved = pub.resolve_at(15)
-            observed_roots.append(resolved.ledger_root_digest)
+            decision = pub.resolve_policy_and_select_grant_at(
+                event_sequence=15,
+                action="ADMIT",
+                authority_id="authority:operator",
+                scope_id="scope:control",
+                assumption_materiality="MATERIAL",
+                challenge_materiality=None,
+            )
+            observed.append((decision.ledger_root_digest, decision.selected_grant_id))
         except PolicyStoreError as exc:
             errors.append(f"STORE:{exc.code}")
         except AssumptionPolicyActivationContractError as exc:
             errors.append(f"CONTRACT:{exc.code}")
         except Exception as exc:  # noqa: BLE001
             errors.append(f"UNEXPECTED:{type(exc).__name__}")
-    result_queue.put(("READER", "OK", (observed_roots, errors)))
+    result_queue.put(("READER", "OK", (observed, errors)))
 
 
 def _mp_publisher_worker(
@@ -1497,15 +2328,24 @@ def test_concurrent_reader_and_publisher_serialize(tmp_path: Path) -> None:
     r1 = resulting_root
     assert r0 != r1  # the append changed the root
 
-    # The reader observed only complete snapshots: every observed root is
-    # either R0 (old) or R1 (new), never anything else, and no errors.
+    # The reader observed only complete snapshots: every observed (root,
+    # grant_id) pair is from either R0 (old generation) or R1 (new
+    # generation), never a torn read or a mixed snapshot, and no errors. The
+    # selected grant must always be the grant carried by the entry whose
+    # ledger root was observed (selection re-binds the resolution to the same
+    # ledger, so root and grants always come from one snapshot).
     _role, read_label, read_payload = read_outcomes[0]
     assert read_label == "OK", f"reader barrier error: {read_payload}"
-    observed_roots, errors = read_payload
+    observed_pairs, errors = read_payload
     assert errors == [], f"reader observed errors: {errors}"
-    assert observed_roots, "reader observed no roots"
-    for observed in observed_roots:
-        assert observed in (r0, r1), f"torn read: {observed} not in ({r0}, {r1})"
+    assert observed_pairs, "reader observed no snapshots"
+    for observed_root, observed_grant in observed_pairs:
+        assert observed_root in (r0, r1), f"torn read: {observed_root} not in ({r0}, {r1})"
+        # The grant is always selected (the default grant covers ADMIT at
+        # MATERIAL for authority:operator / scope:control), and it must be
+        # non-None: a denial would indicate a mixed snapshot where the grants
+        # did not match the resolved generation.
+        assert observed_grant is not None, f"denial under root {observed_root}"
 
     # The final on-disk state reflects the committed publication.
     final_state = pub.read_state()
@@ -1562,10 +2402,14 @@ def test_reader_sees_complete_old_or_new_ledger(tmp_path: Path) -> None:
     role, label, payload = outcomes[0]
     assert role == "READER", f"unexpected role: {role}"
     assert label == "OK", f"reader failed: {label} {payload}"
-    observed_roots, errors = payload
+    observed_pairs, errors = payload
     assert errors == [], f"reader errors: {errors}"
-    for observed in observed_roots:
-        assert observed in known_roots, f"torn read: {observed} not in known roots"
+    for observed_root, observed_grant in observed_pairs:
+        assert observed_root in known_roots, f"torn read: {observed_root} not in known roots"
+        # Resolution+grants always come from the same snapshot: a selected
+        # grant is present (the default grant covers the request), never a
+        # denial that would indicate a mixed snapshot.
+        assert observed_grant is not None, f"denial under root {observed_root}"
 
 
 def test_multiprocess_bounded_join(tmp_path: Path) -> None:

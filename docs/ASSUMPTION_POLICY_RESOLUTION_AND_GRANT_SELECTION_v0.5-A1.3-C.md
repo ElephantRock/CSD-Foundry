@@ -3,7 +3,8 @@
 **Status:** Implemented historical V3 policy resolution and exact grant selection
 **Date:** 2026-08-04
 **Scope:** `resolve_policy_at_v3`, `select_applicable_grant_v3`,
-`resolve_policy_and_select_grant`, `FilesystemAssumptionPolicyPublisher.resolve_at`
+`resolve_policy_and_select_grant`, `FilesystemAssumptionPolicyPublisher.resolve_at`,
+`FilesystemAssumptionPolicyPublisher.resolve_policy_and_select_grant_at`
 
 This module closes the A1 activation read path against the non-circular V3
 signing envelope. The pure A1.3-A function `compare_and_append_policy_entry_v3`
@@ -17,7 +18,9 @@ read path that answers:
 The filesystem layer (A1.3-B) owns locking, stored-byte validation, atomic
 replacement, restart reconstruction, and post-write verification. A1.3-C adds a
 read-only `resolve_at` method to that publisher that reuses the same strict lock
-scope but performs no writes.
+scope but performs no writes, plus the authoritative composite
+`resolve_policy_and_select_grant_at` that resolves AND selects under a single
+locked snapshot.
 
 ## 1. Half-open interval semantics
 
@@ -60,18 +63,24 @@ this is the unique entry whose half-open interval contains `q`.
 
 ## 3. Future isolation
 
-Future entries (those with `s_i > q`) never affect the resolution of `q`. The
-reverse walk skips them: their `effective_from_sequence` exceeds the query, so
-the `<=` test fails and the walk continues to earlier entries.
+Future policies do not change the resolved generation bindings (policy ID/digest,
+effective sequence, signing-payload digest, commit-receipt digest, ledger-entry
+digest). The reverse walk skips future entries: their
+`effective_from_sequence` exceeds the query, so the `<=` test fails and the walk
+continues to earlier entries.
 
 Consequently, appending a new entry `e_n` after a query of `q < s_n` leaves the
-**resolved policy generation** byte-identical. The generation bindings
-(`policy_id`, `policy_digest`, `effective_from_sequence`,
-`signing_payload_digest`, `commit_receipt_digest`, `ledger_entry_digest`) are
-identical before and after the append. The `ledger_root_digest` and
-`resolution_digest` fields legitimately differ: they bind the ledger observed at
-resolution time, which grows on append. The future-isolation guarantee is about
-the resolved policy generation, not the enclosing ledger root.
+**resolved policy generation** byte-identical: the generation bindings listed
+above are identical before and after the append.
+
+The complete resolution receipt is snapshot-bound and changes when the observed
+authoritative ledger root changes. The `ledger_root_digest` and
+`resolution_digest` fields bind the ledger observed at resolution time, which
+grows on append: a resolution read against a ledger that has since grown
+produces a different (but still generation-consistent) receipt. The
+future-isolation guarantee is about the resolved policy generation, not the
+enclosing ledger root, and the complete receipt is never claimed to remain
+byte-identical after an append.
 
 ## 4. V3-only boundary
 
@@ -124,9 +133,20 @@ at any time and yields byte-identical resolution.
 
 ## 7. Grant applicability dimensions
 
-`select_applicable_grant_v3` scans the resolved policy's grant set for every
-grant applicable to the request. A grant is applicable if and only if ALL of the
-following hold:
+`select_applicable_grant_v3` re-binds the resolved policy to its exact source
+ledger entry (via `_source_entry_for_resolution`, which verifies the ledger is
+V3, the resolution is exactly `ResolvedPolicyAtSequence`, the resolution's
+`ledger_root_digest` equals the ledger's root, exactly one entry has the
+resolution's `ledger_entry_digest`, and that entry matches the resolution's
+`policy_id`/`policy_digest`/`effective_from_sequence`/`signing_payload_digest`/
+`commit_receipt_digest`/`ledger_entry_digest`). It then scans THAT entry's
+digested grant set (`source_entry.policy.grants`) -- never a caller-carried
+tuple, so a substituted grant tuple cannot authorize. The single event sequence
+used for all grant-interval evaluation is `resolved_policy.event_sequence`;
+there is no independently supplied event sequence, so the sequence cannot be
+rebound to a different generation.
+
+A grant is applicable if and only if ALL of the following hold:
 
 | Dimension                | Match rule                                                        |
 |--------------------------|-------------------------------------------------------------------|
@@ -136,9 +156,9 @@ following hold:
 | `assumption_materiality` | exact membership in `grant.assumption_materialities`              |
 | `challenge_materiality`  | exact membership in `grant.challenge_materialities` (resolution   |
 |                          | actions only; `None` for non-resolution actions)                  |
-| effective interval       | `grant.effective_from_sequence <= event_sequence` AND            |
+| effective interval       | `grant.effective_from_sequence <= resolved.event_sequence` AND    |
 |                          | (`effective_until_sequence is None` OR                            |
-|                          | `event_sequence < grant.effective_until_sequence`)                |
+|                          | `resolved.event_sequence < grant.effective_until_sequence`)       |
 
 The effective interval is half-open: closed on the left (inclusive lower bound),
 open on the right (exclusive upper bound). A grant is active at exactly its
@@ -233,21 +253,62 @@ The composite `resolve_policy_and_select_grant(ledger, event_sequence, action,
 ...)` performs the read-path order:
 
 1. `resolve_policy_at_v3(ledger, event_sequence)` — pure resolution, yielding the
-   resolved policy binding (which carries the grant set of the located entry);
-2. `select_applicable_grant_v3(resolved, ...)` — pure exact grant selection
-   against the carried grant set.
+   resolved policy binding (a digest receipt, no grants);
+2. `select_applicable_grant_v3(ledger=ledger, resolved_policy=resolved, ...)` —
+   pure exact grant selection that re-binds the resolution to its source entry
+   in the SAME ledger and scans that entry's digested grants.
 
 The composite performs no I/O and no locking: it is the pure read path over an
 already-validated in-memory `AssumptionPolicyLedgerV3`. For the durable
-filesystem path, call `FilesystemAssumptionPolicyPublisher.resolve_at` (which
-holds the lock across reconstruction) to obtain the resolved policy, then call
-`select_applicable_grant_v3`.
+filesystem path, use
+`FilesystemAssumptionPolicyPublisher.resolve_policy_and_select_grant_at`, which
+resolves AND selects under a single locked snapshot.
 
-The composite guarantees the resolution and selection share the same entry: the
-binding returned by resolution carries the grants of the located entry, so a
-concurrent append cannot split the read across two generations.
+The composite guarantees the resolution and selection share the same snapshot:
+selection re-binds the resolution to the SAME ledger (the resolution's
+`ledger_root_digest` must equal the ledger's root), so a concurrent append
+cannot split the read across two generations.
 
-## 13. Error codes
+## 13. Authoritative filesystem composite
+
+`FilesystemAssumptionPolicyPublisher.resolve_policy_and_select_grant_at(
+event_sequence=, action=, authority_id=, scope_id=, assumption_materiality=,
+challenge_materiality=)` resolves AND selects under a single strict lock
+acquisition, performing NO writes:
+
+1. require an existing initialized root (no creation);
+2. acquire the strict publication lock;
+3. read ONE authoritative byte snapshot;
+4. reconstruct and fully revalidate the ledger from those bytes;
+5. resolve the policy generation at `event_sequence`;
+6. verify the resolution against the SAME reconstructed ledger (re-bind the
+   source entry);
+7. select the applicable grant from that source entry's digested grants (no
+   caller-carried tuple);
+8. reread the authoritative bytes and require they are unchanged;
+9. release the lock;
+10. return the decision.
+
+No writes, no temp, no replace, no fsync, no orphan cleanup. The resolution and
+the grant selection share the same ledger snapshot: the decision's
+`ledger_root_digest` is the root the reader observed under the lock.
+
+## 14. Decision code vocabulary
+
+Every `GrantSelectionDecision` carries a frozen `decision_code`, one per
+decision type, bound into the `selection_digest`:
+
+| Decision type         | Decision code                            |
+|-----------------------|------------------------------------------|
+| `SELECTED`            | `ASSUMPTION_GRANT_SELECTED`              |
+| `NO_APPLICABLE_GRANT` | `ASSUMPTION_POLICY_NO_APPLICABLE_GRANT`  |
+| `AMBIGUOUS_GRANTS`    | `ASSUMPTION_POLICY_AMBIGUOUS_GRANTS`     |
+
+Two decisions over the same `(resolved_policy, request)` that differ only in
+outcome produce distinct `selection_digest` values, because the `decision_code`
+participates in the digest.
+
+## 15. Error codes
 
 Resolution errors (`resolve_policy_at_v3`):
 
@@ -261,12 +322,25 @@ Grant-selection errors (`select_applicable_grant_v3`, raised not returned):
 
 | Code                                                    | Trigger                                |
 |---------------------------------------------------------|----------------------------------------|
+| `ASSUMPTION_GRANT_SELECTION_LEDGER_VERSION_NOT_ACTIVATABLE` | ledger is not exactly `AssumptionPolicyLedgerV3` |
+| `ASSUMPTION_GRANT_SELECTION_RESOLUTION_TYPE_INVALID`    | `resolved_policy` is not exactly `ResolvedPolicyAtSequence` (foreign object) |
+| `ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH`       | resolution's `ledger_root_digest` != ledger's root |
+| `ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_MISSING`       | no ledger entry has the resolution's `ledger_entry_digest` |
+| `ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_AMBIGUOUS`     | two or more entries have the resolution's `ledger_entry_digest` |
+| `ASSUMPTION_GRANT_SELECTION_SOURCE_BINDING_MISMATCH`    | located entry's bindings != resolution's bindings |
 | `ASSUMPTION_GRANT_SELECTION_ACTION_INVALID`             | unknown action                         |
 | `ASSUMPTION_GRANT_SELECTION_ASSUMPTION_MATERIALITY_INVALID` | unknown assumption materiality     |
 | `ASSUMPTION_GRANT_SELECTION_CHALLENGE_MATERIALITY_INVALID` | unknown challenge materiality       |
 | `ASSUMPTION_GRANT_SELECTION_CHALLENGE_MATERIALITY_REQUIRED` | resolution action without challenge materiality |
 | `ASSUMPTION_GRANT_SELECTION_CHALLENGE_MATERIALITY_UNEXPECTED` | non-resolution action with challenge materiality |
-| `ASSUMPTION_GRANT_SELECTION_SEQUENCE_INVALID`           | negative or non-int `event_sequence`   |
+| `ASSUMPTION_GRANT_SELECTION_AUTHORITY_INVALID`          | malformed `authority_id` token         |
+| `ASSUMPTION_GRANT_SELECTION_SCOPE_INVALID`              | malformed `scope_id` token             |
+| `ASSUMPTION_GRANT_SELECTION_DECISION_TYPE_INVALID`      | decision type not in the fail-closed triple |
+| `ASSUMPTION_GRANT_SELECTION_DECISION_CODE_INVALID`      | decision code does not match decision type |
+| `ASSUMPTION_GRANT_SELECTION_SELECTED_GRANT_MISSING`     | SELECTED without both grant bindings   |
+| `ASSUMPTION_GRANT_SELECTION_SELECTED_GRANT_ID_INVALID`  | SELECTED with malformed `selected_grant_id` token |
+| `ASSUMPTION_GRANT_SELECTION_DENIAL_GRANT_PRESENT`       | denial carrying selected-grant fields  |
+| `ASSUMPTION_GRANT_SELECTION_SEQUENCE_INVALID`           | negative or non-int sequence           |
 | `ASSUMPTION_GRANT_SELECTION_EVENT_BEFORE_POLICY_EFFECTIVE` | `event_sequence` < resolved policy's `effective_from_sequence` |
 
 Filesystem errors (`resolve_at`, same codes as `read_ledger`):
