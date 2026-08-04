@@ -28,13 +28,16 @@ The repository currently contains:
 - deterministic `ValidatedEvent` admission and reconstruction boundaries;
 - atomic compare-and-append temporal claims, ordered projection commitments, failure-no-advance,
   crash recovery, and committed-head visibility;
+- proposed Distributional Assurance architecture and doctrine for scenario worlds, causal
+  contrasts, failure ecology, process provenance, optimizer exposure, and independent transfer;
 - the immutable CSD Reasoning Seed v0.1 and its original generator and validator.
 
 The included seed remains an unbenchmarked synthetic seed. Passing validation establishes
 coverage relative to the encoded CSD semantics and committed test evidence. It does not prove
-real-world dependency completeness, external truth, model generalization, scheduler fairness,
-or production safety. Release-scale generation remains blocked until governed registries,
-disposition, quarantine, the vertical slice, synthesis, and empirical policy gates are complete.
+real-world dependency completeness, external truth, structural or distributional completeness,
+model generalization, scheduler fairness, or production safety. Release-scale generation remains
+blocked until governed registries, disposition, quarantine, the governed vertical slice,
+synthesis, structural and distributional assurance, and empirical policy gates are complete.
 
 ## Platform direction
 
@@ -49,22 +52,35 @@ versioned domain packs
 external specialist oracles
         +
 governed open-ended exploration
+        ×
+Distributional Assurance
         ↓
 proof-carrying cognition episodes
 ```
 
 CSD is intended to become the first domain pack, not a universal ontology. Domain breadth will
 come from a domain-definition toolchain, reusable reasoning archetypes, a Reasoning ABI,
-assurance-aware cross-domain composition, and a separate exploration plane whose hypotheses
-remain distinct from verified assertions.
+assurance-aware cross-domain composition, declared scenario worlds, causal contrast families,
+and a separate exploration plane whose hypotheses remain distinct from verified assertions.
+
+The governing quality model is:
+
+```text
+Foundry quality
+=
+Oracle integrity
+× Structural assurance
+× Distributional assurance
+```
 
 The governing principle is:
 
 > **Open at ingestion, bounded at assertion.**
 
-See `docs/FOUNDRY_PLATFORM_CHARTER_v1.0.md` for the normative strategic boundary. The charter is
-normative for project direction and constitutional invariants, but not for exact syntax,
-schemas, algorithms, model choices, or deployment topology.
+See `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md` for the proposed normative strategic boundary and
+`docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` for the proposed Distributional Assurance doctrine. The
+charter is normative for project direction and constitutional invariants, but not for exact
+syntax, schemas, algorithms, model choices, thresholds, quotas, or deployment topology.
 
 ## Current architecture
 
@@ -93,13 +109,18 @@ constraint-valid state/event planning and construction
         ↓
 structural canonicalization and holdout assignment
         ↓
-Verified Cognition Episodes
+canonical scenario worlds, distribution contracts, causal contrasts, and failure ecology
+        ↓
+Verified Cognition Episodes with semantic, epistemic, interaction, and distributional views
         ↓
 SFT / preference / process / verifier / repair / RL / benchmark releases
+        ↓
+independent transfer evaluation and runtime distribution-gap harvesting
 ```
 
 The first seven lines are substantially implemented. Registry, disposition, quarantine,
-trajectory-synthesis, episode, compiler, and empirical-learning layers remain ahead.
+trajectory synthesis, structural and distributional assurance, episode compilation, and
+empirical-learning layers remain ahead.
 
 ## Quick start
 
@@ -142,6 +163,10 @@ reconciliation, topology-independent semantic commitments, and complete independ
 
 The v0.5 gates validate frozen contracts, canonicalization, accepted and rejected event admission,
 and atomic temporal completion in editable and installed-wheel environments.
+
+Distributional Assurance currently has proposed architecture documents only. No executable
+scenario-world schema, distribution contract, causal contrast compiler, failure-topology catalog,
+optimizer-exposure ledger, or distributional release report is yet claimed.
 
 ## Current coverage
 
@@ -255,7 +280,8 @@ Registry, disposition, and quarantine references in v0.5-C are orchestration pla
 substantive reducers and eligibility semantics remain v0.5-D and v0.5-E work.
 
 See `docs/CONTRACT_FREEZE_v0.5.md`, `docs/ATOMIC_TEMPORAL_v0.5.md`,
-`docs/STRATEGIC_ROADMAP.md`, and `docs/FOUNDRY_PLATFORM_CHARTER_v1.0.md`.
+`docs/STRATEGIC_ROADMAP.md`, `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`, and
+`docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`.
 
 ## Project layout
 
@@ -277,6 +303,10 @@ reports/                            Machine-readable coverage and protocol evide
 tests/                              Kernel, protocol, mutation, and synthesis tests
 ```
 
+The future Distributional Assurance implementation will add separately versioned contracts,
+canaries, validators, reports, and source modules. No implementation version is reserved by the
+current doctrine.
+
 ## Explicit boundaries
 
 The current implementation does not establish:
@@ -287,13 +317,17 @@ The current implementation does not establish:
 - a substantive disposition oracle, quarantine index, or governed release compiler;
 - full primary/shadow model replay as an operational subsystem;
 - a complete trajectory planner or state/event constructor;
+- structural canonicalization and holdout assignment at release scale;
+- an executable Distributional Assurance descriptor ontology or distribution contract;
+- causal contrast, failure-topology, process-provenance, filter-loss, or optimizer-exposure contracts;
+- distributional completeness, generating-process independence, or protection from recursive synthetic collapse;
 - a canonical Verified Cognition Episode or data compilers;
 - a domain-neutral microkernel, CognitionDL, domain-pack compiler, or Reasoning ABI;
 - a governed open-ended exploration plane;
 - fairness or liveness of a real scheduler;
 - completeness of real-world dependency declarations;
 - correspondence between encoded evidence and external truth;
-- model learning or generalization from generated records;
+- model learning, causal transfer, or generalization from generated records;
 - production safety.
 
 These remain release boundaries rather than inferred capabilities.
@@ -305,15 +339,20 @@ These remain release boundaries rather than inferred capabilities.
 3. Prove the committed M-03/M-15 governed vertical slice.
 4. Implement event-triggered release and promotion.
 5. Build the performance benchmark harness and freeze reference pilot SLOs.
-6. Resume joint coverage planning, state/event construction, structural assurance, and episode compilation.
-7. Run the empirical model pilot before authorizing release-scale generation.
-8. After the governed CSD vertical slice, extract the domain-neutral microkernel boundary and make CSD the first domain pack.
-9. Implement the minimal domain-definition compiler and Reasoning ABI before broad multi-domain expansion.
-10. Add governed open-ended exploration only with explicit epistemic typing and promotion boundaries.
+6. Resume joint coverage planning, state/event construction, and structural assurance.
+7. Implement the Distributional Assurance contract, causal contrasts, failure ecology, process provenance, and release-report vertical slice over M-03/M-15.
+8. Extend Verified Cognition Episodes and compilers with epistemic, interaction, and distributional views.
+9. Run controlled corpus ablations and the empirical model pilot before authorizing release-scale generation.
+10. Freeze scale policies only from semantic, structural, distributional, transfer, and economic evidence.
+11. After the governed CSD vertical slice, extract the domain-neutral microkernel boundary and make CSD the first domain pack.
+12. Implement the minimal domain-definition compiler and Reasoning ABI before broad multi-domain expansion.
+13. Add governed open-ended exploration only with explicit epistemic typing, promotion boundaries, and distribution-gap governance.
 
 ## Claim boundary
 
 Passing tests establishes correctness relative to the implemented CSD semantics, frozen
-contracts, and test coverage. It does not establish dependency completeness, external truth,
-general reasoning transfer, scheduler fairness, production safety, or completion of the broader
-platform architecture.
+contracts, and test coverage. Proposed architecture documents define intended boundaries but do
+not establish implementation. The repository does not yet establish dependency completeness,
+external truth, structural or distributional completeness, generating-process independence,
+causal transfer, model generalization, scheduler fairness, production safety, or completion of
+the broader platform architecture.
