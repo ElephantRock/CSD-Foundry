@@ -415,6 +415,13 @@ class PolicyStoreError(RuntimeError):
     * ``ASSUMPTION_POLICY_STORE_REPLACE_FAILED`` -- the atomic ``os.replace``
       itself failed. This is a pre-commit failure: the old authoritative
       ledger is intact (the temp file is removed).
+    * ``ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED`` -- a managed orphan
+      temporary file (``.policy-ledger.<32-hex>.tmp``) could not be removed
+      during the open/create/publish orphan sweep. The authoritative ledger is
+      untouched; the operator must reconcile the unremovable orphan.
+    * ``ASSUMPTION_POLICY_STORE_DURABILITY_FAILED`` -- at least one managed
+      orphan was removed but the store-root directory fsync failed
+      afterwards (POSIX only). The authoritative ledger is untouched.
     * ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` -- a failure occurred
       after ``os.replace``; the publication may or may not have landed.
 
@@ -1108,13 +1115,19 @@ class FilesystemAssumptionPolicyPublisher:
     def _cleanup_orphans(self) -> None:
         """Remove any managed temporary files left by a previous crash.
 
-        Only files matching the *exact* managed pattern
+        Only regular files matching the *exact* managed pattern
         ``.policy-ledger.<32-lowercase-hex>.tmp`` are removed, so unrelated
         files in the store root are never touched. Directories and symlinks
-        are never removed: a directory (even one matching the name pattern) is
-        skipped, and a symlink is never followed. On POSIX the store directory
-        is fsynced after a successful deletion so the orphan removal is
-        durable.
+        are never removed (and a symlink is never followed): anything matching
+        the name pattern but not a regular file is left for the operator.
+
+        Cleanup failures are NOT suppressed: a managed orphan that cannot be
+        unlinked surfaces ``ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED`` so the
+        operator learns the store root is not in a clean state, and a directory
+        fsync failure after at least one removal surfaces
+        ``ASSUMPTION_POLICY_STORE_DURABILITY_FAILED``. Neither failure touches
+        the authoritative ledger bytes, so the store state is unchanged on
+        either failure and a subsequent read reconstructs the same ledger.
         """
 
         if not self.root.exists() or not self.root.is_dir():
@@ -1123,6 +1136,7 @@ class FilesystemAssumptionPolicyPublisher:
         for candidate in self.root.iterdir():
             name = candidate.name
             if not _TEMP_NAME_PATTERN.match(name):
+                # Foreign file or non-matching name: leave untouched.
                 continue
             # Never follow symlinks and never remove directories. A managed
             # temp is always a regular file; anything else matching the name
@@ -1134,14 +1148,24 @@ class FilesystemAssumptionPolicyPublisher:
                 continue
             try:
                 candidate.unlink()
-            except OSError:
-                # An orphan that cannot be removed is best-effort: it does not
-                # corrupt the authoritative ledger. Leave it for the operator.
-                continue
+            except OSError as exc:
+                # A managed orphan that cannot be removed is a real store
+                # condition the operator must learn about (the store root may
+                # be read-only, or the filesystem may be degraded). The
+                # authoritative ledger is untouched; raise the stable code so a
+                # caller can switch on the outcome without parsing the message.
+                raise PolicyStoreError("ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED", name) from exc
             removed_any = True
         if removed_any:
-            with suppress(OSError):
+            try:
                 fsync_directory(self.root)
+            except OSError as exc:
+                # The removals landed but their directory entry deletions could
+                # not be durably flushed. The authoritative ledger is
+                # untouched; surface the durability boundary failure so the
+                # operator can reconcile. (No-op on Windows, so this branch is
+                # POSIX-only.)
+                raise PolicyStoreError("ASSUMPTION_POLICY_STORE_DURABILITY_FAILED") from exc
 
     def create(self) -> None:
         """Initialize an empty authoritative ledger, exactly once.
@@ -1175,21 +1199,19 @@ class FilesystemAssumptionPolicyPublisher:
             try:
                 self._checkpoint(_CHECKPOINT_BEFORE_REPLACE)
                 os.replace(temp, self.ledger_path)
-            except OSError as exc:
+            except Exception as exc:
+                # Pre-commit failure normalization (mirrors _commit): the
+                # canonical empty ledger did not land, the temp is owned by
+                # this publisher, and the stable code is REPLACE_FAILED.
                 self._cleanup_own_temp(temp)
                 raise PolicyStoreError("ASSUMPTION_POLICY_STORE_REPLACE_FAILED") from exc
-            except Exception:
-                self._cleanup_own_temp(temp)
-                raise
             # Commit point passed: the empty ledger may now be authoritative.
             # Any failure here is outcome-uncertain.
             try:
                 self._checkpoint(_CHECKPOINT_AFTER_REPLACE)
                 self._checkpoint(_CHECKPOINT_BEFORE_DIRECTORY_FSYNC)
                 fsync_directory(self.root)
-                self._checkpoint(_CHECKPOINT_BEFORE_POST_WRITE_READ)
-                self._checkpoint(_CHECKPOINT_DURING_POST_WRITE_READ)
-                stored_bytes = self._read_ledger_bytes()
+                stored_bytes = self._read_authoritative_after_commit()
                 self._verify_create_post_write(intended_bytes, stored_bytes)
             except PolicyStoreError as exc:
                 if exc.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN":
@@ -1322,6 +1344,31 @@ class FilesystemAssumptionPolicyPublisher:
         except OSError as exc:
             raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID") from exc
 
+    def _read_authoritative_after_commit(self) -> bytes:
+        """Reread the authoritative bytes after the commit point.
+
+        This is the post-commit half of the publication sequence. It splits the
+        read into two independently injectable checkpoints so a test can prove
+        the OUTCOME_UNCERTAIN classification regardless of whether the failure
+        occurs *before* the read (e.g. a fault-hook exception, or the
+        authoritative file being made unreadable between the replace and the
+        read) or *during* the read itself (e.g. an injected OSError from
+        ``read_bytes``, or bytes that vanish mid-read).
+
+        Any failure here is post-commit: ``os.replace`` already landed, so the
+        publication may be authoritative. Every failure -- fault-hook
+        exception, OSError from ``read_bytes``, or a vanished file -- is
+        normalized to ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` and
+        no rollback is attempted.
+        """
+
+        self._checkpoint(_CHECKPOINT_BEFORE_POST_WRITE_READ)
+        try:
+            self._checkpoint(_CHECKPOINT_DURING_POST_WRITE_READ)
+            return self.ledger_path.read_bytes()
+        except Exception as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN") from exc
+
     def _new_temp_path(self) -> Path:
         """Return a fresh managed temp path (not yet created)."""
 
@@ -1376,15 +1423,16 @@ class FilesystemAssumptionPolicyPublisher:
                 handle.flush()
                 os.fsync(handle.fileno())
             self._checkpoint(_CHECKPOINT_AFTER_TEMP_FLUSH)
-        except OSError as exc:
+        except Exception as exc:
+            # Any pre-replace failure -- an OSError from the underlying file
+            # APIs, a fault-hook RuntimeError injected at one of the pre-replace
+            # checkpoints, or the explicit WRITE_FAILED raised when the temp
+            # path shape is a directory/symlink -- is normalized to the single
+            # stable pre-commit code. The old authoritative ledger is intact in
+            # every case (no os.replace has run), so the temp is cleaned up and
+            # the caller can switch on the code without parsing the exception.
             self._cleanup_own_temp(temp)
             raise PolicyStoreError("ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED") from exc
-        except PolicyStoreError:
-            self._cleanup_own_temp(temp)
-            raise
-        except Exception:
-            self._cleanup_own_temp(temp)
-            raise
         return temp
 
     def _reconstruct(self) -> AssumptionPolicyLedgerV3:
@@ -1420,9 +1468,14 @@ class FilesystemAssumptionPolicyPublisher:
             raise AssumptionPolicyPublicationConflict(
                 "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
             )
-        self._validate_root()
+        # publish() must NEVER create the store root, the publication lock, or
+        # the authoritative ledger. Only create() may bring a store into
+        # existence: a publish against a missing root is a missing-store error,
+        # not an implicit initialization. ``_require_existing_root`` raises
+        # ROOT_MISSING (root absent) or ROOT_NOT_DIRECTORY (root exists but is
+        # not a usable directory) and performs no I/O of its own.
+        self._require_existing_root()
         with self._locked():
-            self._ensure_root()
             self._cleanup_orphans()
             ledger = self._reconstruct()
             updated, result = compare_and_append_policy_entry_v3(
@@ -1466,12 +1519,14 @@ class FilesystemAssumptionPolicyPublisher:
         try:
             self._checkpoint(_CHECKPOINT_BEFORE_REPLACE)
             os.replace(temp, self.ledger_path)
-        except OSError as exc:
+        except Exception as exc:
+            # The os.replace itself, or a fault-hook exception raised at the
+            # BEFORE_REPLACE checkpoint, is normalized to the single stable
+            # pre-commit REPLACE_FAILED code. The temp is still owned by this
+            # publisher (the replace did not land) so it is removed, and the
+            # old authoritative ledger is byte-for-byte intact.
             self._cleanup_own_temp(temp)
             raise PolicyStoreError("ASSUMPTION_POLICY_STORE_REPLACE_FAILED") from exc
-        except Exception:
-            self._cleanup_own_temp(temp)
-            raise
         # --- commit point crossed: os.replace returned ---
         # Everything from here on runs after os.replace: the publication may
         # have landed, so any failure (including a fault-hook exception or a
@@ -1482,9 +1537,7 @@ class FilesystemAssumptionPolicyPublisher:
             self._checkpoint(_CHECKPOINT_AFTER_REPLACE)
             self._checkpoint(_CHECKPOINT_BEFORE_DIRECTORY_FSYNC)
             fsync_directory(self.root)
-            self._checkpoint(_CHECKPOINT_BEFORE_POST_WRITE_READ)
-            stored_bytes = self._read_ledger_bytes()
-            self._checkpoint(_CHECKPOINT_DURING_POST_WRITE_READ)
+            stored_bytes = self._read_authoritative_after_commit()
             verified = parse_ledger_v3(stored_bytes)
             self._verify_post_write(
                 old_ledger=old_ledger,

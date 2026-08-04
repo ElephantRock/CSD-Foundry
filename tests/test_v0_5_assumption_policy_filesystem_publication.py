@@ -425,6 +425,40 @@ def test_publish_requires_create_first(tmp_path: Path) -> None:
     assert f.value.code == "ASSUMPTION_POLICY_STORED_BYTES_MISSING"
 
 
+def test_publish_against_missing_root_does_not_create_store(tmp_path: Path) -> None:
+    """Correction 2: publish() must never create the store root, the
+    publication lock, or the authoritative ledger. A publish against a missing
+    root surfaces ROOT_MISSING and leaves the filesystem untouched."""
+
+    missing = tmp_path / "does-not-exist"
+    pub = FilesystemAssumptionPolicyPublisher(missing)
+    prepared = _prepared_activation()
+    with pytest.raises(PolicyStoreError) as f:
+        pub.publish(prepared=prepared, expected_state=ExpectedPolicyLedgerStateV3.empty())
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_ROOT_MISSING"
+    # The root directory, the lock file, and the ledger must NOT have been
+    # created: publish() never initializes a store.
+    assert not missing.exists()
+    assert not (missing / "publication.lock").exists()
+    assert not (missing / "ledger.json").exists()
+
+
+def test_publish_against_existing_root_no_ledger(tmp_path: Path) -> None:
+    """Correction 2: publish() against an existing root directory that holds no
+    authoritative ledger surfaces BYTES_MISSING (the store root exists but is
+    empty), and creates neither the lock file nor the ledger."""
+
+    root = tmp_path / "store"
+    root.mkdir()
+    pub = FilesystemAssumptionPolicyPublisher(root)
+    prepared = _prepared_activation()
+    with pytest.raises(PolicyStoreError) as f:
+        pub.publish(prepared=prepared, expected_state=ExpectedPolicyLedgerStateV3.empty())
+    assert f.value.code == "ASSUMPTION_POLICY_STORED_BYTES_MISSING"
+    # The ledger must not have been created by publish().
+    assert not (root / "ledger.json").exists()
+
+
 def test_create_lock_file_owned_by_advisory_lock(tmp_path: Path) -> None:
     """The lock file is created by advisory_lock itself, not by the publisher."""
 
@@ -1248,11 +1282,33 @@ _POST_REPLACE_CHECKPOINTS = [
 def test_pre_replace_fault_leaves_old_ledger_intact(tmp_path: Path, checkpoint: str) -> None:
     """A fault at any pre-replace checkpoint leaves the old ledger intact.
 
-    The publication returns no result (the injected RuntimeError propagates),
-    the old authoritative ledger is byte-for-byte unchanged, no managed temp
-    file is left behind, and a fresh publisher can reconstruct the old complete
-    ledger and retry the publication successfully.
+    The publication returns no result, the old authoritative ledger is
+    byte-for-byte unchanged, no managed temp file is left behind, and a fresh
+    publisher can reconstruct the old complete ledger and retry the
+    publication successfully.
+
+    Correction 1: every pre-replace fault is normalized to a stable code --
+    BEFORE_TEMP_CREATE, AFTER_PARTIAL_TEMP_WRITE, AFTER_TEMP_FLUSH collapse to
+    ``ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED``, and BEFORE_REPLACE
+    collapses to ``ASSUMPTION_POLICY_STORE_REPLACE_FAILED``. No injected
+    exception type or message may escape.
     """
+
+    # Different injected exception types per checkpoint prove the stable code is
+    # invariant to the backend exception shape (RuntimeError, ValueError,
+    # OSError).
+    _EXC_FOR = {
+        "BEFORE_TEMP_CREATE": RuntimeError,
+        "AFTER_PARTIAL_TEMP_WRITE": ValueError,
+        "AFTER_TEMP_FLUSH": OSError,
+        "BEFORE_REPLACE": RuntimeError,
+    }
+    expected_code = (
+        "ASSUMPTION_POLICY_STORE_REPLACE_FAILED"
+        if checkpoint == "BEFORE_REPLACE"
+        else "ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED"
+    )
+    exc_type = _EXC_FOR[checkpoint]
 
     pub = FilesystemAssumptionPolicyPublisher(tmp_path)
     pub.create()
@@ -1265,16 +1321,20 @@ def test_pre_replace_fault_leaves_old_ledger_intact(tmp_path: Path, checkpoint: 
 
     def fault(name: str) -> None:
         if name == checkpoint:
-            raise RuntimeError(f"injected {checkpoint} fault")
+            raise exc_type(f"injected {checkpoint} fault")
 
     with (
         FilesystemAssumptionPolicyPublisher.with_fault_injection(fault),
-        pytest.raises(RuntimeError, match=f"injected {checkpoint} fault"),
+        pytest.raises(PolicyStoreError) as f,
     ):
         pub.publish(
             prepared=PreparedPolicyActivation.build(second),
             expected_state=state_after_first,
         )
+    # Stable, normalized code -- never the raw exception type or message.
+    assert f.value.code == expected_code
+    assert "injected" not in (f.value.detail or "")
+    assert "fault" not in str(f.value)
 
     # Old ledger is byte-for-byte intact; no managed temp files left behind.
     assert (tmp_path / "ledger.json").read_bytes() == bytes_before
@@ -1343,6 +1403,166 @@ def test_post_replace_fault_reports_uncertain_and_landed(tmp_path: Path, checkpo
         expected_state=new_state,
     )
     assert retry.append_result == "IDEMPOTENT_APPEND"
+
+
+# ===========================================================================
+# 5. Authoritative-read failure variants (Correction 5)
+# ===========================================================================
+#
+# The post-commit read is split into two independently injectable checkpoints
+# (BEFORE_POST_WRITE_READ and DURING_POST_WRITE_READ) and any read failure is
+# normalized to OUTCOME_UNCERTAIN. Each variant below proves a distinct
+# failure mode: a fault-hook exception before the read, a fault-hook exception
+# during the read, a genuine OSError from read_bytes, and truncated bytes.
+# After every variant the publication landed (os.replace succeeded), so a
+# reopen reconstructs the new ledger and an exact retry yields
+# IDEMPOTENT_APPEND.
+
+
+def _seed_first_entry_for_post_read(tmp_path: Path) -> tuple:
+    """Create a store with one entry and return (pub, first, state_after_first)."""
+
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub.create()
+    first = _prepared_activation(seq=10)
+    pub.publish(prepared=first, expected_state=pub.read_state())
+    return pub, first, pub.read_state()
+
+
+def _assert_post_read_failure_landed_and_idempotent(
+    tmp_path: Path, second, state_after_first: ExpectedPolicyLedgerStateV3
+) -> None:
+    """After the uncertain failure, reopen reconstructs the NEW ledger and an
+    exact retry yields IDEMPOTENT_APPEND."""
+
+    pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub2.open()
+    new_state = pub2.read_state()
+    assert new_state.head_entry_digest == second.ledger_entry_digest
+    retry = pub2.publish(
+        prepared=PreparedPolicyActivation.build(second),
+        expected_state=new_state,
+    )
+    assert retry.append_result == "IDEMPOTENT_APPEND"
+
+
+def test_before_read_injected_failure_is_uncertain(tmp_path: Path) -> None:
+    """A fault-hook RuntimeError at BEFORE_POST_WRITE_READ (before the read
+    even begins) surfaces OUTCOME_UNCERTAIN; the publication landed."""
+
+    pub, first, state_after_first = _seed_first_entry_for_post_read(tmp_path)
+    second = _successor_entry(first.ledger_entry, seq=20)
+
+    def fault(name: str) -> None:
+        if name == "BEFORE_POST_WRITE_READ":
+            raise RuntimeError("injected before-read fault")
+
+    with FilesystemAssumptionPolicyPublisher.with_fault_injection(fault):
+        with pytest.raises(PolicyStoreError) as f:
+            pub.publish(
+                prepared=PreparedPolicyActivation.build(second),
+                expected_state=state_after_first,
+            )
+        assert f.value.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+        assert "injected" not in (f.value.detail or "")
+    _assert_post_read_failure_landed_and_idempotent(tmp_path, second, state_after_first)
+
+
+def test_during_read_injected_failure_is_uncertain(tmp_path: Path) -> None:
+    """A fault-hook RuntimeError at DURING_POST_WRITE_READ (after the read
+    decision but before read_bytes returns) surfaces OUTCOME_UNCERTAIN; the
+    publication landed."""
+
+    pub, first, state_after_first = _seed_first_entry_for_post_read(tmp_path)
+    second = _successor_entry(first.ledger_entry, seq=20)
+
+    def fault(name: str) -> None:
+        if name == "DURING_POST_WRITE_READ":
+            raise RuntimeError("injected during-read fault")
+
+    with FilesystemAssumptionPolicyPublisher.with_fault_injection(fault):
+        with pytest.raises(PolicyStoreError) as f:
+            pub.publish(
+                prepared=PreparedPolicyActivation.build(second),
+                expected_state=state_after_first,
+            )
+        assert f.value.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+        assert "injected" not in (f.value.detail or "")
+    _assert_post_read_failure_landed_and_idempotent(tmp_path, second, state_after_first)
+
+
+def test_read_oserror_is_uncertain(tmp_path: Path) -> None:
+    """A genuine OSError raised by read_bytes during the post-commit read
+    surfaces OUTCOME_UNCERTAIN (not BYTES_INVALID, which is the pre-commit
+    read code); the publication landed."""
+
+    import unittest.mock as mock
+
+    pub, first, state_after_first = _seed_first_entry_for_post_read(tmp_path)
+    second = _successor_entry(first.ledger_entry, seq=20)
+    ledger_path = tmp_path / "ledger.json"
+
+    real_read_bytes = Path.read_bytes
+    call_count = {"n": 0}
+
+    def flaky_read(self, *args, **kwargs):
+        # Only the post-commit read (the second read of the ledger path after
+        # the first entry was committed) is forced to fail. Earlier reads
+        # (reconstruction before the publish) must succeed.
+        if self == ledger_path:
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise OSError("injected read failure")
+        return real_read_bytes(self, *args, **kwargs)
+
+    with mock.patch.object(Path, "read_bytes", flaky_read):
+        with pytest.raises(PolicyStoreError) as f:
+            pub.publish(
+                prepared=PreparedPolicyActivation.build(second),
+                expected_state=state_after_first,
+            )
+        assert f.value.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+        assert "injected" not in (f.value.detail or "")
+    _assert_post_read_failure_landed_and_idempotent(tmp_path, second, state_after_first)
+
+
+def test_read_truncated_bytes_is_uncertain(tmp_path: Path) -> None:
+    """If the post-commit read observes truncated bytes, verification cannot
+    confirm the intended ledger, so the outcome is OUTCOME_UNCERTAIN. The
+    publication landed (the on-disk file is whole), so a reopen reconstructs
+    the new ledger and an exact retry is idempotent."""
+
+    import unittest.mock as mock
+
+    pub, first, state_after_first = _seed_first_entry_for_post_read(tmp_path)
+    second = _successor_entry(first.ledger_entry, seq=20)
+    ledger_path = tmp_path / "ledger.json"
+
+    real_read_bytes = Path.read_bytes
+    call_count = {"n": 0}
+
+    def truncated_post_read(self, *args, **kwargs):
+        # Only the post-commit read (the second read of the ledger path after
+        # the first entry was committed) returns a truncated view; the on-disk
+        # file is untouched (the truncation models a transient read-time
+        # artifact, not a partial write).
+        if self == ledger_path:
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                whole = real_read_bytes(self, *args, **kwargs)
+                return whole[: len(whole) // 2]
+        return real_read_bytes(self, *args, **kwargs)
+
+    with mock.patch.object(Path, "read_bytes", truncated_post_read):
+        with pytest.raises(PolicyStoreError) as f:
+            pub.publish(
+                prepared=PreparedPolicyActivation.build(second),
+                expected_state=state_after_first,
+            )
+        assert f.value.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+    # The on-disk file was never actually truncated, so a clean reopen
+    # reconstructs the new ledger and an exact retry is idempotent.
+    _assert_post_read_failure_landed_and_idempotent(tmp_path, second, state_after_first)
 
 
 def test_all_eight_checkpoints_are_distinct_and_ordered() -> None:
@@ -1486,7 +1706,23 @@ def _mp_publish_worker(
         return
     try:
         result = pub.publish(prepared=prepared, expected_state=expected_state)
-        result_queue.put(("OK", worker_id, result.append_result))
+        # Correction 4: return the complete controlled-process outcome so the
+        # parent can assert that the on-disk head/root/receipt match the
+        # winning worker's reported result. Tuple shape:
+        #   ("OK", worker_id, append_result, ledger_entry_digest,
+        #    predecessor_ledger_root, resulting_ledger_root,
+        #    policy_commit_receipt_digest)
+        result_queue.put(
+            (
+                "OK",
+                worker_id,
+                result.append_result,
+                result.ledger_entry_digest,
+                result.predecessor_ledger_root,
+                result.resulting_ledger_root,
+                result.policy_commit_receipt_digest,
+            )
+        )
     except PolicyStoreError as exc:
         result_queue.put(("STORE_ERROR", worker_id, exc.code))
     except Exception as exc:  # noqa: BLE001
@@ -1560,7 +1796,14 @@ def test_multiprocess_distinct_candidates_one_wins(tmp_path: Path) -> None:
     conflicts = [o for o in outcomes if o[0] in ("STORE_ERROR", "CONFLICT")]
     assert len(oks) == 1, f"expected exactly one COMMIT, got: {outcomes}"
     assert len(conflicts) == 1, f"expected exactly one conflict, got: {outcomes}"
-    assert oks[0][2] == "COMMITTED"
+    # Correction 4: the winning result tuple carries the complete controlled
+    # outcome so the parent can prove the on-disk ledger is bound to it.
+    ok = oks[0]
+    assert ok[2] == "COMMITTED"
+    committed_result_digest = ok[3]
+    committed_predecessor_root = ok[4]
+    committed_resulting_root = ok[5]
+    committed_receipt = ok[6]
     # The loser must observe a PublicationConflict whose code is the
     # STATE_MISMATCH family (distinct genesis candidates lose with
     # LEDGER_STATE_MISMATCH).
@@ -1568,25 +1811,38 @@ def test_multiprocess_distinct_candidates_one_wins(tmp_path: Path) -> None:
     assert loser_code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH", (
         f"expected STATE_MISMATCH, got {loser_code}"
     )
-    # Exactly one entry is durably present in the final ledger; the winner's
-    # head and root are authoritative; the loser's entry is absent.
-    winner_digest = oks[0][1]
+    # The committed result's reported entry digest identifies the winner.
     winner_entry_digest = (
         pa.ledger_entry.ledger_entry_digest
-        if winner_digest == "A"
+        if committed_result_digest == pa.ledger_entry.ledger_entry_digest
         else pb.ledger_entry.ledger_entry_digest
     )
     loser_entry_digest = (
         pb.ledger_entry.ledger_entry_digest
-        if winner_digest == "A"
+        if committed_result_digest == pa.ledger_entry.ledger_entry_digest
         else pa.ledger_entry.ledger_entry_digest
+    )
+    assert committed_result_digest == winner_entry_digest
+    # The committed predecessor root is the empty-ledger root (genesis entry).
+    empty_root = ExpectedPolicyLedgerStateV3.empty().ledger_root_digest
+    assert committed_predecessor_root == empty_root
+    # The committed receipt equals the winning head's commit-receipt digest.
+    assert committed_receipt == (
+        pa.ledger_entry.policy_commit.commit_receipt_digest
+        if winner_entry_digest == pa.ledger_entry.ledger_entry_digest
+        else pb.ledger_entry.policy_commit.commit_receipt_digest
     )
     final = FilesystemAssumptionPolicyPublisher(tmp_path)
     final.open()
     final_ledger = final.read_ledger()
     assert len(final_ledger.entries) == 1
-    assert final_ledger.entries[0].ledger_entry_digest == winner_entry_digest
-    assert final_ledger.entries[0].ledger_entry_digest != loser_entry_digest
+    # The final on-disk head equals the committed result's entry digest; the
+    # final on-disk root equals the committed result's resulting root.
+    final_head = final_ledger.entries[0]
+    assert final_head.ledger_entry_digest == committed_result_digest
+    assert final_ledger.ledger_root_digest == committed_resulting_root
+    assert final_head.ledger_entry_digest == winner_entry_digest
+    assert final_head.ledger_entry_digest != loser_entry_digest
     final_root = final_ledger.ledger_root_digest
     # Reopening from a third publisher reconstructs the same root.
     final3 = FilesystemAssumptionPolicyPublisher(tmp_path)
@@ -1640,15 +1896,34 @@ def test_multiprocess_exact_retry_both_succeed(tmp_path: Path) -> None:
     assert len(outcomes) == 2, f"missing outcomes: {outcomes}"
     # Exactly one COMMITTED and one IDEMPOTENT_APPEND; no hard failures.
     assert all(o[0] == "OK" for o in outcomes), outcomes
-    results = sorted(o[2] for o in outcomes if o[0] == "OK")
-    assert results == ["COMMITTED", "IDEMPOTENT_APPEND"], outcomes
-    # Exactly one entry with the shared digest; the reopened root matches.
+    ok_results = [o for o in outcomes if o[0] == "OK"]
+    append_results = sorted(o[2] for o in ok_results)
+    assert append_results == ["COMMITTED", "IDEMPOTENT_APPEND"], outcomes
+    # Correction 4: the COMMITTED and IDEMPOTENT_APPEND results carry identical
+    # entry digest, resulting root, and receipt (the idempotent re-observation
+    # of the same landed entry). The predecessor root legitimately differs:
+    # the COMMITTED observer saw the empty ledger as predecessor, while the
+    # IDEMPOTENT_APPEND observer re-read the now-populated ledger, so its
+    # predecessor root is the populated ledger's root. Tuple positions:
+    # 3=entry_digest, 5=resulting_root, 6=receipt.
+    committed = next(o for o in ok_results if o[2] == "COMMITTED")
+    idempotent = next(o for o in ok_results if o[2] == "IDEMPOTENT_APPEND")
+    assert committed[3] == idempotent[3], "entry digest must match"
+    assert committed[5] == idempotent[5], "resulting root must match"
+    assert committed[6] == idempotent[6], "receipt must match"
+    # The shared digest equals the prepared entry's digest, and the resulting
+    # root matches the reopened ledger's root.
+    shared_digest = committed[3]
+    shared_root = committed[5]
+    assert shared_digest == pa.ledger_entry.ledger_entry_digest
     final = FilesystemAssumptionPolicyPublisher(tmp_path)
     final.open()
     final_ledger = final.read_ledger()
     assert len(final_ledger.entries) == 1
     assert final_ledger.entries[0].ledger_entry_digest == pa.ledger_entry.ledger_entry_digest
+    assert final_ledger.entries[0].ledger_entry_digest == shared_digest
     final_root = final_ledger.ledger_root_digest
+    assert final_root == shared_root
     final3 = FilesystemAssumptionPolicyPublisher(tmp_path)
     final3.open()
     assert final3.read_ledger().ledger_root_digest == final_root
@@ -2113,6 +2388,114 @@ def test_create_rereads_and_verifies_empty_ledger(tmp_path: Path) -> None:
 
 
 # ===========================================================================
+# 6. create()-path checkpoint normalization (Correction 6)
+# ===========================================================================
+#
+# Run the pre/post classification through create(): a pre-replace create
+# failure surfaces the stable pre-commit code and leaves no ledger.json; a
+# post-replace create failure surfaces OUTCOME_UNCERTAIN, the canonical empty
+# ledger may be present, open() reconstructs it, and a later create() returns
+# ALREADY_INITIALIZED. No injected exception type or message may escape.
+
+
+_CREATE_PRE_REPLACE_CHECKPOINTS = [
+    "BEFORE_TEMP_CREATE",
+    "AFTER_PARTIAL_TEMP_WRITE",
+    "AFTER_TEMP_FLUSH",
+    "BEFORE_REPLACE",
+]
+_CREATE_POST_REPLACE_CHECKPOINTS = [
+    "AFTER_REPLACE",
+    "BEFORE_DIRECTORY_FSYNC",
+    "BEFORE_POST_WRITE_READ",
+    "DURING_POST_WRITE_READ",
+]
+
+
+@pytest.mark.parametrize("checkpoint", _CREATE_PRE_REPLACE_CHECKPOINTS)
+def test_create_pre_replace_failure_is_normalized(tmp_path: Path, checkpoint: str) -> None:
+    """A fault at any pre-replace checkpoint during create() surfaces the
+    stable pre-commit code (WRITE_FAILED for the temp-write checkpoints,
+    REPLACE_FAILED for BEFORE_REPLACE), leaves no ledger.json behind, and a
+    later create() initializes the store cleanly."""
+
+    expected_code = (
+        "ASSUMPTION_POLICY_STORE_REPLACE_FAILED"
+        if checkpoint == "BEFORE_REPLACE"
+        else "ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED"
+    )
+
+    def fault(name: str) -> None:
+        if name == checkpoint:
+            raise RuntimeError(f"injected {checkpoint} create fault")
+
+    with (
+        FilesystemAssumptionPolicyPublisher.with_fault_injection(fault),
+        pytest.raises(PolicyStoreError) as f,
+    ):
+        FilesystemAssumptionPolicyPublisher(tmp_path).create()
+    assert f.value.code == expected_code
+    assert "injected" not in (f.value.detail or "")
+    assert "fault" not in str(f.value)
+    # No authoritative ledger was created: the pre-replace failure left the
+    # store as it was (root may exist but ledger.json must not).
+    assert not (tmp_path / "ledger.json").exists()
+    # No managed temp files left behind by the failed create().
+    leftovers = [
+        p.name
+        for p in tmp_path.iterdir()
+        if p.name.startswith(".policy-ledger.") and p.name.endswith(".tmp")
+    ]
+    assert leftovers == []
+    # A later create() initializes the store cleanly.
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub.create()
+    assert pub.read_state() == ExpectedPolicyLedgerStateV3.empty()
+
+
+@pytest.mark.parametrize("checkpoint", _CREATE_POST_REPLACE_CHECKPOINTS)
+def test_create_post_replace_failure_is_outcome_uncertain(tmp_path: Path, checkpoint: str) -> None:
+    """A fault at any post-replace checkpoint during create() surfaces
+    OUTCOME_UNCERTAIN, the canonical empty ledger may now be present, open()
+    reconstructs it, and a later create() returns ALREADY_INITIALIZED. No
+    injected exception type or message escapes."""
+
+    def fault(name: str) -> None:
+        if name == checkpoint:
+            raise RuntimeError(f"injected {checkpoint} create fault")
+
+    with (
+        FilesystemAssumptionPolicyPublisher.with_fault_injection(fault),
+        pytest.raises(PolicyStoreError) as f,
+    ):
+        FilesystemAssumptionPolicyPublisher(tmp_path).create()
+    assert f.value.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+    assert "injected" not in (f.value.detail or "")
+    assert "fault" not in str(f.value)
+    # The canonical empty ledger may or may not be present. Either way, open()
+    # reconstructs a valid empty store (create() wrote canonical bytes via
+    # os.replace before the fault, OR the fault preceded the replace -- both
+    # must leave the store reconstructable to the empty state).
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    try:
+        pub.open()
+        reconstructed_state = pub.read_state()
+    except PolicyStoreError as open_exc:
+        # If the empty ledger did not land, open() surfaces BYTES_MISSING; in
+        # that case a fresh create() must initialize cleanly.
+        assert open_exc.code == "ASSUMPTION_POLICY_STORED_BYTES_MISSING"
+        pub.create()
+        reconstructed_state = pub.read_state()
+    assert reconstructed_state == ExpectedPolicyLedgerStateV3.empty()
+    # A later create() must observe the now-valid empty ledger and refuse with
+    # ALREADY_INITIALIZED (never clobber).
+    pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    with pytest.raises(PolicyStoreError) as f2:
+        pub2.create()
+    assert f2.value.code == "ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED"
+
+
+# ===========================================================================
 # 4. Delayed lifecycle race: a later create/open cannot reset to empty
 # ===========================================================================
 
@@ -2418,6 +2801,175 @@ def test_orphan_cleanup_requires_exact_32_hex_pattern(tmp_path: Path) -> None:
     pub2.open()
     for name in keepers:
         assert (tmp_path / name).read_bytes() == b"keep", name
+
+
+# ===========================================================================
+# 3b. Orphan cleanup failures are not suppressed (Correction 3)
+# ===========================================================================
+#
+# A managed orphan (``.policy-ledger.<32-hex>.tmp``) that cannot be unlinked
+# surfaces ``ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED``; a directory fsync
+# failure after at least one removal surfaces
+# ``ASSUMPTION_POLICY_STORE_DURABILITY_FAILED``. In every case the
+# authoritative ledger bytes are unchanged and foreign files / directories /
+# symlinks are left untouched.
+
+
+_ORPHAN_NAME = ".policy-ledger.deadbeefdeadbeefdeadbeefdeadbeef.tmp"
+
+
+def _seed_store_with_entry_and_state(
+    tmp_path: Path,
+) -> tuple[Path, bytes, ExpectedPolicyLedgerStateV3]:
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub.create()
+    pub.publish(prepared=_prepared_activation(), expected_state=pub.read_state())
+    state = pub.read_state()
+    ledger_path = tmp_path / "ledger.json"
+    return ledger_path, ledger_path.read_bytes(), state
+
+
+def test_orphan_unlink_failure_surfaces_cleanup_failed(tmp_path: Path) -> None:
+    """A managed orphan whose unlink raises OSError surfaces
+    TEMP_CLEANUP_FAILED; the authoritative ledger bytes are unchanged."""
+
+    import unittest.mock as mock
+
+    ledger_path, bytes_before, _state = _seed_store_with_entry_and_state(tmp_path)
+    orphan = tmp_path / _ORPHAN_NAME
+    orphan.write_bytes(b"garbage")
+
+    real_unlink = Path.unlink
+
+    def flaky_unlink(self, *args, **kwargs):
+        if self == orphan:
+            raise OSError("injected unlink failure")
+        return real_unlink(self, *args, **kwargs)
+
+    with mock.patch.object(Path, "unlink", flaky_unlink):
+        pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+        with pytest.raises(PolicyStoreError) as f:
+            pub2.open()
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED"
+    # The orphan is still present (unlink failed); the authoritative ledger is
+    # byte-for-byte unchanged.
+    assert orphan.exists()
+    assert ledger_path.read_bytes() == bytes_before
+
+
+def test_post_cleanup_dir_fsync_failure_surfaces_durability_failed(tmp_path: Path) -> None:
+    """When at least one orphan is removed, a subsequent directory fsync
+    failure surfaces DURABILITY_FAILED; the authoritative ledger is unchanged.
+
+    fsync_directory is a no-op on Windows, so this test exercises the POSIX
+    branch via monkeypatching (it still proves the error path is wired on both
+    platforms by injecting a raising stub)."""
+
+    import unittest.mock as mock
+
+    from csd_foundry.governance.v0_5 import assumption_policy_filesystem_publication as mod
+
+    ledger_path, bytes_before, _state = _seed_store_with_entry_and_state(tmp_path)
+    orphan = tmp_path / _ORPHAN_NAME
+    orphan.write_bytes(b"garbage")
+
+    with mock.patch.object(mod, "fsync_directory", side_effect=OSError("injected fsync")):
+        pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+        with pytest.raises(PolicyStoreError) as f:
+            pub2.open()
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_DURABILITY_FAILED"
+    # The orphan was removed; the authoritative ledger is unchanged.
+    assert not orphan.exists()
+    assert ledger_path.read_bytes() == bytes_before
+
+
+def test_post_cleanup_dir_fsync_skipped_when_nothing_removed(tmp_path: Path) -> None:
+    """If no managed orphan is removed, fsync_directory is not called, so a
+    broken stub does not affect open(). (Proves the dir-fsync failure path is
+    gated on ``removed_any``.)"""
+
+    import unittest.mock as mock
+
+    from csd_foundry.governance.v0_5 import assumption_policy_filesystem_publication as mod
+
+    ledger_path, bytes_before, _state = _seed_store_with_entry_and_state(tmp_path)
+    # No orphan present, so removed_any stays False and fsync is never called.
+
+    calls = []
+
+    def spy_fsync(path):
+        calls.append(path)
+        raise OSError("should not be called")
+
+    with mock.patch.object(mod, "fsync_directory", spy_fsync):
+        pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+        pub2.open()  # must not raise
+    assert calls == []
+    assert ledger_path.read_bytes() == bytes_before
+
+
+def test_cleanup_failure_preserves_foreign_file(tmp_path: Path) -> None:
+    """A foreign file in the store root is never touched, even when a managed
+    orphan alongside it cannot be removed (state and bytes unchanged)."""
+
+    import unittest.mock as mock
+
+    ledger_path, bytes_before, _state = _seed_store_with_entry_and_state(tmp_path)
+    orphan = tmp_path / _ORPHAN_NAME
+    orphan.write_bytes(b"garbage")
+    foreign = tmp_path / "unrelated.tmp"
+    foreign.write_bytes(b"keep-me")
+    foreign_bytes = foreign.read_bytes()
+
+    real_unlink = Path.unlink
+
+    def flaky_unlink(self, *args, **kwargs):
+        if self == orphan:
+            raise OSError("injected unlink failure")
+        return real_unlink(self, *args, **kwargs)
+
+    with mock.patch.object(Path, "unlink", flaky_unlink):
+        pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+        with pytest.raises(PolicyStoreError):
+            pub2.open()
+    # Foreign file untouched; authoritative ledger unchanged.
+    assert foreign.read_bytes() == foreign_bytes
+    assert ledger_path.read_bytes() == bytes_before
+
+
+def test_cleanup_failure_preserves_directory_matching_pattern(tmp_path: Path) -> None:
+    """A directory whose name matches the managed pattern is never removed, and
+    its presence does not trip the cleanup (it is skipped, not unlinked). The
+    authoritative ledger is unchanged."""
+
+    ledger_path, bytes_before, _state = _seed_store_with_entry_and_state(tmp_path)
+    fake_dir = tmp_path / _ORPHAN_NAME
+    fake_dir.mkdir()
+    (fake_dir / "inside").write_bytes(b"x")
+
+    pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub2.open()  # must not raise: the directory is skipped, not removed
+    assert fake_dir.is_dir()
+    assert (fake_dir / "inside").read_bytes() == b"x"
+    assert ledger_path.read_bytes() == bytes_before
+
+
+@_skip_no_symlinks
+def test_cleanup_failure_preserves_symlink_matching_pattern(tmp_path: Path) -> None:
+    """A symlink whose name matches the managed pattern is never removed or
+    followed; the target is preserved; the authoritative ledger is unchanged."""
+
+    ledger_path, bytes_before, _state = _seed_store_with_entry_and_state(tmp_path)
+    target = tmp_path / "precious"
+    target.write_bytes(b"keep")
+    link = tmp_path / _ORPHAN_NAME
+    link.symlink_to(target)
+
+    pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub2.open()  # must not raise: the symlink is skipped, not removed
+    assert link.is_symlink()
+    assert target.read_bytes() == b"keep"
+    assert ledger_path.read_bytes() == bytes_before
 
 
 # ===========================================================================
