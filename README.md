@@ -28,7 +28,7 @@ The repository currently contains:
 - deterministic `ValidatedEvent` admission and reconstruction boundaries;
 - atomic compare-and-append temporal claims, ordered projection commitments, failure-no-advance,
   crash recovery, and committed-head visibility;
-- proposed Distributional Assurance architecture and doctrine for scenario worlds, causal
+- approved Distributional Assurance architecture and doctrine for scenario worlds, causal
   contrasts, failure ecology, process provenance, optimizer exposure, and independent transfer;
 - the immutable CSD Reasoning Seed v0.1 and its original generator and validator.
 
@@ -77,8 +77,8 @@ The governing principle is:
 
 > **Open at ingestion, bounded at assertion.**
 
-See `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md` for the proposed normative strategic boundary and
-`docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` for the proposed Distributional Assurance doctrine. The
+See `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md` for the active normative strategic boundary and
+`docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` for the approved Distributional Assurance doctrine. The
 charter is normative for project direction and constitutional invariants, but not for exact
 syntax, schemas, algorithms, model choices, thresholds, quotas, or deployment topology.
 
@@ -164,7 +164,7 @@ reconciliation, topology-independent semantic commitments, and complete independ
 The v0.5 gates validate frozen contracts, canonicalization, accepted and rejected event admission,
 and atomic temporal completion in editable and installed-wheel environments.
 
-Distributional Assurance currently has proposed architecture documents only. No executable
+Distributional Assurance currently has approved architecture documents only. No executable
 scenario-world schema, distribution contract, causal contrast compiler, failure-topology catalog,
 optimizer-exposure ledger, or distributional release report is yet claimed.
 
@@ -351,7 +351,7 @@ These remain release boundaries rather than inferred capabilities.
 ## Claim boundary
 
 Passing tests establishes correctness relative to the implemented CSD semantics, frozen
-contracts, and test coverage. Proposed architecture documents define intended boundaries but do
+contracts, and test coverage. Approved architecture documents define intended boundaries but do
 not establish implementation. The repository does not yet establish dependency completeness,
 external truth, structural or distributional completeness, generating-process independence,
 causal transfer, model generalization, scheduler fairness, production safety, or completion of

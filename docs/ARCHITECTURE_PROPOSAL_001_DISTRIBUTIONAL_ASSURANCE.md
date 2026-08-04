@@ -1,8 +1,11 @@
 # Architecture Proposal 001 — Distributional Assurance
 
-**Status:** PROPOSED  
+**Status:** APPROVED  
 **Proposal:** AP-001  
 **Date:** 2026-08-04  
+**Approved:** 2026-08-04  
+**Approval PR:** #59  
+**Approval commit:** `4ccc60c06b7f97703d1d3a574475f54b5cc34dde`  
 **Issue:** #55  
 **Parent epic:** #54  
 **Affected constitutional document:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.0.md`
@@ -296,26 +299,34 @@ Rejected as the initial intervention. The project must first isolate effects fro
 
 Rejected. Multiple agents may share weights, sources, objectives, and blind spots. Independence requires provenance and evidence.
 
-## 9. Required successor documents
+## 9. Approved successor documents
 
-Upon approval, create:
+Approval of AP-001 authorized publication of:
 
-1. `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`;
-2. `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`;
-3. `docs/STRATEGIC_ROADMAP.md` v1.2;
-4. README navigation and boundary updates.
+1. `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md` through PR #60;
+2. `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` through PR #61;
+3. `docs/STRATEGIC_ROADMAP.md` v1.2 through PR #62;
+4. README navigation and boundary updates through PR #62.
 
 Future executable work shall use separately versioned schemas, policies, conformance vectors, validators, reports, and pilot evidence.
 
 ## 10. Approval record
 
-Approval requires explicit review of:
+AP-001 was approved through PR #59 on 2026-08-04.
 
-- the constitutional invariant;
-- authority separation;
-- compatibility with frozen artifacts;
-- safety and claim-boundary analysis;
-- roadmap sequencing;
-- prohibited shortcuts.
+Approval authorizes:
 
-Approval of AP-001 authorizes publication of the successor charter and subsystem doctrine. It does not authorize release-scale generation or freeze empirical thresholds.
+- Platform Charter v1.1;
+- Distributional Assurance v0.1 contract design;
+- Roadmap v1.2 integration;
+- future executable work under separately versioned contracts.
+
+Approval does not establish:
+
+- executable Distributional Assurance schemas;
+- causal contrast implementation;
+- distributional completeness;
+- generating-process independence;
+- optimizer-exposure adequacy;
+- empirical model transfer;
+- readiness for release-scale generation.

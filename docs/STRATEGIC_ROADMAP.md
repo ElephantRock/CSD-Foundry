@@ -1,8 +1,11 @@
 # CSD Foundry Strategic Roadmap
 
-**Status:** Proposed program roadmap  
+**Status:** Active program roadmap  
 **Version:** 1.2  
 **Date:** 2026-08-04  
+**Approved:** 2026-08-04  
+**Approval PR:** #62  
+**Approval commit:** `7cd16463eee6bcc4f815aaee81f9eef6b8d0d760`  
 **Governing architecture:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`  
 **Distributional doctrine:** `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`
 
@@ -19,7 +22,7 @@ The longer-term platform objective is:
 
 > A proof-carrying cognition manufacturing and governance platform that combines bounded executable semantics, external specialist oracles, empirical evidence, adjudicated processes, governed exploration, and distributionally assured cognition manufacturing while preserving an exact claim boundary for every material result.
 
-The platform charter is normative for strategic direction and constitutional boundaries. `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` defines the proposed subsystem doctrine and initial contract model. This roadmap remains normative for sequencing and release gates. Exact syntax, schemas, algorithms, model choices, thresholds, quotas, and deployment topology remain versioned implementation decisions.
+The platform charter is normative for strategic direction and constitutional boundaries. `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` defines the approved subsystem doctrine and initial contract model. This roadmap remains normative for sequencing and release gates. Exact syntax, schemas, algorithms, model choices, thresholds, quotas, and deployment topology remain versioned implementation decisions.
 
 The governing quality model is:
 
@@ -48,7 +51,7 @@ The repository has completed:
 
 The current implementation frontier is v0.5-D: substantive evidence-unit, assumption, and alternative-model registries.
 
-The repository now contains proposed architecture documents for Distributional Assurance, but it has not implemented their executable contracts or empirical gates.
+The repository now contains approved architecture documents for Distributional Assurance, but it has not implemented their executable contracts or empirical gates.
 
 The repository has not yet completed:
 

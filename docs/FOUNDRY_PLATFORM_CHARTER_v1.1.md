@@ -1,8 +1,11 @@
 # Foundry Platform Architecture Charter v1.1
 
-**Status:** Proposed normative architecture charter  
+**Status:** Active normative architecture charter  
 **Version:** 1.1  
 **Date:** 2026-08-04  
+**Approved:** 2026-08-04  
+**Approval PR:** #60  
+**Approval commit:** `46a1f25c5e87051e3b0dc7332b63e120a10cf751`  
 **Scope:** Project direction and constitutional boundaries  
 **Change authority:** `docs/ARCHITECTURE_PROPOSAL_001_DISTRIBUTIONAL_ASSURANCE.md`  
 **Implementation status:** The current CSD implementation is the first governed domain and has not yet been extracted into a domain-neutral platform. Distributional Assurance is architecturally required but not yet implemented.
@@ -628,7 +631,7 @@ A change to its normative commitments requires:
 
 Implementation details may change through ordinary specifications and pull requests without a charter revision, provided the constitutional commitments remain intact.
 
-This v1.1 change is proposed under `docs/ARCHITECTURE_PROPOSAL_001_DISTRIBUTIONAL_ASSURANCE.md`.
+This v1.1 change is approved under `docs/ARCHITECTURE_PROPOSAL_001_DISTRIBUTIONAL_ASSURANCE.md`.
 
 ## 16. Claim boundary
 
