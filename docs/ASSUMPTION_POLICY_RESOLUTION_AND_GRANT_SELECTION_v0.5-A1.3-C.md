@@ -136,15 +136,19 @@ at any time and yields byte-identical resolution.
 `select_applicable_grant_v3` re-binds the resolved policy to its exact source
 ledger entry (via `_source_entry_for_resolution`, which verifies the ledger is
 V3, the resolution is exactly `ResolvedPolicyAtSequence`, the resolution's
-`ledger_root_digest` equals the ledger's root, exactly one entry has the
+`ledger_root_digest` equals the ledger's root, the supplied resolution is
+byte-identical to the resolution recomputed against this ledger at
+`resolved_policy.event_sequence` -- the authoritative re-resolution proof that
+defeats the superseded-policy attack -- then exactly one entry has the
 resolution's `ledger_entry_digest`, and that entry matches the resolution's
 `policy_id`/`policy_digest`/`effective_from_sequence`/`signing_payload_digest`/
 `commit_receipt_digest`/`ledger_entry_digest`). It then scans THAT entry's
-digested grant set (`source_entry.policy.grants`) -- never a caller-carried
-tuple, so a substituted grant tuple cannot authorize. The single event sequence
-used for all grant-interval evaluation is `resolved_policy.event_sequence`;
-there is no independently supplied event sequence, so the sequence cannot be
-rebound to a different generation.
+digested grant set (`source_entry.policy.grants`) -- the verified source
+entry's canonical `policy.grants` tuple, never a caller-carried tuple, so a
+substituted grant tuple cannot authorize. The single event sequence used for
+all grant-interval evaluation is `resolved_policy.event_sequence`; there is no
+independently supplied event sequence, so the sequence cannot be rebound to a
+different generation.
 
 A grant is applicable if and only if ALL of the following hold:
 
@@ -201,9 +205,9 @@ effective sequence) **raise** `AssumptionPolicyActivationContractError` with a
 stable code, because they indicate a caller bug rather than an authorization
 outcome.
 
-The scan is deterministic because the resolved policy's grant tuple is canonical
-(sorted by `grant_id`), so the same request always yields the same selected
-grant or the same ambiguity.
+The scan is deterministic because the verified source entry's
+`policy.grants` tuple is canonical (sorted by `grant_id`), so the same request
+always yields the same selected grant or the same ambiguity.
 
 ## 10. Read-only lock scope
 
@@ -278,20 +282,36 @@ acquisition, performing NO writes:
 
 1. require an existing initialized root (no creation);
 2. acquire the strict publication lock;
-3. read ONE authoritative byte snapshot;
-4. reconstruct and fully revalidate the ledger from those bytes;
+3. read ONE authoritative byte snapshot (the "before" bytes);
+4. reconstruct and fully revalidate the ledger from those bytes (single parse);
 5. resolve the policy generation at `event_sequence`;
-6. verify the resolution against the SAME reconstructed ledger (re-bind the
-   source entry);
-7. select the applicable grant from that source entry's digested grants (no
-   caller-carried tuple);
-8. reread the authoritative bytes and require they are unchanged;
+6. prove the resolution is authoritative at its event sequence: recompute
+   `resolve_policy_at_v3(ledger, resolved_policy.event_sequence)` and require its
+   `canonical_bytes` be byte-identical to the supplied resolution (the
+   superseded-policy defense);
+7. select the applicable grant from the verified source entry's digested
+   `policy.grants` tuple (no caller-carried tuple) -- selection runs INSIDE the
+   lock, on the SAME parsed ledger, before the second read;
+8. reread the authoritative bytes (the "after" bytes) AFTER selection completes,
+   and compare them to the "before" bytes INSIDE the lock -- raise
+   `ASSUMPTION_POLICY_RESOLVE_AT_BYTES_MUTATED` on any divergence;
 9. release the lock;
 10. return the decision.
 
-No writes, no temp, no replace, no fsync, no orphan cleanup. The resolution and
-the grant selection share the same ledger snapshot: the decision's
-`ledger_root_digest` is the root the reader observed under the lock.
+The required ordering inside one locked region is therefore:
+
+```
+lock -> before read -> parse -> resolve -> authoritative proof ->
+  selector (lock held) -> selector completed -> after read -> compare -> lock exit
+```
+
+No writes, no temp, no replace, no fsync, no orphan cleanup, and no reparsing
+outside the lock: the grant selection operates on the single ledger object
+produced by the one reconstruction. The resolution and the grant selection share
+the same ledger snapshot, and the non-mutation comparison happens AFTER
+selection completes (still under the lock), so the decision's
+`ledger_root_digest` is the root the reader observed under the lock and the
+store is proven unchanged across the locked region that included selection.
 
 ## 14. Decision code vocabulary
 
@@ -325,9 +345,10 @@ Grant-selection errors (`select_applicable_grant_v3`, raised not returned):
 | `ASSUMPTION_GRANT_SELECTION_LEDGER_VERSION_NOT_ACTIVATABLE` | ledger is not exactly `AssumptionPolicyLedgerV3` |
 | `ASSUMPTION_GRANT_SELECTION_RESOLUTION_TYPE_INVALID`    | `resolved_policy` is not exactly `ResolvedPolicyAtSequence` (foreign object) |
 | `ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH`       | resolution's `ledger_root_digest` != ledger's root |
+| `ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE` | supplied resolution's `canonical_bytes` != the resolution recomputed against this ledger at `resolved_policy.event_sequence` (the superseded-policy defense: a caller-presented resolution binding a historical generation, even with a current root and recomputed digest, is not the authoritative resolution at this event sequence) |
 | `ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_MISSING`       | no ledger entry has the resolution's `ledger_entry_digest` |
 | `ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_AMBIGUOUS`     | two or more entries have the resolution's `ledger_entry_digest` |
-| `ASSUMPTION_GRANT_SELECTION_SOURCE_BINDING_MISMATCH`    | located entry's bindings != resolution's bindings |
+| `ASSUMPTION_GRANT_SELECTION_SOURCE_BINDING_MISMATCH`    | located entry's bindings != resolution's bindings (defense-in-depth; unreachable via a forged caller resolution once the authoritative check passes) |
 | `ASSUMPTION_GRANT_SELECTION_ACTION_INVALID`             | unknown action                         |
 | `ASSUMPTION_GRANT_SELECTION_ASSUMPTION_MATERIALITY_INVALID` | unknown assumption materiality     |
 | `ASSUMPTION_GRANT_SELECTION_CHALLENGE_MATERIALITY_INVALID` | unknown challenge materiality       |
