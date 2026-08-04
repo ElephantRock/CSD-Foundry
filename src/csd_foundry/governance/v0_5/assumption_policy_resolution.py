@@ -59,8 +59,8 @@ A1.3-C claims, on every supported platform:
   a caller-carried tuple -- so a substituted tuple cannot authorize;
 * V3-only resolution: a V2 ``AssumptionPolicyLedgerV2`` (or any non-V3 ledger
   object) is rejected by an exact type check before any field is read, so the
-  stable ``ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE`` code is
-  surfaced rather than an ``AttributeError``;
+  stable ``ASSUMPTION_POLICY_RESOLUTION_LEDGER_VERSION_NOT_ACTIVATABLE`` code
+  is surfaced rather than an ``AttributeError``;
 * strict sequence typing: a ``bool`` sequence is rejected even though
   ``bool`` subclasses ``int`` in Python, so a stored ``true`` cannot
   masquerade as ``1``;
@@ -131,7 +131,10 @@ well-formed policy is a configuration error the operator must reconcile).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Final
 
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     AssumptionPolicyActivationContractError,
@@ -170,11 +173,20 @@ DECISION_TYPES = ("SELECTED", "NO_APPLICABLE_GRANT", "AMBIGUOUS_GRANTS")
 #: produce distinct, distinguishable digests. The action vocabulary is the one
 #: normative enumeration imported from the contracts module
 #: (``ASSUMPTION_AUTHORITY_ACTIONS``); this module defines no local action set.
-DECISION_CODES = {
-    "SELECTED": "ASSUMPTION_GRANT_SELECTED",
-    "NO_APPLICABLE_GRANT": "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",
-    "AMBIGUOUS_GRANTS": "ASSUMPTION_POLICY_AMBIGUOUS_GRANTS",
-}
+#: The mapping is frozen as a :class:`types.MappingProxyType` so neither a
+#: caller nor a future edit can mutate the vocabulary in place: any attempt to
+#: add, rebind, or delete a decision code raises ``TypeError`` at runtime. A
+#: forged ``decision_code`` on a constructed ``GrantSelectionDecision`` still
+#: fails the frozen ``DECISION_CODES[decision_type]`` lookup comparison and is
+#: rejected with ``ASSUMPTION_GRANT_SELECTION_DECISION_CODE_INVALID``, leaving
+#: every other decision unchanged.
+DECISION_CODES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "SELECTED": "ASSUMPTION_GRANT_SELECTED",
+        "NO_APPLICABLE_GRANT": "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",
+        "AMBIGUOUS_GRANTS": "ASSUMPTION_POLICY_AMBIGUOUS_GRANTS",
+    }
+)
 
 
 # ===========================================================================
@@ -420,6 +432,15 @@ def _source_entry_for_resolution(
     * ``resolved_policy.ledger_root_digest == ledger.ledger_root_digest`` ->
       ``ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH`` (the resolution and
       the ledger do not describe the same authoritative snapshot);
+    * the supplied resolution is byte-identical to the resolution recomputed
+      against this ledger at ``resolved_policy.event_sequence`` ->
+      ``ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE`` (the
+      superseded-policy defense: a caller-presented resolution that binds a
+      superseded generation's bindings, even with a current ledger root and
+      recomputed digest, cannot be the authoritative resolution at this event
+      sequence, because the authoritative re-resolution binds the CURRENT
+      governing generation's bindings and therefore produces a different
+      canonical receipt);
     * exactly one ledger entry has ``ledger_entry_digest == resolved's`` ->
       ``ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_MISSING`` (zero) or
       ``ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_AMBIGUOUS`` (two or more);
@@ -450,6 +471,24 @@ def _source_entry_for_resolution(
     if resolved_policy.ledger_root_digest != ledger.ledger_root_digest:
         raise AssumptionPolicyActivationContractError(
             "ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH"
+        )
+    # Authoritative re-resolution proof. Recompute what the resolution for
+    # ``resolved_policy.event_sequence`` SHOULD be against this exact ledger and
+    # require the supplied resolution be byte-identical to it. This defeats the
+    # superseded-policy attack: a caller cannot present a ResolvedPolicyAtSequence
+    # that binds a historical (superseded) generation's bindings while carrying a
+    # current ledger_root_digest and a recomputed resolution_digest -- the
+    # authoritative re-resolution at this event sequence produces a DIFFERENT
+    # canonical receipt (different generation bindings), so the byte-identity
+    # check fails before any source entry is located. The full canonical_bytes
+    # receipt is compared (not just ledger_entry_digest) so every generation
+    # binding (policy id/digest, effective sequence, signing-payload digest,
+    # commit-receipt digest, ledger-entry digest) is bound, not just the entry
+    # pointer.
+    authoritative = resolve_policy_at_v3(ledger, resolved_policy.event_sequence)
+    if authoritative.canonical_bytes != resolved_policy.canonical_bytes:
+        raise AssumptionPolicyActivationContractError(
+            "ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE"
         )
     # Locate the unique source entry by ledger_entry_digest. There must be
     # exactly one (the ledger chain is strictly increasing on commit-receipt

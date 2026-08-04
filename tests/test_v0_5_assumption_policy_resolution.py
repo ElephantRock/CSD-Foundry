@@ -22,6 +22,8 @@ import hashlib
 import multiprocessing as mp
 import queue as queue_module
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -1349,22 +1351,446 @@ def test_different_ledger_root_is_rejected() -> None:
     assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH"
 
 
+# ===========================================================================
+# Part 2c: Authoritative re-resolution proof (corrections 1, 2, 8)
+# ===========================================================================
+#
+# The selector does not trust a caller-presented ResolvedPolicyAtSequence on
+# binding faith: after the type and ledger-root checks it recomputes the
+# authoritative resolution at ``resolved_policy.event_sequence`` against the
+# SAME ledger and requires byte-identical ``canonical_bytes``. This defeats the
+# superseded-policy attack: a caller cannot present a resolution that binds a
+# superseded generation's bindings (with a current ledger root and a recomputed
+# digest) and have it authorize selection against that superseded generation.
+
+
+def _forged_resolved(
+    *,
+    base: ResolvedPolicyAtSequence,
+    event_sequence: int,
+    ledger_root_digest: str,
+    overrides: dict[str, object] | None = None,
+) -> ResolvedPolicyAtSequence:
+    """Build a self-consistent forged ResolvedPolicyAtSequence.
+
+    Starts from ``base``'s generation bindings, applies any ``overrides``
+    (e.g. a superseded generation's bindings), and rebinds ``event_sequence``
+    and ``ledger_root_digest``. The ``resolution_digest`` is recomputed so the
+    forged object is internally self-consistent (it passes the dataclass
+    self-digest check). This is exactly the shape of a caller-presented attack.
+    """
+
+    unsigned: dict[str, object] = {
+        "schema_version": RESOLVED_POLICY_AT_SEQUENCE_SCHEMA_VERSION,
+        "commit_receipt_digest": base.commit_receipt_digest,
+        "effective_from_sequence": base.effective_from_sequence,
+        "event_sequence": event_sequence,
+        "ledger_entry_digest": base.ledger_entry_digest,
+        "ledger_root_digest": ledger_root_digest,
+        "policy_digest": base.policy_digest,
+        "policy_id": base.policy_id,
+        "signing_payload_digest": base.signing_payload_digest,
+    }
+    if overrides:
+        unsigned.update(overrides)
+    return ResolvedPolicyAtSequence(
+        event_sequence=unsigned["event_sequence"],  # type: ignore[arg-type]
+        policy_id=unsigned["policy_id"],  # type: ignore[arg-type]
+        policy_digest=unsigned["policy_digest"],  # type: ignore[arg-type]
+        effective_from_sequence=unsigned["effective_from_sequence"],  # type: ignore[arg-type]
+        signing_payload_digest=unsigned["signing_payload_digest"],  # type: ignore[arg-type]
+        commit_receipt_digest=unsigned["commit_receipt_digest"],  # type: ignore[arg-type]
+        ledger_entry_digest=unsigned["ledger_entry_digest"],  # type: ignore[arg-type]
+        ledger_root_digest=unsigned["ledger_root_digest"],  # type: ignore[arg-type]
+        resolution_digest=domain_digest("ASSUMPTION_RESOLVED_POLICY_AT_SEQUENCE", unsigned),
+    )
+
+
+def test_superseded_policy_attack_is_rejected() -> None:
+    """A caller presents a resolution binding a SUPERSEDED generation's bindings
+    (carrying the CURRENT ledger root and a recomputed digest) and requests a
+    grant from that superseded generation. The authoritative re-resolution
+    proof defeats this: at ``event_sequence=25`` the authoritative resolution
+    binds e1's generation, so a forged resolution carrying e0's bindings is not
+    byte-identical and is rejected with NOT_AUTHORITATIVE before any source
+    entry is located.
+
+    Setup mirrors the task spec exactly:
+
+    * e0 (effective seq 10) grants authority:legacy;
+    * e1 (effective seq 20) grants authority:current;
+    * the forged resolution carries event_sequence=25, all of e0's generation
+      bindings, the current two-entry ledger_root, and a recomputed digest.
+    """
+
+    legacy_grant = _grant(
+        "grant:legacy",
+        authority_id="authority:legacy",
+        effective_from_sequence=10,
+    )
+    current_grant = _grant(
+        "grant:current",
+        authority_id="authority:current",
+        effective_from_sequence=20,
+    )
+    e0 = _entry_with_policy((legacy_grant,), seq=10)
+    e1 = _successor_entry_with_policy(e0, (current_grant,), seq=20)
+    ledger = _ledger(e0, e1)  # two-entry, root R1
+
+    # The authoritative resolution at seq 25 is e1 (current generation).
+    authoritative_at_25 = resolve_policy_at_v3(ledger, 25)
+    assert authoritative_at_25.ledger_entry_digest == e1.ledger_entry_digest
+
+    # Forge a resolution carrying e0's bindings (legacy generation) but the
+    # current two-entry ledger root and event_sequence=25.
+    e0_resolved_at_10 = resolve_policy_at_v3(ledger, 10)  # binds e0's generation
+    forged = _forged_resolved(
+        base=e0_resolved_at_10,
+        event_sequence=25,
+        ledger_root_digest=ledger.ledger_root_digest,
+        overrides={
+            # e0's full generation bindings (policy_id/digest, payload digest,
+            # commit receipt, ledger entry, effective_from_sequence).
+            "policy_id": e0.policy.policy_id,
+            "policy_digest": e0.policy.policy_digest,
+            "signing_payload_digest": e0.signing_payload.signing_payload_digest,
+            "commit_receipt_digest": e0.policy_commit.commit_receipt_digest,
+            "ledger_entry_digest": e0.ledger_entry_digest,
+            "effective_from_sequence": e0.signing_payload.effective_from_sequence,
+        },
+    )
+    # Sanity: the forged object is self-consistent (digest checks pass) but its
+    # canonical bytes differ from the authoritative resolution at 25.
+    assert forged.canonical_bytes != authoritative_at_25.canonical_bytes
+
+    # Request the legacy grant from the superseded generation via the forged
+    # resolution: rejected as NOT_AUTHORITATIVE, never selected.
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=forged,
+            action="ADMIT",
+            authority_id="authority:legacy",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE"
+
+
+def test_valid_historical_resolution_selects_legacy_grant() -> None:
+    """The authoritative re-resolution proof does NOT block legitimate
+    historical reads. At ``event_sequence=15`` (governed by e0), the
+    authoritative resolution binds e0's generation, so a resolution for seq 15
+    is byte-identical to the recomputed authoritative resolution and the legacy
+    grant MAY be selected. This is the valid counterpart to the superseded-
+    policy attack."""
+
+    legacy_grant = _grant(
+        "grant:legacy",
+        authority_id="authority:legacy",
+        effective_from_sequence=10,
+    )
+    current_grant = _grant(
+        "grant:current",
+        authority_id="authority:current",
+        effective_from_sequence=20,
+    )
+    e0 = _entry_with_policy((legacy_grant,), seq=10)
+    e1 = _successor_entry_with_policy(e0, (current_grant,), seq=20)
+    ledger = _ledger(e0, e1)
+
+    # Historical query at 15 is governed by e0.
+    resolved_at_15 = resolve_policy_at_v3(ledger, 15)
+    assert resolved_at_15.ledger_entry_digest == e0.ledger_entry_digest
+    decision = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved_at_15,
+        action="ADMIT",
+        authority_id="authority:legacy",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision.decision_type == "SELECTED"
+    assert decision.selected_grant_id == "grant:legacy"
+
+
+def test_current_generation_at_head_sequence_selects_current_grant() -> None:
+    """At ``event_sequence=25`` (governed by e1, the current head generation),
+    the authoritative resolution binds e1's generation and the current grant is
+    selected. The legacy grant (from e0) is NOT applicable because it lives in
+    a different generation whose grants are not scanned at this sequence."""
+
+    legacy_grant = _grant(
+        "grant:legacy",
+        authority_id="authority:legacy",
+        effective_from_sequence=10,
+    )
+    current_grant = _grant(
+        "grant:current",
+        authority_id="authority:current",
+        effective_from_sequence=20,
+    )
+    e0 = _entry_with_policy((legacy_grant,), seq=10)
+    e1 = _successor_entry_with_policy(e0, (current_grant,), seq=20)
+    ledger = _ledger(e0, e1)
+
+    resolved_at_25 = resolve_policy_at_v3(ledger, 25)
+    assert resolved_at_25.ledger_entry_digest == e1.ledger_entry_digest
+    decision = resolve_policy_and_select_grant(
+        ledger=ledger,
+        event_sequence=25,
+        action="ADMIT",
+        authority_id="authority:current",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision.decision_type == "SELECTED"
+    assert decision.selected_grant_id == "grant:current"
+    # The legacy authority has no grant in the current generation -> denial.
+    decision_legacy = resolve_policy_and_select_grant(
+        ledger=ledger,
+        event_sequence=25,
+        action="ADMIT",
+        authority_id="authority:legacy",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert decision_legacy.decision_type == "NO_APPLICABLE_GRANT"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("policy_id", "policy:foreign"),
+        ("policy_digest", "sha256:" + "f" * 64),
+        ("signing_payload_digest", "sha256:" + "e" * 64),
+        ("commit_receipt_digest", "sha256:" + "d" * 64),
+        ("ledger_entry_digest", "sha256:" + "0" * 64),
+    ],
+)
+def test_every_source_entry_binding_mutation_is_rejected(field: str, value: object) -> None:
+    """Mutating ANY single source-entry binding on a caller-presented resolution
+    is rejected. The authoritative re-resolution proof compares the FULL
+    ``canonical_bytes`` receipt, so every generation binding is bound: a forged
+    resolution that tampers with any one field (with a recomputed digest so it
+    is internally self-consistent) is not byte-identical to the authoritative
+    re-resolution and surfaces NOT_AUTHORITATIVE.
+
+    ``effective_from_sequence`` is omitted from this matrix because the
+    ``ResolvedPolicyAtSequence`` dataclass itself enforces
+    ``event_sequence >= effective_from_sequence`` at construction, so it cannot
+    be mutated in isolation while holding ``event_sequence`` fixed; that guard
+    is exercised by ``test_resolved_event_before_effective_raises``."""
+
+    e0 = _entry(seq=10)
+    ledger = _ledger(e0)
+    resolved = resolve_policy_at_v3(ledger, 15)
+    forged = _forged_resolved(
+        base=resolved,
+        event_sequence=resolved.event_sequence,
+        ledger_root_digest=resolved.ledger_root_digest,
+        overrides={field: value},
+    )
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=forged,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE"
+
+
+def test_authoritative_check_runs_after_root_check() -> None:
+    """The authoritative re-resolution runs AFTER the type and ledger-root
+    checks. A resolution carrying a foreign ledger root surfaces
+    LEDGER_ROOT_MISMATCH (not NOT_AUTHORITATIVE), because the root check fails
+    first -- the authoritative re-resolution cannot even be computed against a
+    ledger whose root the resolution does not describe."""
+
+    e0 = _entry(seq=10)
+    ledger_one = _ledger(e0)
+    e1 = _successor_entry(e0, seq=20)
+    ledger_two = _ledger(e0, e1)
+    resolved = resolve_policy_at_v3(ledger_one, 15)
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger_two,
+            resolved_policy=resolved,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_LEDGER_ROOT_MISMATCH"
+
+
+def test_canonical_bytes_comparison_not_just_entry_digest() -> None:
+    """The authoritative proof compares the FULL canonical_bytes receipt, not
+    just ``ledger_entry_digest``. A forged resolution whose ledger_entry_digest
+    matches the real entry (so a digest-only check would pass) but whose
+    policy_id differs is still rejected, because canonical_bytes includes
+    policy_id."""
+
+    e0 = _entry(seq=10)
+    ledger = _ledger(e0)
+    resolved = resolve_policy_at_v3(ledger, 15)
+    # Same ledger_entry_digest, same ledger_root, but a foreign policy_id: the
+    # receipt differs on policy_id even though ledger_entry_digest is unchanged.
+    forged = _forged_resolved(
+        base=resolved,
+        event_sequence=resolved.event_sequence,
+        ledger_root_digest=resolved.ledger_root_digest,
+        overrides={"policy_id": "policy:foreign"},
+    )
+    assert forged.ledger_entry_digest == resolved.ledger_entry_digest  # entry digest same
+    assert forged.canonical_bytes != resolved.canonical_bytes  # receipt differs
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        select_applicable_grant_v3(
+            ledger=ledger,
+            resolved_policy=forged,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE"
+
+
+def test_decision_codes_mapping_is_immutable() -> None:
+    """DECISION_CODES is a frozen MappingProxyType: in-place mutation raises
+    TypeError. A caller cannot add, rebind, or delete a decision code to make
+    a forged decision appear valid."""
+
+    from types import MappingProxyType
+
+    # The mapping behaves as the expected vocabulary...
+    assert DECISION_CODES == {
+        "SELECTED": "ASSUMPTION_GRANT_SELECTED",
+        "NO_APPLICABLE_GRANT": "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",
+        "AMBIGUOUS_GRANTS": "ASSUMPTION_POLICY_AMBIGUOUS_GRANTS",
+    }
+    assert isinstance(DECISION_CODES, MappingProxyType)
+    # ...and rejects every in-place mutation shape.
+    with pytest.raises(TypeError):
+        DECISION_CODES["FORGED"] = "ASSUMPTION_FORGED"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        del DECISION_CODES["SELECTED"]  # type: ignore[misc]
+    with pytest.raises((TypeError, AttributeError)):
+        DECISION_CODES.pop("SELECTED")  # type: ignore[attr-defined]
+    with pytest.raises((TypeError, AttributeError)):
+        DECISION_CODES.update({"SELECTED": "x"})  # type: ignore[attr-defined]
+    with pytest.raises((TypeError, AttributeError)):
+        DECISION_CODES.clear()  # type: ignore[attr-defined]
+
+
+def test_forged_decision_code_does_not_change_other_decisions() -> None:
+    """A forged decision_code on a directly-constructed GrantSelectionDecision
+    does not change the frozen vocabulary: the same SELECTED/NO_APPLICABLE_GRANT
+    requests before and after a failed forged construction produce identical
+    decisions, because the mapping is immutable and the forged code is rejected
+    at construction."""
+
+    grant = _grant()
+    resolved, ledger = _resolved_and_ledger_with_grants((grant,))
+    selected_before = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    # Attempt to construct a decision with a forged code: rejected, and the
+    # rejection does not mutate DECISION_CODES.
+    unsigned = {
+        "schema_version": GRANT_SELECTION_DECISION_SCHEMA_VERSION,
+        "action": "ADMIT",
+        "assumption_materiality": "MATERIAL",
+        "authority_id": "authority:operator",
+        "challenge_materiality": None,
+        "commit_receipt_digest": resolved.commit_receipt_digest,
+        "decision_code": "ASSUMPTION_FORGED_CODE",
+        "decision_type": "SELECTED",
+        "effective_from_sequence": resolved.effective_from_sequence,
+        "event_sequence": resolved.event_sequence,
+        "grant_digest": grant.grant_digest,
+        "ledger_entry_digest": resolved.ledger_entry_digest,
+        "ledger_root_digest": resolved.ledger_root_digest,
+        "policy_digest": resolved.policy_digest,
+        "policy_id": resolved.policy_id,
+        "scope_id": "scope:control",
+        "selected_grant_id": grant.grant_id,
+        "signing_payload_digest": resolved.signing_payload_digest,
+    }
+    with pytest.raises(AssumptionPolicyActivationContractError) as failure:
+        GrantSelectionDecision(
+            policy_id=resolved.policy_id,
+            policy_digest=resolved.policy_digest,
+            effective_from_sequence=resolved.effective_from_sequence,
+            signing_payload_digest=resolved.signing_payload_digest,
+            commit_receipt_digest=resolved.commit_receipt_digest,
+            ledger_entry_digest=resolved.ledger_entry_digest,
+            ledger_root_digest=resolved.ledger_root_digest,
+            event_sequence=resolved.event_sequence,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+            decision_type="SELECTED",
+            decision_code="ASSUMPTION_FORGED_CODE",
+            selected_grant_id=grant.grant_id,
+            grant_digest=grant.grant_digest,
+            selection_digest=domain_digest("ASSUMPTION_GRANT_SELECTION_DECISION", unsigned),
+        )
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_DECISION_CODE_INVALID"
+    # The vocabulary is unchanged and the same selection is byte-identical.
+    assert DECISION_CODES == {
+        "SELECTED": "ASSUMPTION_GRANT_SELECTED",
+        "NO_APPLICABLE_GRANT": "ASSUMPTION_POLICY_NO_APPLICABLE_GRANT",
+        "AMBIGUOUS_GRANTS": "ASSUMPTION_POLICY_AMBIGUOUS_GRANTS",
+    }
+    selected_after = select_applicable_grant_v3(
+        ledger=ledger,
+        resolved_policy=resolved,
+        action="ADMIT",
+        authority_id="authority:operator",
+        scope_id="scope:control",
+        assumption_materiality="MATERIAL",
+        challenge_materiality=None,
+    )
+    assert selected_after.canonical_bytes == selected_before.canonical_bytes
+
+
 def test_source_entry_missing_is_rejected() -> None:
     """A resolution whose ledger_entry_digest matches no entry in the supplied
-    ledger is rejected (the ledger is from a different generation that does
-    not contain the resolved entry)."""
+    ledger is rejected.
 
-    # Build a resolution from a ledger with a DIFFERENT entry but engineered
-    # to share the ledger root is impossible (root binds all entries). Instead,
-    # build a resolution from ledger_two's second entry, then supply
-    # ledger_one (which lacks that entry) -- roots differ, so this surfaces
-    # LEDGER_ROOT_MISMATCH first. To reach SOURCE_ENTRY_MISSING we need same
-    # root but missing entry, which is impossible by construction. Instead,
-    # verify the SOURCE_ENTRY_MISSING code path by directly mutating the
-    # resolved's ledger_entry_digest to a digest not in the ledger (the digest
-    # re-binding still passes because we reconstruct the binding). Use the
-    # helper: build a resolved, then craft a foreign resolved with a bogus
-    # ledger_entry_digest but correct root/policy bindings.
+    The authoritative re-resolution proof (correction 1) is strictly stronger
+    than the locate-by-digest scan: a forged resolution that carries a bogus
+    ``ledger_entry_digest`` (valid in shape, with all other bindings intact and
+    a recomputed ``resolution_digest``) cannot be byte-identical to the
+    resolution recomputed against this ledger at this event sequence, because
+    that recomputed resolution binds the REAL source entry's
+    ``ledger_entry_digest``. The ``canonical_bytes`` comparison therefore fails
+    before the locate scan runs, surfacing
+    ``ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE``. (The downstream
+    ``SOURCE_ENTRY_MISSING`` code remains as a defense-in-depth invariant inside
+    ``_source_entry_for_resolution`` but is unreachable through a forged caller
+    resolution once the authoritative check is in place.)
+    """
+
     e0 = _entry(seq=10)
     ledger = _ledger(e0)
     resolved = resolve_policy_at_v3(ledger, 15)
@@ -1403,19 +1829,31 @@ def test_source_entry_missing_is_rejected() -> None:
             assumption_materiality="MATERIAL",
             challenge_materiality=None,
         )
-    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SOURCE_ENTRY_MISSING"
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE"
 
 
 def test_source_binding_mismatch_is_rejected() -> None:
     """A resolution whose bindings (policy_id, policy_digest, etc.) do not
-    match the located source entry is rejected. Each binding dimension is
-    verified after the entry is located."""
+    match the authoritative resolution at its event sequence is rejected.
+
+    The authoritative re-resolution proof (correction 1) compares the FULL
+    ``canonical_bytes`` receipt: tampering with any single binding
+    (``policy_id`` here) produces a receipt that is not byte-identical to the
+    authoritative re-resolution, so the superseded-policy / binding-mismatch
+    attack surfaces as ``ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE``
+    before the source-entry locate/verify scan runs. (The downstream
+    ``SOURCE_BINDING_MISMATCH`` code remains a defense-in-depth invariant but is
+    unreachable through a forged caller resolution once the authoritative check
+    is in place, since ``canonical_bytes`` equality forces every binding to
+    agree with the real resolved entry.)"""
 
     e0 = _entry(seq=10)
     ledger = _ledger(e0)
     resolved = resolve_policy_at_v3(ledger, 15)
-    # Tamper with policy_id while keeping ledger_entry_digest (so the entry is
-    # still located) but the policy_id binding will mismatch.
+    # Tamper with policy_id while keeping the event sequence and ledger root
+    # intact. The recomputed resolution_digest makes the forged object
+    # self-consistent, but its canonical_bytes differ from the authoritative
+    # re-resolution (which binds the real policy_id).
     tampered_unsigned = {
         "schema_version": RESOLVED_POLICY_AT_SEQUENCE_SCHEMA_VERSION,
         "commit_receipt_digest": resolved.commit_receipt_digest,
@@ -1424,7 +1862,7 @@ def test_source_binding_mismatch_is_rejected() -> None:
         "ledger_entry_digest": resolved.ledger_entry_digest,
         "ledger_root_digest": resolved.ledger_root_digest,
         "policy_digest": resolved.policy_digest,
-        "policy_id": "policy:foreign",  # mismatches the entry
+        "policy_id": "policy:foreign",  # mismatches the authoritative resolution
         "signing_payload_digest": resolved.signing_payload_digest,
     }
     tampered = ResolvedPolicyAtSequence(
@@ -1450,7 +1888,7 @@ def test_source_binding_mismatch_is_rejected() -> None:
             assumption_materiality="MATERIAL",
             challenge_materiality=None,
         )
-    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_SOURCE_BINDING_MISMATCH"
+    assert failure.value.code == "ASSUMPTION_GRANT_SELECTION_RESOLUTION_NOT_AUTHORITATIVE"
 
 
 def test_foreign_resolution_object_returns_stable_code() -> None:
@@ -1989,6 +2427,134 @@ def test_resolve_at_missing_store_raises(tmp_path: Path) -> None:
     with pytest.raises(PolicyStoreError) as failure:
         pub.resolve_at(15)
     assert failure.value.code == "ASSUMPTION_POLICY_STORED_BYTES_MISSING"
+
+
+# ---------------------------------------------------------------------------
+# Mechanical lock-scope evidence (correction 4)
+# ---------------------------------------------------------------------------
+
+
+def test_composite_runs_selection_inside_lock_with_required_ordering(
+    tmp_path: Path,
+) -> None:
+    """Mechanical proof that the composite executes grant selection INSIDE the
+    publication lock, between the first and second authoritative byte reads,
+    and that the second read + comparison happen AFTER selection completes.
+
+    Instrumentation (all normalized to a single event log so the ordering is
+    observed, not assumed):
+
+    * wrap ``_locked`` to record lock acquire/release and to track a
+      ``lock_held`` boolean readable by the patched selector;
+    * monkeypatch ``select_applicable_grant_v3`` to assert ``lock_held`` is
+      True when the selector runs, and to record ``selection_started`` then
+      ``selection_completed``;
+    * instrument ``_read_authoritative_bytes_in_lock`` to record each read and
+      to prove the SECOND read occurs AFTER ``selection_completed``.
+
+    The required order is exactly:
+
+        lock -> first read -> parse -> resolve -> selector (lock held) ->
+        selector completed -> second read -> compare -> lock exit
+    """
+
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    _populate_store_with_grant(pub, _grant())
+
+    events: list[str] = []
+    state = {"lock_held": False, "selection_completed": False}
+
+    # Wrap _locked to track lock_held and record acquire/release boundaries.
+    original_locked = pub._locked
+
+    @contextmanager
+    def instrumented_locked() -> Iterator[None]:
+        events.append("LOCK_ACQUIRED")
+        state["lock_held"] = True
+        try:
+            yield
+        finally:
+            # The non-mutation comparison must have run before release.
+            events.append("LOCK_RELEASED")
+            state["lock_held"] = False
+
+    pub._locked = instrumented_locked  # type: ignore[assignment]
+
+    # Instrument the in-lock byte reader to record each read and prove the
+    # second read follows selection completion.
+    original_read = pub._read_authoritative_bytes_in_lock
+    read_count = {"n": 0}
+
+    def instrumented_read() -> bytes:
+        read_count["n"] += 1
+        events.append(f"READ_{read_count['n']}")
+        if read_count["n"] == 2:
+            # The second read MUST occur after selection completed.
+            assert state["selection_completed"], (
+                "second authoritative read occurred before selection completed"
+            )
+        return original_read()
+
+    pub._read_authoritative_bytes_in_lock = instrumented_read  # type: ignore[assignment]
+
+    # Monkeypatch the selector to assert it runs while the lock is held and to
+    # bracket selection with started/completed events. The filesystem composite
+    # imports ``resolve_policy_and_select_grant`` at call time from the
+    # resolution module; that composite in turn calls the module-level
+    # ``select_applicable_grant_v3``, so patching both module attributes is
+    # sufficient to intercept resolution and selection inside the lock.
+    import csd_foundry.governance.v0_5.assumption_policy_resolution as res_mod
+
+    original_select = res_mod.select_applicable_grant_v3
+
+    def instrumented_select(*, ledger, resolved_policy, **kwargs):  # type: ignore[no-untyped-def]
+        assert state["lock_held"], "selector ran while the publication lock was NOT held"
+        events.append("SELECTION_STARTED")
+        decision = original_select(ledger=ledger, resolved_policy=resolved_policy, **kwargs)
+        events.append("SELECTION_COMPLETED")
+        state["selection_completed"] = True
+        return decision
+
+    original_composite = res_mod.resolve_policy_and_select_grant
+
+    def instrumented_composite(*, ledger, event_sequence, **kwargs):  # type: ignore[no-untyped-def]
+        # Resolve, then call the (patched) selector. We re-implement the
+        # composite ordering so the patched selector is the one invoked.
+        resolved = res_mod.resolve_policy_at_v3(ledger, event_sequence)
+        events.append("RESOLVE_COMPLETED")
+        return res_mod.select_applicable_grant_v3(ledger=ledger, resolved_policy=resolved, **kwargs)
+
+    res_mod.resolve_policy_and_select_grant = instrumented_composite  # type: ignore[assignment]
+    res_mod.select_applicable_grant_v3 = instrumented_select  # type: ignore[assignment]
+
+    try:
+        decision = pub.resolve_policy_and_select_grant_at(
+            event_sequence=15,
+            action="ADMIT",
+            authority_id="authority:operator",
+            scope_id="scope:control",
+            assumption_materiality="MATERIAL",
+            challenge_materiality=None,
+        )
+    finally:
+        res_mod.resolve_policy_and_select_grant = original_composite  # type: ignore[assignment]
+        res_mod.select_applicable_grant_v3 = original_select  # type: ignore[assignment]
+        pub._locked = original_locked  # type: ignore[assignment]
+        pub._read_authoritative_bytes_in_lock = original_read  # type: ignore[assignment]
+
+    assert decision.decision_type == "SELECTED"
+    # The observed event sequence proves the required ordering.
+    assert events == [
+        "LOCK_ACQUIRED",
+        "READ_1",
+        "RESOLVE_COMPLETED",
+        "SELECTION_STARTED",
+        "SELECTION_COMPLETED",
+        "READ_2",
+        "LOCK_RELEASED",
+    ], events
+    # No third read: exactly two in-lock reads (before/after selection).
+    assert read_count["n"] == 2
 
 
 # ---------------------------------------------------------------------------
