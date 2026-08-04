@@ -33,19 +33,26 @@ guarantees it is a regular file before a handle is returned:
   `O_NOFOLLOW` causes the kernel to reject a symlink at `publication.lock`
   with `ELOOP` before any file is opened or followed; `fstat` on the descriptor
   then confirms a regular file.
-* **Windows:** there is no `O_NOFOLLOW` equivalent, so the opener performs a
-  seven-step acquisition-time validation: (1) `lstat` the path and reject a
-  symlink or non-regular shape; (2) open/create without truncation (never
-  follow, never `O_TRUNC`); (3) `fstat` the opened descriptor and require a
-  regular file (rejects a directory or a dereferenced symlink the open may have
-  followed); (4) `lstat` the path again and reject a symlink or non-regular
-  shape (detects a concurrent replacement that occurred between the open and
-  now); (5) require the same identity (`st_dev`, `st_ino`) between the opened
-  descriptor and the path (detects a replacement that swapped in a different
-  file); (6) seed only after all validation passes (when the opened descriptor
-  reported a zero size, so the `msvcrt` byte-range lock is well-defined); (7)
-  return the seeded handle. The strict opener never seeds or locks through a
-  symlink detected during acquisition.
+* **Windows:** there is no `O_NOFOLLOW` equivalent. The opener performs
+  cooperative acquisition-time validation:
+
+  1. `lstat` the path;
+  2. reject an observed symlink or non-regular shape;
+  3. atomically create a missing regular file or open an existing path
+     without truncation; subsequent path-shape and identity checks must
+     succeed before the descriptor is seeded or locked;
+  4. `fstat` the opened descriptor and require a regular file. A symlink to
+     a regular file may also produce a regular descriptor; the second `lstat`
+     and descriptor/path identity comparison detect the observed symlink or
+     replacement before seeding and locking;
+  5. `lstat` the path again;
+  6. require the descriptor and path to identify the same regular file;
+  7. seed only after all checks succeed.
+
+  The opener does not seed or lock through a symlink or replacement
+  detected during acquisition. A noncooperating actor changing the
+  directory entry after validation is outside the cooperative
+  single-host claim.
 
 POSIX uses `fcntl.flock`; Windows uses `msvcrt.locking` on byte 0. Both
 provide process-wide exclusive advisory locking on the lock file, which is

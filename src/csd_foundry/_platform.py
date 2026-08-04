@@ -26,14 +26,16 @@ validation against cooperating store operators:
 
     lstat path
     reject symlink/non-regular shape
-    open/create without truncation
+    atomically create a missing regular file or open an existing path
+    without truncation; subsequent path-shape and identity checks must
+    succeed before the descriptor is seeded or locked
     fstat opened descriptor
     lstat path again
     require same regular-file identity
     seed only after validation
 
-The strict opener never seeds or locks through a symlink detected during
-acquisition. A noncooperating actor replacing directory entries after
+The opener does not seed or lock through a symlink or replacement detected
+during acquisition. A noncooperating actor replacing directory entries after
 validation is outside the cooperative single-host claim.
 """
 
@@ -198,19 +200,20 @@ def _finish_lock_file_open(fd: int, *, opened_size: int) -> IO[bytes]:
 
 
 def _open_windows_lock_file_strict(lock_path: Path) -> IO[bytes]:
-    """Windows strict lock-file opener with acquisition-time validation.
+    """Windows strict lock-file opener with cooperative acquisition-time validation.
 
-    Algorithm (seven acquisition-time validation steps):
-      1. lstat the path; reject symlink or non-regular.
-      2. Open/create without truncation (O_RDWR | O_CREAT | O_EXCL when absent,
-         O_RDWR when present; never O_TRUNC, never follow).
-      3. fstat the opened descriptor; require regular (rejects a directory or a
-         dereferenced symlink the open call may have followed).
-      4. lstat the path again; reject symlink or non-regular (detects a
-         concurrent replacement that occurred between the open and now).
-      5. Require same identity (st_dev, st_ino) between the opened descriptor
-         and the path (detects a replacement that swapped in a different file).
-      6. Seed only after all validation passes (when the opened descriptor
+    Algorithm (seven cooperative validation steps):
+      1. lstat the path; reject an observed symlink or non-regular shape.
+      2. Atomically create a missing regular file or open an existing path
+         without truncation; subsequent path-shape and identity checks must
+         succeed before the descriptor is seeded or locked.
+      3. fstat the opened descriptor and require a regular file. A symlink to
+         a regular file may also produce a regular descriptor; the second lstat
+         and descriptor/path identity comparison detect the observed symlink or
+         replacement before seeding and locking.
+      4. lstat the path again; reject an observed symlink or non-regular shape.
+      5. Require the descriptor and path to identify the same regular file.
+      6. Seed only after all checks succeed (when the opened descriptor
          reported a zero size).
       7. Return the seeded handle; the caller owns its lifetime.
     """

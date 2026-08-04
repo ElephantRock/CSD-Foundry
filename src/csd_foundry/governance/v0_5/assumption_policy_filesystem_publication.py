@@ -61,18 +61,22 @@ path during acquisition:
   ``O_NOFOLLOW`` causes the kernel to reject a symlink at ``publication.lock``
   with ``ELOOP`` before any file is opened or followed; ``fstat`` on the
   descriptor then confirms a regular file.
-* **Windows:** there is no ``O_NOFOLLOW`` equivalent, so the opener performs a
-  seven-step acquisition-time validation: (1) ``lstat`` the path and reject a
-  symlink or non-regular shape; (2) open/create without truncation (never
-  follow, never ``O_TRUNC``); (3) ``fstat`` the opened descriptor and require a
-  regular file (rejects a directory or a dereferenced symlink the open may have
-  followed); (4) ``lstat`` the path again and reject a symlink or non-regular
-  shape (detects a concurrent replacement that occurred between the open and
-  now); (5) require the same identity (``st_dev``, ``st_ino``) between the
-  opened descriptor and the path (detects a replacement that swapped in a
-  different file); (6) seed only after all validation passes (when the opened
-  descriptor reported a zero size); (7) return the seeded handle. The strict
-  opener never seeds or locks through a symlink detected during acquisition.
+* **Windows:** there is no ``O_NOFOLLOW`` equivalent. The opener performs
+  cooperative acquisition-time validation:
+
+  1. ``lstat`` the path;
+  2. reject an observed symlink or non-regular shape;
+  3. atomically create a missing regular file or open an existing path
+     without truncation;
+  4. ``fstat`` the opened descriptor and require a regular file;
+  5. ``lstat`` the path again;
+  6. require the descriptor and path to identify the same regular file;
+  7. seed only after all checks succeed.
+
+  The opener does not seed or lock through a symlink or replacement
+  detected during acquisition. A noncooperating actor changing the
+  directory entry after validation is outside the cooperative
+  single-host claim.
 
 Every such shape/open failure is normalized to
 ``ASSUMPTION_POLICY_STORE_LOCK_INVALID``. A descriptor that validated but whose
