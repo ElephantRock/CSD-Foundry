@@ -21,15 +21,38 @@ can be reopened from any process at any time.
 
 ## 2. publication.lock
 
-Exclusive interprocess access is provided by `_platform` advisory locking on
-`root/publication.lock`. The lock file is created by the lock helper itself on
-first acquisition (opened `a+b`, seeded with one byte on Windows so the byte
-range lock is well-defined). The publisher never creates the lock file
-directly.
+Exclusive interprocess access is provided by a *strict* composition of the
+`_platform` lock primitives on `root/publication.lock`. The publisher does NOT
+use the ordinary `_platform.advisory_lock` used by the temporal, admission, and
+registry stores — those remain permissive and are intentionally untouched.
+
+The strict opener (`_platform.open_lock_file_strict`) opens the lock file and
+guarantees it is a regular file before a handle is returned:
+
+* **POSIX:** `os.open` with `O_RDWR | O_CREAT | O_APPEND | O_NOFOLLOW`.
+  `O_NOFOLLOW` causes the kernel to reject a symlink at `publication.lock`
+  with `ELOOP` before any file is opened or followed.
+* **Windows:** `a+b` (the Windows-compatible approach, seeded with one byte so
+  the `msvcrt` byte-range lock is well-defined), followed by an `os.fstat`
+  regular-file check: if the opened descriptor is not `S_ISREG` — which happens
+  when `publication.lock` is a directory or a symlink the runtime transparently
+  dereferenced — the handle is closed and `LockInvalidError` is raised.
 
 POSIX uses `fcntl.flock`; Windows uses `msvcrt.locking` on byte 0. Both
 provide process-wide exclusive advisory locking on the lock file, which is
 sufficient for single-writer publication.
+
+### Lock-path invariant
+
+`publication.lock` must always be a regular file. A symlink (or directory, or
+any other non-regular shape) at the lock path is rejected before any lock is
+acquired — the publication lock can never be held against an attacker-controlled
+file or followed into corruption. Every such shape/open failure is normalized
+to `ASSUMPTION_POLICY_STORE_LOCK_INVALID`; `ASSUMPTION_POLICY_STORE_LOCK_FAILED`
+is reserved for the case where the lock path is a valid regular file but the
+advisory lock itself could not be acquired. An `OSError` raised by the
+protected operation inside the lock scope is never mislabeled as either lock
+code.
 
 The full lock scope covers the entire compare-and-append transition: actual
 state read, oracle invocation, temp write, atomic replace, directory fsync,
@@ -123,10 +146,46 @@ Pre-replace failures surface as one of:
   removed.
 * `ASSUMPTION_POLICY_STORE_REPLACE_FAILED` — `os.replace` itself failed. Old
   ledger intact; temp removed.
+* `ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED` — the owned-temp cleanup that
+  follows a write/replace failure itself failed (the temp could not be
+  unlinked). This code dominates the original write/replace error because an
+  un-removable orphan is the more actionable signal; the old ledger is intact.
 
 In every pre-commit case the caller receives no activation result, the old
 authoritative ledger is byte-for-byte intact, and retrying the publication is
 safe.
+
+### Normalized fault table
+
+Every filesystem, locking, enumeration, and parser failure is normalized to a
+stable public code so callers can switch on outcomes without parsing messages.
+No error code carries `str(exc)` or `repr(exc)` of an underlying backend
+exception as its detail.
+
+| Condition | Public code | Stage |
+|---|---|---|
+| constructor root not a `Path` | `ASSUMPTION_POLICY_STORE_ROOT_INVALID` | construction |
+| `open()`/read against a missing root | `ASSUMPTION_POLICY_STORE_ROOT_MISSING` | pre-lock |
+| root exists but is not a directory | `ASSUMPTION_POLICY_STORE_ROOT_NOT_DIRECTORY` | pre-lock |
+| root/parent create or sync failed | `ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED` | create() |
+| lock path is a symlink / directory / non-regular | `ASSUMPTION_POLICY_STORE_LOCK_INVALID` | lock acquisition |
+| lock path valid but advisory lock not acquired | `ASSUMPTION_POLICY_STORE_LOCK_FAILED` | lock acquisition |
+| `create()` against an existing valid ledger | `ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED` | create() |
+| authoritative ledger file missing | `ASSUMPTION_POLICY_STORED_BYTES_MISSING` | read |
+| stored bytes not valid UTF-8 JSON / not an object | `ASSUMPTION_POLICY_STORED_BYTES_INVALID` | read |
+| stored bytes valid JSON but not canonical | `ASSUMPTION_POLICY_STORED_BYTES_NONCANONICAL` | read |
+| duplicate JSON key at any depth | `ASSUMPTION_POLICY_STORED_DUPLICATE_KEY` | read |
+| unsupported `schema_version` | `ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED` | read |
+| missing/extra/wrong-type field | `ASSUMPTION_POLICY_STORED_FIELD_INVALID` | read |
+| frozen-contract self-validation failed | `ASSUMPTION_POLICY_STORED_CONTRACT_INVALID` | read |
+| stored root digest != rebuilt root | `ASSUMPTION_POLICY_STORED_ROOT_MISMATCH` | read |
+| post-write verification mismatch | `ASSUMPTION_POLICY_STORED_VERIFICATION_FAILED` | post-commit (→ uncertain) |
+| temp write/fsync failure (pre-replace) | `ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED` | pre-commit |
+| `os.replace` failure (pre-replace) | `ASSUMPTION_POLICY_STORE_REPLACE_FAILED` | pre-commit |
+| owned-temp cleanup failure (pre-replace path) | `ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED` | pre-commit |
+| orphan enumeration / inspection / unlink failure | `ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED` | orphan sweep |
+| directory fsync after orphan removal (POSIX) | `ASSUMPTION_POLICY_STORE_DURABILITY_FAILED` | orphan sweep |
+| any failure after `os.replace` | `ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN` | post-commit |
 
 ## 8. Post-commit uncertain outcomes
 
@@ -200,18 +259,54 @@ one matching the name pattern) is skipped, and a symlink is left untouched. On
 POSIX the store directory is fsynced after a successful deletion so the orphan
 removal is durable.
 
+### Normalized enumeration failures
+
+Orphan enumeration and every candidate inspection are normalized: no raw
+`OSError` from `iterdir()`, `is_symlink()`, `is_dir()`, or the managed
+`unlink()` may escape `_cleanup_orphans`. A failure to enumerate the store
+root surfaces `ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED` with detail
+`"<root>"`; a failure to inspect or unlink a candidate surfaces the same code
+with the offending candidate name as the detail. The authoritative ledger
+bytes and the read state are unchanged in every case.
+
+### Owned-temp cleanup behavior (pre-replace failure path)
+
+`_cleanup_own_temp()` is NOT best-effort. On the pre-replace failure path (a
+write or `os.replace` failure that leaves a temp file owned by this
+publisher), a failure to unlink the temp surfaces
+`ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED`. Because `_cleanup_own_temp` runs
+inside the pre-replace `except` handlers of `_write_and_fsync_temp`, `create`,
+and `_commit`, a cleanup failure propagates in place of the original
+write/replace error: the caller observes `TEMP_CLEANUP_FAILED` rather than
+`WRITE_FAILED` / `REPLACE_FAILED`. This is intentional — a temp the publisher
+could not remove is a strictly more actionable signal than the write/replace
+error that preceded it (the operator must reconcile the orphan regardless), and
+the old authoritative ledger is byte-for-byte intact in every case.
+
 ## 14. Multiprocessing evidence
 
-Real multiprocessing races (spawn context, barriers, queues) prove the claim:
+Real multiprocessing races (spawn context, barriers, queues) prove the claim.
+Each spawn worker classifies its outcome into exactly one of four buckets so
+the parent can assert the loser's *exception type* precisely, not just its
+code:
 
-* **distinct genesis candidates:** exactly one `COMMITTED` and one
-  `PublicationConflict` with code `ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH`.
-  After both processes exit (exit code 0): one entry, head = winner digest,
-  root = winner root, loser absent. A third publisher reopens and reconstructs
-  the same root.
-* **exact retry:** one `COMMITTED` and one `IDEMPOTENT_APPEND`, one entry, the
-  same digest and root, reopened root matches. Neither process observes a hard
-  failure.
+* `("OK", worker_id, append_result, …)` — `publish()` returned a result;
+* `("PUBLICATION_CONFLICT", worker_id, exc.code)` —
+  `AssumptionPolicyPublicationConflict` (the expected "loser" outcome);
+* `("STORE_ERROR", worker_id, exc.code)` — `PolicyStoreError` (a store-level
+  failure that must never occur in a healthy race);
+* `("UNEXPECTED", worker_id, type(exc).__name__)` — any other exception type
+  (never silently swallowed by a broad conflict/store catch).
+
+* **distinct genesis candidates:** exactly one `OK`/`COMMITTED` and exactly one
+  `PUBLICATION_CONFLICT` with code `ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH`,
+  with zero `STORE_ERROR` and zero `UNEXPECTED`. After both processes exit
+  (exit code 0): one entry, head = winner digest, root = winner root, loser
+  absent. A third publisher reopens and reconstructs the same root.
+* **exact retry:** exactly two `OK` outcomes (one `COMMITTED`, one
+  `IDEMPOTENT_APPEND`), one entry, the same digest and root, reopened root
+  matches, with zero failures of every kind (no `PUBLICATION_CONFLICT`, no
+  `STORE_ERROR`, no `UNEXPECTED`).
 * **concurrent create:** exactly one `CREATED` and one
   `ALREADY_INITIALIZED`; the authoritative ledger is exactly one canonical
   empty ledger.

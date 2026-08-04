@@ -31,10 +31,10 @@ import base64
 import hashlib
 import json
 import multiprocessing as mp
+import os
 import queue as queue_module
 import threading
 import time
-from contextlib import suppress
 from pathlib import Path
 from typing import cast
 
@@ -1723,10 +1723,18 @@ def _mp_publish_worker(
                 result.policy_commit_receipt_digest,
             )
         )
+    except AssumptionPolicyPublicationConflict as exc:
+        # A publication conflict is the expected "loser" outcome for distinct
+        # candidates (STATE_MISMATCH) -- distinct from a store-level failure.
+        result_queue.put(("PUBLICATION_CONFLICT", worker_id, exc.code))
     except PolicyStoreError as exc:
+        # A store-level failure (lock, bytes, cleanup, replace) must never
+        # occur in a healthy race; flag it distinctly from a conflict.
         result_queue.put(("STORE_ERROR", worker_id, exc.code))
-    except Exception as exc:  # noqa: BLE001
-        result_queue.put(("CONFLICT", worker_id, getattr(exc, "code", repr(exc))))
+    except Exception as exc:  # noqa: BLE001 - surface any other failure type
+        # Any other exception is unexpected and must be visible by exact type
+        # name (never silently swallowed by a broad Conflict/StoreError catch).
+        result_queue.put(("UNEXPECTED", worker_id, type(exc).__name__))
 
 
 def _mp_parse_entry(entry_bytes: bytes):
@@ -1793,9 +1801,16 @@ def test_multiprocess_distinct_candidates_one_wins(tmp_path: Path) -> None:
     assert len(outcomes) == 2, f"missing outcomes: {outcomes}"
 
     oks = [o for o in outcomes if o[0] == "OK"]
-    conflicts = [o for o in outcomes if o[0] in ("STORE_ERROR", "CONFLICT")]
+    conflicts = [o for o in outcomes if o[0] == "PUBLICATION_CONFLICT"]
+    store_errors = [o for o in outcomes if o[0] == "STORE_ERROR"]
+    unexpected = [o for o in outcomes if o[0] == "UNEXPECTED"]
     assert len(oks) == 1, f"expected exactly one COMMIT, got: {outcomes}"
     assert len(conflicts) == 1, f"expected exactly one conflict, got: {outcomes}"
+    # Correction 5: the loser's exception type is exactly a publication
+    # conflict (not a store error, not an unexpected exception). Distinct
+    # genesis candidates lose with LEDGER_STATE_MISMATCH.
+    assert store_errors == [], f"unexpected STORE_ERROR: {store_errors}"
+    assert unexpected == [], f"unexpected UNEXPECTED: {unexpected}"
     # Correction 4: the winning result tuple carries the complete controlled
     # outcome so the parent can prove the on-disk ledger is bound to it.
     ok = oks[0]
@@ -1804,9 +1819,6 @@ def test_multiprocess_distinct_candidates_one_wins(tmp_path: Path) -> None:
     committed_predecessor_root = ok[4]
     committed_resulting_root = ok[5]
     committed_receipt = ok[6]
-    # The loser must observe a PublicationConflict whose code is the
-    # STATE_MISMATCH family (distinct genesis candidates lose with
-    # LEDGER_STATE_MISMATCH).
     loser_code = conflicts[0][2]
     assert loser_code == "ASSUMPTION_POLICY_LEDGER_STATE_MISMATCH", (
         f"expected STATE_MISMATCH, got {loser_code}"
@@ -1894,8 +1906,12 @@ def test_multiprocess_exact_retry_both_succeed(tmp_path: Path) -> None:
         except queue_module.Empty:
             break
     assert len(outcomes) == 2, f"missing outcomes: {outcomes}"
-    # Exactly one COMMITTED and one IDEMPOTENT_APPEND; no hard failures.
+    # Correction 5: exactly two OK outcomes, zero failures of every kind
+    # (no publication conflict, no store error, no unexpected exception).
     assert all(o[0] == "OK" for o in outcomes), outcomes
+    assert [o for o in outcomes if o[0] == "PUBLICATION_CONFLICT"] == []
+    assert [o for o in outcomes if o[0] == "STORE_ERROR"] == []
+    assert [o for o in outcomes if o[0] == "UNEXPECTED"] == []
     ok_results = [o for o in outcomes if o[0] == "OK"]
     append_results = sorted(o[2] for o in ok_results)
     assert append_results == ["COMMITTED", "IDEMPOTENT_APPEND"], outcomes
@@ -2496,6 +2512,188 @@ def test_create_post_replace_failure_is_outcome_uncertain(tmp_path: Path, checkp
 
 
 # ===========================================================================
+# 4b. Owned-temp cleanup failure dominates the write/replace error (Correction 4)
+# ===========================================================================
+#
+# _cleanup_own_temp() is NOT best-effort: a failure to unlink a temp the
+# publisher created surfaces ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED. When
+# a pre-commit write/replace failure is followed by an owned-temp cleanup
+# failure, the public code is TEMP_CLEANUP_FAILED -- not the original write or
+# replace error -- because an orphan the publisher cannot remove is the more
+# actionable signal, and the old authoritative ledger is intact in every case.
+
+
+def _seed_first_entry_for_cleanup(tmp_path: Path) -> tuple:
+    """Create a store with one entry; return (pub, first, state_after_first)."""
+
+    pub = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub.create()
+    first = _prepared_activation(seq=10)
+    pub.publish(prepared=first, expected_state=pub.read_state())
+    return pub, first, pub.read_state()
+
+
+def _assert_cleanup_failure_after_pre_commit_fault(
+    tmp_path: Path,
+    *,
+    fault: object,
+) -> None:
+    """Run a publish under ``fault`` with a flaky owned-temp unlink, assert the
+    public code is TEMP_CLEANUP_FAILED, and assert the old ledger is intact.
+
+    The flaky unlink only fails on a managed temp (``.policy-ledger.<hex>.tmp``
+    under the store root), so the orphan-sweep unlinks are unaffected. Every
+    pre-commit fault exercised here leaves a real temp file on disk that the
+    owned-temp cleanup then fails to remove."""
+
+    pub, first, state_after_first = _seed_first_entry_for_cleanup(tmp_path)
+    second = _successor_entry(first.ledger_entry, seq=20)
+    bytes_before = (tmp_path / "ledger.json").read_bytes()
+
+    import unittest.mock as mock
+
+    real_unlink = Path.unlink
+    invoked = {"on_temp": False}
+
+    def flaky_unlink(self, *args, **kwargs):
+        # A managed temp lives under the store root and matches the managed
+        # naming pattern. Only fail those unlinks (the pre-replace cleanup
+        # path); leave every other unlink (e.g. orphan sweeps) intact.
+        name = self.name
+        if self.parent == tmp_path and name.startswith(".policy-ledger.") and name.endswith(".tmp"):
+            invoked["on_temp"] = True
+            raise OSError("injected owned-temp cleanup failure")
+        return real_unlink(self, *args, **kwargs)
+
+    with (
+        FilesystemAssumptionPolicyPublisher.with_fault_injection(fault),  # type: ignore[arg-type]
+        mock.patch.object(Path, "unlink", flaky_unlink),
+        pytest.raises(PolicyStoreError) as f,
+    ):
+        pub.publish(
+            prepared=PreparedPolicyActivation.build(second),
+            expected_state=state_after_first,
+        )
+    # The public code is TEMP_CLEANUP_FAILED, never the original write/replace
+    # error, even though the write/replace fault fired first.
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED", (
+        f"expected TEMP_CLEANUP_FAILED, got {f.value.code}"
+    )
+    # The old authoritative ledger is byte-for-byte intact.
+    assert (tmp_path / "ledger.json").read_bytes() == bytes_before
+    # The flaky unlink was actually reached on a managed temp (the cleanup path
+    # ran against a real on-disk temp).
+    assert invoked["on_temp"] is True
+
+
+def test_cleanup_failure_after_partial_temp_write(tmp_path: Path) -> None:
+    """AFTER_PARTIAL_TEMP_WRITE fault (write path fails) followed by an
+    owned-temp cleanup failure surfaces TEMP_CLEANUP_FAILED."""
+
+    def fault(name: str) -> None:
+        if name == "AFTER_PARTIAL_TEMP_WRITE":
+            raise RuntimeError("injected partial-write fault")
+
+    _assert_cleanup_failure_after_pre_commit_fault(tmp_path, fault=fault)
+
+
+def test_cleanup_failure_after_temp_fsync_failure(tmp_path: Path) -> None:
+    """A temp fsync failure (write path fails at the flush/fsync step) followed
+    by an owned-temp cleanup failure surfaces TEMP_CLEANUP_FAILED."""
+
+    import unittest.mock as mock
+
+    pub, first, state_after_first = _seed_first_entry_for_cleanup(tmp_path)
+    second = _successor_entry(first.ledger_entry, seq=20)
+    bytes_before = (tmp_path / "ledger.json").read_bytes()
+
+    real_fsync = os.fsync
+    real_unlink = Path.unlink
+    invoked = {"on_temp": False}
+
+    def flaky_fsync(fd):
+        raise OSError("injected temp fsync failure")
+
+    def flaky_unlink(self, *args, **kwargs):
+        name = self.name
+        if self.parent == tmp_path and name.startswith(".policy-ledger.") and name.endswith(".tmp"):
+            invoked["on_temp"] = True
+            raise OSError("injected owned-temp cleanup failure")
+        return real_unlink(self, *args, **kwargs)
+
+    with (
+        mock.patch(
+            "csd_foundry.governance.v0_5.assumption_policy_filesystem_publication.os.fsync",
+            flaky_fsync,
+        ),
+        mock.patch.object(Path, "unlink", flaky_unlink),
+        pytest.raises(PolicyStoreError) as f,
+    ):
+        pub.publish(
+            prepared=PreparedPolicyActivation.build(second),
+            expected_state=state_after_first,
+        )
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED"
+    assert (tmp_path / "ledger.json").read_bytes() == bytes_before
+    assert invoked["on_temp"] is True
+    _ = real_fsync  # referenced for clarity
+
+
+def test_cleanup_failure_after_os_replace_failure(tmp_path: Path) -> None:
+    """A real os.replace failure (replace path fails) followed by an owned-temp
+    cleanup failure surfaces TEMP_CLEANUP_FAILED."""
+
+    import unittest.mock as mock
+
+    pub, first, state_after_first = _seed_first_entry_for_cleanup(tmp_path)
+    second = _successor_entry(first.ledger_entry, seq=20)
+    bytes_before = (tmp_path / "ledger.json").read_bytes()
+
+    real_replace = os.replace
+    real_unlink = Path.unlink
+    invoked = {"on_temp": False}
+
+    def flaky_replace(src, dst):
+        raise OSError("injected replace failure")
+
+    def flaky_unlink(self, *args, **kwargs):
+        name = self.name
+        if self.parent == tmp_path and name.startswith(".policy-ledger.") and name.endswith(".tmp"):
+            invoked["on_temp"] = True
+            raise OSError("injected owned-temp cleanup failure")
+        return real_unlink(self, *args, **kwargs)
+
+    with (
+        mock.patch(
+            "csd_foundry.governance.v0_5.assumption_policy_filesystem_publication.os.replace",
+            flaky_replace,
+        ),
+        mock.patch.object(Path, "unlink", flaky_unlink),
+        pytest.raises(PolicyStoreError) as f,
+    ):
+        pub.publish(
+            prepared=PreparedPolicyActivation.build(second),
+            expected_state=state_after_first,
+        )
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED"
+    assert (tmp_path / "ledger.json").read_bytes() == bytes_before
+    assert invoked["on_temp"] is True
+    _ = real_replace  # referenced for clarity
+
+
+def test_cleanup_failure_after_before_replace_injected_fault(tmp_path: Path) -> None:
+    """A BEFORE_REPLACE injected fault (replace path fails at the checkpoint)
+    followed by an owned-temp cleanup failure surfaces TEMP_CLEANUP_FAILED
+    (never REPLACE_FAILED)."""
+
+    def fault(name: str) -> None:
+        if name == "BEFORE_REPLACE":
+            raise RuntimeError("injected before-replace fault")
+
+    _assert_cleanup_failure_after_pre_commit_fault(tmp_path, fault=fault)
+
+
+# ===========================================================================
 # 4. Delayed lifecycle race: a later create/open cannot reset to empty
 # ===========================================================================
 
@@ -2649,8 +2847,9 @@ def test_read_ledger_on_missing_root_raises_root_missing(tmp_path: Path) -> None
 
 
 def test_open_lock_path_is_directory(tmp_path: Path) -> None:
-    """If publication.lock is a directory, opening the store must fail (the
-    lock helper cannot lock a directory) rather than corrupt anything."""
+    """If publication.lock is a directory, opening the store must fail with
+    LOCK_INVALID (the strict lock opener refuses a non-regular lock path)
+    rather than corrupt anything."""
 
     pub = FilesystemAssumptionPolicyPublisher(tmp_path)
     pub.create()
@@ -2660,32 +2859,57 @@ def test_open_lock_path_is_directory(tmp_path: Path) -> None:
     pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
     with pytest.raises(PolicyStoreError) as f:
         pub2.open()
-    assert f.value.code == "ASSUMPTION_POLICY_STORE_LOCK_FAILED"
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_LOCK_INVALID"
 
 
 @_skip_no_symlinks
 def test_open_lock_path_is_symlink(tmp_path: Path) -> None:
-    """If publication.lock is a symlink, open() must not follow it into
-    corruption: it fails at the lock boundary."""
+    """Correction 2: if publication.lock is a symlink to an unrelated file,
+    the strict lock opener must reject it as LOCK_INVALID on every operation
+    (open/read_state/publish). The symlink target is never written through,
+    the authoritative ledger bytes are unchanged, and no alternate lock object
+    is created."""
 
     pub = FilesystemAssumptionPolicyPublisher(tmp_path)
     pub.create()
-    target = tmp_path / "elsewhere"
-    target.write_bytes(b"x")
+    # Record the authoritative ledger bytes before tampering with the lock.
+    ledger_bytes_before = (tmp_path / "ledger.json").read_bytes()
+    # Sentinel: an unrelated file the symlink will point at. Any write through
+    # the lock symlink would corrupt this file, so we prove the strict opener
+    # never follows it by asserting its bytes are unchanged.
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_bytes(b"sentinel-bytes-unchanged")
+    sentinel_bytes_before = sentinel.read_bytes()
+    # Replace the lock file with a symlink to the sentinel.
     lock = tmp_path / "publication.lock"
     lock.unlink()
-    lock.symlink_to(target)
+    lock.symlink_to(sentinel)
+
     pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
-    # open() under the lock must surface a lock failure or the existing ledger
-    # cleanly; it must never corrupt the authoritative ledger.
-    with suppress(PolicyStoreError):
+    # open() must surface LOCK_INVALID.
+    with pytest.raises(PolicyStoreError) as f:
         pub2.open()
-    # The authoritative ledger is still valid.
-    pub3 = FilesystemAssumptionPolicyPublisher(tmp_path)
-    # Remove the symlink so a clean lock can be acquired.
-    lock.unlink()
-    pub3.open()
-    assert pub3.read_state() == ExpectedPolicyLedgerStateV3.empty()
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_LOCK_INVALID"
+    # read_state() must surface LOCK_INVALID too.
+    with pytest.raises(PolicyStoreError) as f:
+        pub2.read_state()
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_LOCK_INVALID"
+    # publish() must surface LOCK_INVALID too (it acquires the same lock).
+    prepared = _prepared_activation(seq=10)
+    with pytest.raises(PolicyStoreError) as f:
+        pub2.publish(prepared=prepared, expected_state=ExpectedPolicyLedgerStateV3.empty())
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_LOCK_INVALID"
+
+    # The sentinel file was never written through the symlink.
+    assert sentinel.read_bytes() == sentinel_bytes_before
+    # The authoritative ledger bytes are byte-for-byte unchanged.
+    assert (tmp_path / "ledger.json").read_bytes() == ledger_bytes_before
+    # No alternate lock object was created: the symlink is still a symlink
+    # (not a regular file substituted in its place), and no second lock file
+    # appeared anywhere in the store root.
+    assert lock.is_symlink()
+    lock_names = [p.name for p in tmp_path.iterdir() if "lock" in p.name or p.suffix == ".lock"]
+    assert lock_names == ["publication.lock"]
 
 
 def test_ledger_path_is_directory_surfaces_write_failed(tmp_path: Path) -> None:
@@ -2970,6 +3194,126 @@ def test_cleanup_failure_preserves_symlink_matching_pattern(tmp_path: Path) -> N
     assert link.is_symlink()
     assert target.read_bytes() == b"keep"
     assert ledger_path.read_bytes() == bytes_before
+
+
+# ===========================================================================
+# 3c. Orphan enumeration failures are normalized (Correction 3)
+# ===========================================================================
+#
+# A raw OSError from iterdir(), lstat(), is_symlink(), is_dir(), or unlink()
+# must never escape _cleanup_orphans: every filesystem operation involved in
+# discovering and classifying a managed orphan is wrapped so the failure
+# surfaces ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED with the offending
+# candidate name (or "<root>" for an enumeration failure) as the detail. The
+# authoritative ledger bytes and the read state are unchanged in every case.
+
+
+def test_orphan_enumeration_iterdir_failure_surfaces_cleanup_failed(tmp_path: Path) -> None:
+    """If self.root.iterdir() raises OSError, open() surfaces
+    TEMP_CLEANUP_FAILED (detail "<root>"); the ledger bytes and state are
+    unchanged."""
+
+    import unittest.mock as mock
+
+    ledger_path, bytes_before, state = _seed_store_with_entry_and_state(tmp_path)
+    # A managed orphan so the cleanup path actually reaches iterdir's body.
+    orphan = tmp_path / _ORPHAN_NAME
+    orphan.write_bytes(b"garbage")
+
+    real_iterdir = Path.iterdir
+
+    def flaky_iterdir(self, *args, **kwargs):
+        if self == tmp_path:
+            raise OSError("injected iterdir failure")
+        return real_iterdir(self, *args, **kwargs)
+
+    with mock.patch.object(Path, "iterdir", flaky_iterdir):
+        pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+        with pytest.raises(PolicyStoreError) as f:
+            pub2.open()
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED"
+    assert f.value.detail == "<root>"
+    # The orphan is still present (iterdir failed before any unlink); the
+    # authoritative ledger bytes and state are unchanged.
+    assert orphan.exists()
+    assert ledger_path.read_bytes() == bytes_before
+    # A clean reopen (no fault) reconstructs the same state.
+    pub3 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub3.open()
+    assert pub3.read_state() == state
+
+
+def test_orphan_candidate_lstat_failure_surfaces_cleanup_failed(tmp_path: Path) -> None:
+    """If a candidate's lstat/is_symlink inspection raises OSError, open()
+    surfaces TEMP_CLEANUP_FAILED (detail = candidate name); the ledger bytes
+    and state are unchanged."""
+
+    import unittest.mock as mock
+
+    ledger_path, bytes_before, state = _seed_store_with_entry_and_state(tmp_path)
+    orphan = tmp_path / _ORPHAN_NAME
+    orphan.write_bytes(b"garbage")
+
+    real_is_symlink = Path.is_symlink
+    call_count = {"n": 0}
+
+    def flaky_is_symlink(self, *args, **kwargs):
+        # Fail only on the managed orphan candidate; leave other paths (e.g.
+        # the root's own is_dir check) intact.
+        if self == orphan:
+            call_count["n"] += 1
+            raise OSError("injected lstat failure")
+        return real_is_symlink(self, *args, **kwargs)
+
+    with mock.patch.object(Path, "is_symlink", flaky_is_symlink):
+        pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+        with pytest.raises(PolicyStoreError) as f:
+            pub2.open()
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED"
+    assert f.value.detail == _ORPHAN_NAME
+    assert call_count["n"] >= 1
+    # The orphan is still present (inspection failed before unlink); the
+    # authoritative ledger bytes and state are unchanged.
+    assert orphan.exists()
+    assert ledger_path.read_bytes() == bytes_before
+    pub3 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub3.open()
+    assert pub3.read_state() == state
+
+
+def test_orphan_managed_unlink_failure_surfaces_cleanup_failed(tmp_path: Path) -> None:
+    """If unlink() of a managed orphan raises OSError, open() surfaces
+    TEMP_CLEANUP_FAILED (detail = candidate name); the ledger bytes and state
+    are unchanged.
+
+    This mirrors test_orphan_unlink_failure_surfaces_cleanup_failed but is kept
+    as an explicit, independently-named assertion of the Correction 3 wrapping
+    requirement so the enumeration-failure normalization matrix is complete."""
+
+    import unittest.mock as mock
+
+    ledger_path, bytes_before, state = _seed_store_with_entry_and_state(tmp_path)
+    orphan = tmp_path / _ORPHAN_NAME
+    orphan.write_bytes(b"garbage")
+
+    real_unlink = Path.unlink
+
+    def flaky_unlink(self, *args, **kwargs):
+        if self == orphan:
+            raise OSError("injected unlink failure")
+        return real_unlink(self, *args, **kwargs)
+
+    with mock.patch.object(Path, "unlink", flaky_unlink):
+        pub2 = FilesystemAssumptionPolicyPublisher(tmp_path)
+        with pytest.raises(PolicyStoreError) as f:
+            pub2.open()
+    assert f.value.code == "ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED"
+    assert f.value.detail == _ORPHAN_NAME
+    assert orphan.exists()
+    assert ledger_path.read_bytes() == bytes_before
+    pub3 = FilesystemAssumptionPolicyPublisher(tmp_path)
+    pub3.open()
+    assert pub3.read_state() == state
 
 
 # ===========================================================================

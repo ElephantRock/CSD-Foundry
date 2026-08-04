@@ -2,8 +2,8 @@
 
 Provides ``FilesystemAssumptionPolicyPublisher``: an interprocess-safe atomic
 publisher that stores the authoritative ``AssumptionPolicyLedgerV3`` as a
-single canonical JSON file and uses ``_platform.advisory_lock`` for exclusive
-access.
+single canonical JSON file and uses a *strict* composition of the
+``_platform`` lock primitives for exclusive access.
 
 The pure A1.3-A function ``compare_and_append_policy_entry_v3`` remains the
 semantic oracle. The filesystem layer owns: locking, stored-byte validation,
@@ -15,15 +15,25 @@ Claim boundary
 
 This module claims, on every supported platform:
 
-* exclusive interprocess publication (via ``advisory_lock`` on a lock file the
-  lock helper itself creates);
+* exclusive interprocess publication via a *strict* lock composition: the lock
+  file is opened with ``_platform.open_lock_file_strict`` (POSIX
+  ``O_RDWR | O_CREAT | O_APPEND | O_NOFOLLOW``; Windows ``a+b`` plus an
+  ``os.fstat`` regular-file check) so a symlink (or directory, or any other
+  non-regular shape) at ``publication.lock`` is rejected before any lock is
+  acquired. The publisher does NOT use the ordinary ``_platform.advisory_lock``
+  used by the temporal, admission, and registry stores -- those remain
+  permissive and are intentionally untouched;
 * atomic visibility of the authoritative ledger through ``os.replace`` on the
   same filesystem as the destination;
 * temporary-file fsync before the atomic replace so the replacement is durable
   up to the supported durability boundary;
 * crash-safe temporary-file handling: every managed temp file is named
   ``.policy-ledger.<uuid>.tmp`` inside the store root, and any such orphan left
-  by a previous crash is removed at store open;
+  by a previous crash is removed at store open. Orphan enumeration and every
+  candidate inspection (``iterdir``, ``is_symlink``, ``is_dir``, ``unlink``)
+  is normalized: no raw ``OSError`` from these calls may escape -- a failure
+  surfaces ``ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED`` with the offending
+  name (or ``"<root>"``) as the detail;
 * full restart reconstruction: every published ledger is re-parsed and fully
   revalidated (including every nested contract's schema version) on read;
 * strengthened post-write verification that the bytes just written are the
@@ -38,6 +48,19 @@ POSIX additionally claims:
 Windows does NOT claim POSIX-equivalent sudden-power-loss directory-fsync
 durability: directories cannot be opened as file descriptors and ``os.sync``
 is unavailable. ``fsync_directory`` is a no-op on Windows.
+
+Lock-path invariant
+===================
+
+``publication.lock`` must always be a regular file. A symlink at the lock path
+is rejected (POSIX ``O_NOFOLLOW`` yields ``ELOOP``; Windows ``fstat`` fails the
+``S_ISREG`` check after a transparent dereference), as is a directory or any
+other non-regular shape. Every such shape/open failure is normalized to
+``ASSUMPTION_POLICY_STORE_LOCK_INVALID``; ``ASSUMPTION_POLICY_STORE_LOCK_FAILED``
+is reserved for the case where the lock path is a valid regular file but the
+advisory lock itself could not be acquired. An ``OSError`` raised by the
+protected operation inside the lock scope is never mislabeled as either lock
+code.
 
 Lifecycle
 =========
@@ -60,9 +83,9 @@ be reopened from any process at any time.
 Atomic publication sequence
 ===========================
 
-All steps run under a single ``advisory_lock`` acquisition:
+All steps run under a single strict lock acquisition:
 
-  1. acquire exclusive publication lock
+  1. acquire exclusive publication lock (strict opener)
   2. read authoritative stored ledger bytes
   3. reconstruct and fully validate ledger/3 (every nested contract revalidated)
   4. derive exact current root and head
@@ -70,19 +93,57 @@ All steps run under a single ``advisory_lock`` acquisition:
   6. compare exact expected state
   7. validate predecessor pair and sequence
   8. construct updated ledger/3 bytes
-  9. ``_checkpoint("pre-commit")`` -- fault injection point
+  9. ``_checkpoint("BEFORE_TEMP_CREATE")`` -- fault injection point
  10. write managed temporary file ``.policy-ledger.<uuid>.tmp``
- 11. flush and fsync the temporary file
- 12. ``os.replace`` atomically swaps the authoritative file
- 13. ``_checkpoint("post-commit")`` -- fault injection point
- 14. perform supported directory durability operation
- 15. reread authoritative bytes
- 16. reconstruct and verify exact bytes + entries + root + head + predecessor
- 17. return the activation result
- 18. release the lock
+ 11. ``_checkpoint("AFTER_PARTIAL_TEMP_WRITE")`` -- fault injection point
+ 12. ``_checkpoint("AFTER_TEMP_FLUSH")`` -- fault injection point
+ 13. ``os.replace`` atomically swaps the authoritative file
+ 14. ``_checkpoint("BEFORE_REPLACE")`` -- fault injection point (pre-commit)
+     [commit point: os.replace crosses here]
+ 15. ``_checkpoint("AFTER_REPLACE")`` -- fault injection point (post-commit)
+ 16. ``_checkpoint("BEFORE_DIRECTORY_FSYNC")`` -- fault injection point
+ 17. perform supported directory durability operation
+ 18. ``_checkpoint("BEFORE_POST_WRITE_READ")`` -- fault injection point
+ 19. reread authoritative bytes
+ 20. ``_checkpoint("DURING_POST_WRITE_READ")`` -- fault injection point
+ 21. reconstruct and verify exact bytes + entries + root + head + predecessor
+ 22. return the activation result
+ 23. release the lock
 
-Pre-commit failure (steps 1-11): the old ledger is intact, no result is
-returned, no rollback is required. Post-commit failure (steps 12+): the
+Named fault-injection checkpoints (all normalized)
+===================================================
+
+There are exactly eight deterministic checkpoints, split at the ``os.replace``
+commit point. A fault raised at any of them is normalized to a stable public
+code (never the raw exception type or message):
+
+* pre-replace (old ledger byte-for-byte intact, fault propagates, temp
+  removed):
+
+  - ``BEFORE_TEMP_CREATE``
+  - ``AFTER_PARTIAL_TEMP_WRITE``
+  - ``AFTER_TEMP_FLUSH``
+  - ``BEFORE_REPLACE``
+
+  The first three normalize to ``ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED``;
+  ``BEFORE_REPLACE`` normalizes to
+  ``ASSUMPTION_POLICY_STORE_REPLACE_FAILED``. If the owned-temp cleanup that
+  follows any of these faults itself fails, the public code is
+  ``ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED`` (the cleanup failure
+  dominates the original write/replace error because an un-removable orphan is
+  the more actionable signal).
+
+* post-replace (the publication may have landed, so any fault is normalized to
+  ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` and no rollback is
+  attempted):
+
+  - ``AFTER_REPLACE``
+  - ``BEFORE_DIRECTORY_FSYNC``
+  - ``BEFORE_POST_WRITE_READ``
+  - ``DURING_POST_WRITE_READ``
+
+Pre-commit failure (steps 1-13): the old ledger is intact, no result is
+returned, no rollback is required. Post-commit failure (steps 14+): the
 replacement may or may not have been durably installed; the publisher raises
 ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` and never attempts a
 rollback (which could itself corrupt a successfully-installed ledger).
@@ -95,11 +156,11 @@ import os
 import re
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from csd_foundry._platform import _open_lock_file, fsync_directory, lock_file, unlock_file
+from csd_foundry._platform import fsync_directory, lock_file, open_lock_file_strict, unlock_file
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION,
     SIGNATURE_PROFILE_SCHEMA_VERSION,
@@ -383,10 +444,16 @@ class PolicyStoreError(RuntimeError):
       a directory (or is an unusable path shape such as a symlink to a file).
     * ``ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED`` -- the root directory or
       its parent could not be created or synced.
-    * ``ASSUMPTION_POLICY_STORE_LOCK_FAILED`` -- the publication lock could not
-      be acquired (raised by the lock helper as ``OSError`` during acquisition
-      only; an ``OSError`` raised by a protected operation is never mislabeled
-      as ``LOCK_FAILED``).
+    * ``ASSUMPTION_POLICY_STORE_LOCK_INVALID`` -- the publication lock path is
+      not a regular file (it is a symlink, a directory, or another non-regular
+      shape). The strict lock opener refuses to open or follow such a path, so
+      the publication lock can never be held against an attacker-controlled
+      file. Raised during acquisition only; an ``OSError`` raised by a
+      protected operation is never mislabeled as ``LOCK_INVALID``.
+    * ``ASSUMPTION_POLICY_STORE_LOCK_FAILED`` -- the lock path is a valid
+      regular file but the advisory lock itself could not be acquired (raised
+      by the lock helper as ``OSError`` during acquisition only; an ``OSError``
+      raised by a protected operation is never mislabeled as ``LOCK_FAILED``).
     * ``ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED`` -- ``create()`` was called
       against a store that already holds a valid authoritative ledger.
     * ``ASSUMPTION_POLICY_STORED_BYTES_MISSING`` -- the authoritative ledger
@@ -1042,8 +1109,13 @@ class FilesystemAssumptionPolicyPublisher:
     """Interprocess-safe atomic filesystem publisher.
 
     Stores the authoritative ``AssumptionPolicyLedgerV3`` as a single canonical
-    JSON file. Uses ``_platform.advisory_lock`` for exclusive interprocess
-    access and ``os.replace`` for atomic file replacement.
+    JSON file. Uses a *strict* composition of the ``_platform`` lock primitives
+    (``open_lock_file_strict`` + ``lock_file``/``unlock_file``) for exclusive
+    interprocess access -- not the ordinary ``_platform.advisory_lock`` used by
+    the temporal, admission, and registry stores -- and ``os.replace`` for
+    atomic file replacement. The strict opener rejects a symlink (or directory,
+    or any other non-regular shape) at ``publication.lock`` before any lock is
+    acquired.
 
     See the module docstring for the full claim boundary, lifecycle, and the
     atomic publication sequence.
@@ -1102,8 +1174,8 @@ class FilesystemAssumptionPolicyPublisher:
         """Create the store root directory if needed and sync it.
 
         Performed under the publication lock by ``create()`` only. The lock
-        file is created by ``advisory_lock`` itself when it opens the lock
-        path.
+        file is created by the strict lock opener (``open_lock_file_strict``)
+        itself when it opens the lock path.
         """
 
         try:
@@ -1128,12 +1200,31 @@ class FilesystemAssumptionPolicyPublisher:
         ``ASSUMPTION_POLICY_STORE_DURABILITY_FAILED``. Neither failure touches
         the authoritative ledger bytes, so the store state is unchanged on
         either failure and a subsequent read reconstructs the same ledger.
+
+        Enumeration and inspection failures are normalized too: every
+        filesystem operation involved in discovering and classifying a
+        candidate (``iterdir``, ``lstat``/``is_symlink``/``is_dir``, and the
+        managed ``unlink``) is wrapped so no raw ``OSError`` may escape. A
+        failure to enumerate the store root or to inspect a candidate surfaces
+        ``ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED`` with the offending
+        candidate name (or ``"<root>"`` for an enumeration failure) as the
+        detail, so a caller can switch on the outcome without parsing the
+        underlying backend message.
         """
 
-        if not self.root.exists() or not self.root.is_dir():
+        try:
+            root_exists = self.root.exists()
+            root_is_dir = self.root.is_dir() if root_exists else False
+        except OSError as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED", "<root>") from exc
+        if not root_exists or not root_is_dir:
             return
         removed_any = False
-        for candidate in self.root.iterdir():
+        try:
+            candidates = list(self.root.iterdir())
+        except OSError as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED", "<root>") from exc
+        for candidate in candidates:
             name = candidate.name
             if not _TEMP_NAME_PATTERN.match(name):
                 # Foreign file or non-matching name: leave untouched.
@@ -1141,10 +1232,21 @@ class FilesystemAssumptionPolicyPublisher:
             # Never follow symlinks and never remove directories. A managed
             # temp is always a regular file; anything else matching the name
             # pattern is left untouched (and surfaces later as a publish
-            # failure if it blocks the atomic replace).
-            if candidate.is_symlink():
+            # failure if it blocks the atomic replace). Each inspection call is
+            # wrapped so a degraded filesystem cannot leak a raw OSError: an
+            # inspection failure is a cleanup failure the operator must learn
+            # about, and it is normalized to TEMP_CLEANUP_FAILED.
+            try:
+                is_symlink = candidate.is_symlink()
+            except OSError as exc:
+                raise PolicyStoreError("ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED", name) from exc
+            if is_symlink:
                 continue
-            if candidate.is_dir():
+            try:
+                is_dir = candidate.is_dir()
+            except OSError as exc:
+                raise PolicyStoreError("ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED", name) from exc
+            if is_dir:
                 continue
             try:
                 candidate.unlink()
@@ -1245,32 +1347,49 @@ class FilesystemAssumptionPolicyPublisher:
 
     @contextmanager
     def _locked(self) -> Iterator[None]:
-        """Acquire the publication lock, normalizing *acquisition* failures.
+        """Acquire the publication lock, normalizing acquisition failures.
 
-        Only an ``OSError`` raised while acquiring the lock (opening or locking
-        the lock file, before the protected operation begins) is translated to
-        ``LOCK_FAILED``. Any exception -- including an ``OSError`` -- raised by
-        the protected operation inside the ``with`` body propagates unchanged:
-        it must never be mislabeled as a lock failure, because the observable
-        recovery action differs. The lock is released (best-effort) on exit
-        even if the body raises.
+        The lock file is opened with the *strict* opener
+        (:func:`open_lock_file_strict`), which refuses a symlink (or directory,
+        or any other non-regular shape) at ``publication.lock``: such a path
+        can never be followed into an attacker-controlled file or directory.
+        The strict opener raises ``OSError`` for a malformed path *during
+        opening*; that is normalized to ``ASSUMPTION_POLICY_STORE_LOCK_INVALID``
+        so a caller can switch on the precise recovery action.
+
+        Once a valid regular lock file is open, acquiring the advisory lock
+        itself may still fail (e.g. the kernel lock table is exhausted, or a
+        lock held by a dead process cannot be reclaimed). That is normalized to
+        ``ASSUMPTION_POLICY_STORE_LOCK_FAILED`` -- the lock path is valid, the
+        acquisition simply could not complete.
+
+        Any exception -- including an ``OSError`` -- raised by the protected
+        operation inside the ``with`` body propagates unchanged: it must never
+        be mislabeled as a lock failure, because the observable recovery action
+        differs. The lock is released (best-effort) on exit even if the body
+        raises.
 
         This drives the lock primitives directly rather than using the
-        ``advisory_lock`` context manager, because ``advisory_lock`` performs
+        ``advisory_lock_strict`` context manager, because that manager performs
         its open+lock during ``__enter__``: a caller cannot otherwise
-        distinguish an acquisition-time ``OSError`` (lock failure) from a
-        body-time ``OSError`` (operation failure). By performing the open+lock
-        here, outside the body, the attribution is exact.
+        distinguish an acquisition-time ``OSError`` (lock invalid / lock
+        failed) from a body-time ``OSError`` (operation failure). By performing
+        the open+lock here, outside the body, the attribution is exact.
         """
 
         try:
-            handle = _open_lock_file(self.lock_path)
+            handle = open_lock_file_strict(self.lock_path)
         except OSError as exc:
-            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED") from exc
+            # Shape/open failure: the lock path is a symlink, a directory, or
+            # otherwise not a usable regular file. The publication lock can
+            # never be safely held against such a path.
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_INVALID") from exc
         try:
             try:
                 lock_file(handle)
             except OSError as exc:
+                # The lock path is a valid regular file, but the advisory lock
+                # itself could not be acquired.
                 raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED") from exc
             yield
         finally:
@@ -1375,15 +1494,30 @@ class FilesystemAssumptionPolicyPublisher:
         return self.root / f"{_TEMP_PREFIX}{uuid.uuid4().hex}{_TEMP_SUFFIX}"
 
     def _cleanup_own_temp(self, temp: Path) -> None:
-        """Best-effort unlink of a temp file this publisher created.
+        """Unlink a temp file this publisher created, surfacing cleanup failure.
 
         Used on the pre-replace failure path only: if ``os.replace`` failed,
         the temp file is still owned by this publisher and the old
-        authoritative ledger is intact, so removing the temp is always safe.
+        authoritative ledger is intact, so removing the temp is always safe --
+        and a failure to remove it is a real store condition the operator must
+        learn about. Cleanup is therefore NOT best-effort: an ``OSError`` from
+        the unlink surfaces ``ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED``.
+
+        Because this is called from inside the pre-replace ``except`` handlers
+        of ``_write_and_fsync_temp``, ``create``, and ``_commit``, a cleanup
+        failure propagates in place of the original write/replace error: the
+        caller observes ``TEMP_CLEANUP_FAILED`` rather than
+        ``WRITE_FAILED`` / ``REPLACE_FAILED``. That is intentional -- a temp
+        the publisher could not remove is a strictly more actionable signal
+        than the write/replace error that preceded it (the operator must
+        reconcile the orphan regardless), and the old authoritative ledger is
+        byte-for-byte intact in every case.
         """
 
-        with suppress(OSError):
+        try:
             temp.unlink(missing_ok=True)
+        except OSError as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED") from exc
 
     def _write_and_fsync_temp(self, payload: bytes) -> Path:
         """Write ``payload`` to a managed temp file and fsync it; return path.
