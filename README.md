@@ -103,6 +103,13 @@ trajectory-synthesis, episode, compiler, and empirical-learning layers remain ah
 
 ## Quick start
 
+The full historical validation gate count is exactly sixteen commands, grouped
+by release: four v0.1/v0.3 (scenarios, mutations, temporal, temporal-mutations),
+seven v0.4 (contracts, determinism, identities, replay, execution, publication,
+reconciliation), four v0.5 (contract-freeze, governance, admission, temporal),
+and one v0.1 seed. `scripts/monitor_csd_foundry.py` runs these same sixteen
+gates plus the static `ruff`/`mypy`/`pytest` suite and prints a compact summary.
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate

@@ -43,7 +43,7 @@ import os
 import stat
 import sys
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import IO
 
@@ -142,16 +142,77 @@ class LockInvalidError(OSError):
     """
 
 
+class LockInitializationError(OSError):
+    """Raised by :func:`open_lock_file_strict` when a validated lock-file
+    descriptor was acquired but the handle initialization failed (``os.fdopen``
+    or the seed write/flush/fsync raised).
+
+    This is a distinct ``OSError`` subclass so the strict opener's caller can
+    separate "the validated descriptor could not be turned into a usable handle
+    or seeded" (which the caller normalizes to
+    ``ASSUMPTION_POLICY_STORE_LOCK_FAILED`` -- the lock path is a valid regular
+    file, but a usable lock could not be established) from "the lock path itself
+    is malformed" (``LockInvalidError``, normalized to ``LOCK_INVALID``) and
+    from a body-time ``OSError`` (operation failure, never mislabeled).
+    """
+
+
+def _finish_lock_file_open(fd: int, *, opened_size: int) -> IO[bytes]:
+    """Turn a validated raw lock-file descriptor into a seeded binary handle.
+
+    Takes ownership of ``fd``: on success the returned handle owns the
+    descriptor, and the caller MUST NOT close ``fd`` independently. On failure
+    the descriptor is always closed here (never leaked), and the failure is
+    re-raised as :class:`LockInitializationError`:
+
+    * if ``os.fdopen`` fails, the raw ``fd`` is closed before re-raising;
+    * if ``os.fdopen`` succeeds but the seed (``write`` / ``flush`` /
+      ``os.fsync``) fails, the handle is closed (which closes the descriptor)
+      before re-raising.
+
+    The seed is written only when the opened descriptor reported a zero size,
+    matching the original permissive opener's contract that the lock file
+    contains at least one byte (required by ``msvcrt.locking`` on Windows).
+    """
+
+    try:
+        handle = os.fdopen(fd, "a+b")  # noqa: SIM115
+    except Exception as exc:
+        # fdopen failed: the raw descriptor is still ours to close. Closing it
+        # here means the caller never has to.
+        with suppress(OSError):
+            os.close(fd)
+        raise LockInitializationError("lock file handle could not be opened") from exc
+    if opened_size == 0:
+        try:
+            handle.write(b"\0")
+            handle.flush()
+            os.fsync(handle.fileno())
+        except Exception as exc:
+            # The seed failed: the handle (and thus the descriptor) is ours, so
+            # close it before re-raising so no descriptor is leaked.
+            with suppress(OSError):
+                handle.close()
+            raise LockInitializationError("lock file could not be seeded") from exc
+    return handle
+
+
 def _open_windows_lock_file_strict(lock_path: Path) -> IO[bytes]:
     """Windows strict lock-file opener with acquisition-time validation.
 
-    Algorithm:
+    Algorithm (seven acquisition-time validation steps):
       1. lstat the path; reject symlink or non-regular.
-      2. Open/create without truncation.
-      3. fstat the opened descriptor; require regular.
-      4. lstat the path again; reject symlink or non-regular.
-      5. Require same identity (st_dev, st_ino) between descriptor and path.
-      6. Seed only after all validation passes.
+      2. Open/create without truncation (O_RDWR | O_CREAT | O_EXCL when absent,
+         O_RDWR when present; never O_TRUNC, never follow).
+      3. fstat the opened descriptor; require regular (rejects a directory or a
+         dereferenced symlink the open call may have followed).
+      4. lstat the path again; reject symlink or non-regular (detects a
+         concurrent replacement that occurred between the open and now).
+      5. Require same identity (st_dev, st_ino) between the opened descriptor
+         and the path (detects a replacement that swapped in a different file).
+      6. Seed only after all validation passes (when the opened descriptor
+         reported a zero size).
+      7. Return the seeded handle; the caller owns its lifetime.
     """
 
     binary = getattr(os, "O_BINARY", 0)
@@ -195,16 +256,15 @@ def _open_windows_lock_file_strict(lock_path: Path) -> IO[bytes]:
             raise LockInvalidError("lock path became non-regular")
         if (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino):
             raise LockInvalidError("lock path changed during acquisition")
-        handle = os.fdopen(fd, "a+b")  # noqa: SIM115
     except Exception:
         os.close(fd)
         raise
 
-    if opened.st_size == 0:
-        handle.write(b"\0")
-        handle.flush()
-        os.fsync(handle.fileno())
-    return handle
+    # The descriptor is validated; transfer ownership to the helper. The helper
+    # closes the descriptor (directly or via the handle) on any failure and
+    # re-raises as LockInitializationError. On success the returned handle owns
+    # the descriptor and the caller MUST NOT close ``fd`` independently.
+    return _finish_lock_file_open(fd, opened_size=opened.st_size)
 
 
 def _open_posix_lock_file_strict(lock_path: Path) -> IO[bytes]:
@@ -222,16 +282,15 @@ def _open_posix_lock_file_strict(lock_path: Path) -> IO[bytes]:
         opened = os.fstat(fd)
         if not stat.S_ISREG(opened.st_mode):
             raise LockInvalidError("opened lock object is not regular")
-        handle = os.fdopen(fd, "a+b")  # noqa: SIM115
     except Exception:
         os.close(fd)
         raise
 
-    if opened.st_size == 0:
-        handle.write(b"\0")
-        handle.flush()
-        os.fsync(handle.fileno())
-    return handle
+    # The descriptor is validated; transfer ownership to the helper. The helper
+    # closes the descriptor (directly or via the handle) on any failure and
+    # re-raises as LockInitializationError. On success the returned handle owns
+    # the descriptor and the caller MUST NOT close ``fd`` independently.
+    return _finish_lock_file_open(fd, opened_size=opened.st_size)
 
 
 def open_lock_file_strict(lock_path: Path) -> IO[bytes]:

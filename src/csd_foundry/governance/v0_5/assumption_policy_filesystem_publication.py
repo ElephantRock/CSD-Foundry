@@ -53,14 +53,37 @@ Lock-path invariant
 ===================
 
 ``publication.lock`` must always be a regular file. A symlink at the lock path
-is rejected (POSIX ``O_NOFOLLOW`` yields ``ELOOP``; Windows ``fstat`` fails the
-``S_ISREG`` check after a transparent dereference), as is a directory or any
-other non-regular shape. Every such shape/open failure is normalized to
-``ASSUMPTION_POLICY_STORE_LOCK_INVALID``; ``ASSUMPTION_POLICY_STORE_LOCK_FAILED``
-is reserved for the case where the lock path is a valid regular file but the
-advisory lock itself could not be acquired. An ``OSError`` raised by the
-protected operation inside the lock scope is never mislabeled as either lock
-code.
+is rejected, as is a directory or any other non-regular shape. The platform
+opener (:func:`csd_foundry._platform.open_lock_file_strict`) refuses such a
+path during acquisition:
+
+* **POSIX:** ``os.open`` with ``O_RDWR | O_CREAT | O_APPEND | O_NOFOLLOW``.
+  ``O_NOFOLLOW`` causes the kernel to reject a symlink at ``publication.lock``
+  with ``ELOOP`` before any file is opened or followed; ``fstat`` on the
+  descriptor then confirms a regular file.
+* **Windows:** there is no ``O_NOFOLLOW`` equivalent, so the opener performs a
+  seven-step acquisition-time validation: (1) ``lstat`` the path and reject a
+  symlink or non-regular shape; (2) open/create without truncation (never
+  follow, never ``O_TRUNC``); (3) ``fstat`` the opened descriptor and require a
+  regular file (rejects a directory or a dereferenced symlink the open may have
+  followed); (4) ``lstat`` the path again and reject a symlink or non-regular
+  shape (detects a concurrent replacement that occurred between the open and
+  now); (5) require the same identity (``st_dev``, ``st_ino``) between the
+  opened descriptor and the path (detects a replacement that swapped in a
+  different file); (6) seed only after all validation passes (when the opened
+  descriptor reported a zero size); (7) return the seeded handle. The strict
+  opener never seeds or locks through a symlink detected during acquisition.
+
+Every such shape/open failure is normalized to
+``ASSUMPTION_POLICY_STORE_LOCK_INVALID``. A descriptor that validated but whose
+handle could not be created or seeded (``os.fdopen`` or the seed
+``write``/``flush``/``fsync`` failed) is normalized to
+``ASSUMPTION_POLICY_STORE_LOCK_FAILED`` -- the lock path is a valid regular
+file, but a usable lock could not be established. ``LOCK_FAILED`` is also used
+for the case where the lock path is a valid regular file but the advisory lock
+itself could not be acquired. An ``OSError`` raised by the protected operation
+inside the lock scope is never mislabeled as either lock code. No backend
+exception message is carried into the public ``detail``.
 
 Lifecycle
 =========
@@ -97,8 +120,8 @@ All steps run under a single strict lock acquisition:
  10. write managed temporary file ``.policy-ledger.<uuid>.tmp``
  11. ``_checkpoint("AFTER_PARTIAL_TEMP_WRITE")`` -- fault injection point
  12. ``_checkpoint("AFTER_TEMP_FLUSH")`` -- fault injection point
- 13. ``os.replace`` atomically swaps the authoritative file
- 14. ``_checkpoint("BEFORE_REPLACE")`` -- fault injection point (pre-commit)
+ 13. ``_checkpoint("BEFORE_REPLACE")`` -- fault injection point (pre-commit)
+ 14. ``os.replace`` atomically swaps the authoritative file
      [commit point: os.replace crosses here]
  15. ``_checkpoint("AFTER_REPLACE")`` -- fault injection point (post-commit)
  16. ``_checkpoint("BEFORE_DIRECTORY_FSYNC")`` -- fault injection point
@@ -117,7 +140,7 @@ There are exactly eight deterministic checkpoints, split at the ``os.replace``
 commit point. A fault raised at any of them is normalized to a stable public
 code (never the raw exception type or message):
 
-* pre-replace (old ledger byte-for-byte intact, fault propagates, temp
+* pre-replace (old ledger byte-for-byte intact, fault is normalized, temp
   removed):
 
   - ``BEFORE_TEMP_CREATE``
@@ -160,7 +183,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from csd_foundry._platform import fsync_directory, lock_file, open_lock_file_strict, unlock_file
+from csd_foundry._platform import (
+    LockInitializationError,
+    LockInvalidError,
+    fsync_directory,
+    lock_file,
+    open_lock_file_strict,
+    unlock_file,
+)
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
     CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION,
     SIGNATURE_PROFILE_SCHEMA_VERSION,
@@ -1353,9 +1383,20 @@ class FilesystemAssumptionPolicyPublisher:
         (:func:`open_lock_file_strict`), which refuses a symlink (or directory,
         or any other non-regular shape) at ``publication.lock``: such a path
         can never be followed into an attacker-controlled file or directory.
-        The strict opener raises ``OSError`` for a malformed path *during
-        opening*; that is normalized to ``ASSUMPTION_POLICY_STORE_LOCK_INVALID``
-        so a caller can switch on the precise recovery action.
+        The strict opener raises three distinct ``OSError`` subclasses *during
+        acquisition*, each normalized to a precise public code so a caller can
+        switch on the exact recovery action:
+
+        * :class:`LockInvalidError` -- the lock path is a symlink, a directory,
+          or another non-regular shape, or it could not be opened at all.
+          Normalized to ``ASSUMPTION_POLICY_STORE_LOCK_INVALID``.
+        * :class:`LockInitializationError` -- a validated descriptor was
+          acquired but the handle could not be created (``os.fdopen`` failed)
+          or seeded (``write``/``flush``/``fsync`` failed). The lock path is a
+          valid regular file but a usable lock could not be established, so it
+          is normalized to ``ASSUMPTION_POLICY_STORE_LOCK_FAILED``.
+        * any other ``OSError`` from the opener that is neither of the above is
+          also normalized to ``ASSUMPTION_POLICY_STORE_LOCK_FAILED``.
 
         Once a valid regular lock file is open, acquiring the advisory lock
         itself may still fail (e.g. the kernel lock table is exhausted, or a
@@ -1369,6 +1410,11 @@ class FilesystemAssumptionPolicyPublisher:
         differs. The lock is released (best-effort) on exit even if the body
         raises.
 
+        No backend exception message is carried into the public ``detail``:
+        every acquisition-time normalization raises ``PolicyStoreError(code)``
+        with ``detail=None`` so the observable behavior depends only on the
+        acquisition stage, never on backend diagnostic text.
+
         This drives the lock primitives directly rather than using the
         ``advisory_lock_strict`` context manager, because that manager performs
         its open+lock during ``__enter__``: a caller cannot otherwise
@@ -1379,17 +1425,30 @@ class FilesystemAssumptionPolicyPublisher:
 
         try:
             handle = open_lock_file_strict(self.lock_path)
-        except OSError as exc:
+        except LockInvalidError as exc:
             # Shape/open failure: the lock path is a symlink, a directory, or
             # otherwise not a usable regular file. The publication lock can
-            # never be safely held against such a path.
+            # never be safely held against such a path. No backend message in
+            # the detail (the chain is preserved via ``from exc`` for debugging,
+            # but the public ``detail`` is None).
             raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_INVALID") from exc
+        except LockInitializationError as exc:
+            # The lock path is a valid regular file, but a usable handle could
+            # not be created or seeded. No backend message in the detail.
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED") from exc
+        except OSError as exc:
+            # Any other opener-level OSError (not a LockInvalid /
+            # LockInitialization subclass) is still an acquisition-time failure
+            # against a lock path that is not usable as-is. No backend message
+            # in the detail.
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED") from exc
         try:
             try:
                 lock_file(handle)
             except OSError as exc:
                 # The lock path is a valid regular file, but the advisory lock
-                # itself could not be acquired.
+                # itself could not be acquired. No backend message in the
+                # detail.
                 raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED") from exc
             yield
         finally:

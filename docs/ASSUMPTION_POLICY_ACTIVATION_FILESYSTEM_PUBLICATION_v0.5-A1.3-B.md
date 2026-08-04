@@ -1,7 +1,7 @@
 # Assumption Policy Activation Filesystem Publication v0.5-A1.3-B
 
 **Status:** Implemented durable interprocess filesystem publication
-**Date:** 2026-08-03
+**Date:** 2026-08-04
 **Scope:** `FilesystemAssumptionPolicyPublisher` — durable, interprocess-safe,
 atomic publication of the authoritative `AssumptionPolicyLedgerV3`
 
@@ -31,16 +31,36 @@ guarantees it is a regular file before a handle is returned:
 
 * **POSIX:** `os.open` with `O_RDWR | O_CREAT | O_APPEND | O_NOFOLLOW`.
   `O_NOFOLLOW` causes the kernel to reject a symlink at `publication.lock`
-  with `ELOOP` before any file is opened or followed.
-* **Windows:** `a+b` (the Windows-compatible approach, seeded with one byte so
-  the `msvcrt` byte-range lock is well-defined), followed by an `os.fstat`
-  regular-file check: if the opened descriptor is not `S_ISREG` — which happens
-  when `publication.lock` is a directory or a symlink the runtime transparently
-  dereferenced — the handle is closed and `LockInvalidError` is raised.
+  with `ELOOP` before any file is opened or followed; `fstat` on the descriptor
+  then confirms a regular file.
+* **Windows:** there is no `O_NOFOLLOW` equivalent, so the opener performs a
+  seven-step acquisition-time validation: (1) `lstat` the path and reject a
+  symlink or non-regular shape; (2) open/create without truncation (never
+  follow, never `O_TRUNC`); (3) `fstat` the opened descriptor and require a
+  regular file (rejects a directory or a dereferenced symlink the open may have
+  followed); (4) `lstat` the path again and reject a symlink or non-regular
+  shape (detects a concurrent replacement that occurred between the open and
+  now); (5) require the same identity (`st_dev`, `st_ino`) between the opened
+  descriptor and the path (detects a replacement that swapped in a different
+  file); (6) seed only after all validation passes (when the opened descriptor
+  reported a zero size, so the `msvcrt` byte-range lock is well-defined); (7)
+  return the seeded handle. The strict opener never seeds or locks through a
+  symlink detected during acquisition.
 
 POSIX uses `fcntl.flock`; Windows uses `msvcrt.locking` on byte 0. Both
 provide process-wide exclusive advisory locking on the lock file, which is
 sufficient for single-writer publication.
+
+### Cooperative claim boundary
+
+The strict opener's acquisition-time validation defends against cooperating
+store operators: another publisher in the same single-host claim that attempts
+to point `publication.lock` at a symlink, a directory, or a non-regular shape is
+refused before any lock is acquired. A *noncooperating* actor replacing
+directory entries after the opener's validation window closes is outside the
+cooperative single-host claim, as is any cross-host or privilege-boundary
+adversary. The claim is therefore precisely: among cooperating publishers on a
+single host, the lock path is always a regular file when a handle is returned.
 
 ### Lock-path invariant
 
@@ -48,11 +68,16 @@ sufficient for single-writer publication.
 any other non-regular shape) at the lock path is rejected before any lock is
 acquired — the publication lock can never be held against an attacker-controlled
 file or followed into corruption. Every such shape/open failure is normalized
-to `ASSUMPTION_POLICY_STORE_LOCK_INVALID`; `ASSUMPTION_POLICY_STORE_LOCK_FAILED`
-is reserved for the case where the lock path is a valid regular file but the
-advisory lock itself could not be acquired. An `OSError` raised by the
-protected operation inside the lock scope is never mislabeled as either lock
-code.
+to `ASSUMPTION_POLICY_STORE_LOCK_INVALID`. A descriptor that validated but whose
+handle could not be created or seeded (`os.fdopen` failed, or the seed
+`write`/`flush`/`fsync` failed) is normalized to
+`ASSUMPTION_POLICY_STORE_LOCK_FAILED` — the lock path is a valid regular file,
+but a usable lock could not be established; the descriptor is closed in every
+case (no leak). `ASSUMPTION_POLICY_STORE_LOCK_FAILED` is also reserved for the
+case where the lock path is a valid regular file but the advisory lock itself
+could not be acquired. An `OSError` raised by the protected operation inside
+the lock scope is never mislabeled as either lock code. No backend exception
+message is carried into the public `detail`.
 
 The full lock scope covers the entire compare-and-append transition: actual
 state read, oracle invocation, temp write, atomic replace, directory fsync,
@@ -93,20 +118,28 @@ never create it.
 All steps of a publication run under a single lock acquisition:
 
 ```text
-1. acquire exclusive publication lock
-2. ensure root (create() only) + orphan cleanup
-3. read authoritative stored ledger bytes
-4. reconstruct and fully validate ledger/3 (every nested contract revalidated)
-5. run V3 exact idempotence (the A1.3-A oracle)
-6. compare expected state + predecessor/sequence validation
-7. construct updated ledger/3 canonical bytes
-8. write managed temp  (.policy-ledger.<32-hex>.tmp)
-9. fsync temp
-10. os.replace  ← commit point
-11. fsync store directory (POSIX)
-12. reread authoritative bytes
-13. reconstruct + verify every binding
-14. release lock
+ 1. acquire exclusive publication lock (strict opener)
+ 2. ensure root (create() only) + orphan cleanup
+ 3. read authoritative stored ledger bytes
+ 4. reconstruct and fully validate ledger/3 (every nested contract revalidated)
+ 5. run V3 exact idempotence (the A1.3-A oracle)
+ 6. compare expected state + predecessor/sequence validation
+ 7. construct updated ledger/3 canonical bytes
+ 8. checkpoint BEFORE_TEMP_CREATE        ← fault injection point
+ 9. write managed temp  (.policy-ledger.<32-hex>.tmp)
+10. checkpoint AFTER_PARTIAL_TEMP_WRITE   ← fault injection point
+11. checkpoint AFTER_TEMP_FLUSH           ← fault injection point
+12. checkpoint BEFORE_REPLACE             ← fault injection point (pre-commit)
+13. os.replace                            ← commit point
+14. checkpoint AFTER_REPLACE              ← fault injection point (post-commit)
+15. checkpoint BEFORE_DIRECTORY_FSYNC     ← fault injection point
+16. fsync store directory (POSIX)
+17. checkpoint BEFORE_POST_WRITE_READ     ← fault injection point
+18. reread authoritative bytes
+19. checkpoint DURING_POST_WRITE_READ     ← fault injection point
+20. reconstruct + verify every binding
+21. return the activation result
+22. release lock
 ```
 
 ## 6. os.replace commit point
@@ -169,6 +202,8 @@ exception as its detail.
 | root exists but is not a directory | `ASSUMPTION_POLICY_STORE_ROOT_NOT_DIRECTORY` | pre-lock |
 | root/parent create or sync failed | `ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED` | create() |
 | lock path is a symlink / directory / non-regular | `ASSUMPTION_POLICY_STORE_LOCK_INVALID` | lock acquisition |
+| validated descriptor but handle init/seed failed (fdopen/seed write/flush/fsync) | `ASSUMPTION_POLICY_STORE_LOCK_FAILED` | lock acquisition |
+| other opener-level `OSError` during acquisition | `ASSUMPTION_POLICY_STORE_LOCK_FAILED` | lock acquisition |
 | lock path valid but advisory lock not acquired | `ASSUMPTION_POLICY_STORE_LOCK_FAILED` | lock acquisition |
 | `create()` against an existing valid ledger | `ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED` | create() |
 | authoritative ledger file missing | `ASSUMPTION_POLICY_STORED_BYTES_MISSING` | read |
@@ -320,21 +355,27 @@ No sleeps are used as synchronization.
 ## 15. Fault-injection evidence
 
 Eight deterministic checkpoints, split at `os.replace`, prove the pre/post
-failure behavior without arbitrary monkey-patching:
+failure behavior without arbitrary monkey-patching. Every checkpoint is
+normalized to a stable public code — never the raw exception type or message:
 
 ```text
-pre-replace (old ledger intact, fault propagates):
-  BEFORE_TEMP_CREATE
-  AFTER_PARTIAL_TEMP_WRITE
-  AFTER_TEMP_FLUSH
-  BEFORE_REPLACE
+pre-replace (old ledger byte-for-byte intact, fault is normalized, temp removed):
+  BEFORE_TEMP_CREATE         → ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED
+  AFTER_PARTIAL_TEMP_WRITE   → ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED
+  AFTER_TEMP_FLUSH           → ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED
+  BEFORE_REPLACE             → ASSUMPTION_POLICY_STORE_REPLACE_FAILED
 --- os.replace commit point ---
 post-replace (outcome uncertain, publication may have landed):
-  AFTER_REPLACE
-  BEFORE_DIRECTORY_FSYNC
-  BEFORE_POST_WRITE_READ
-  DURING_POST_WRITE_READ
+  AFTER_REPLACE              → ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN
+  BEFORE_DIRECTORY_FSYNC     → ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN
+  BEFORE_POST_WRITE_READ     → ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN
+  DURING_POST_WRITE_READ     → ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN
 ```
+
+If the owned-temp cleanup that follows a pre-replace fault itself fails, the
+public code is `ASSUMPTION_POLICY_STORE_TEMP_CLEANUP_FAILED` (the cleanup
+failure dominates the original write/replace error because an un-removable
+orphan is the more actionable signal).
 
 For every checkpoint: a fault raises, the publication returns no result, a
 fresh publisher reopens the store and reconstructs the old or new *complete*
