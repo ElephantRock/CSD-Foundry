@@ -10,17 +10,82 @@ semantic oracle. The filesystem layer owns: locking, stored-byte validation,
 atomic replacement, restart reconstruction, post-write verification, and
 platform-specific durability boundaries.
 
-Claim boundary:
+Claim boundary
+==============
 
-    POSIX: exclusive interprocess lock, temporary-file fsync, atomic
-    same-filesystem replace, directory fsync where supported.
+This module claims, on every supported platform:
 
-    Windows: exclusive interprocess lock, temporary-file flush, atomic
-    visibility through the supported replacement primitive, restart
-    reconstruction.
+* exclusive interprocess publication (via ``advisory_lock`` on a lock file the
+  lock helper itself creates);
+* atomic visibility of the authoritative ledger through ``os.replace`` on the
+  same filesystem as the destination;
+* temporary-file fsync before the atomic replace so the replacement is durable
+  up to the supported durability boundary;
+* crash-safe temporary-file handling: every managed temp file is named
+  ``.policy-ledger.<uuid>.tmp`` inside the store root, and any such orphan left
+  by a previous crash is removed at store open;
+* full restart reconstruction: every published ledger is re-parsed and fully
+  revalidated (including every nested contract's schema version) on read;
+* strengthened post-write verification that the bytes just written are the
+  exact canonical bytes the publisher intended and that the resulting ledger's
+  entries, root, and head match the oracle's updated ledger.
 
-    POSIX-equivalent sudden-power-loss directory-fsync durability is NOT
-    claimed on Windows.
+POSIX additionally claims:
+
+* directory fsync of the store root after the atomic replace, providing
+  sudden-power-loss durability of the rename.
+
+Windows does NOT claim POSIX-equivalent sudden-power-loss directory-fsync
+durability: directories cannot be opened as file descriptors and ``os.sync``
+is unavailable. ``fsync_directory`` is a no-op on Windows.
+
+Lifecycle
+=========
+
+The constructor performs no initialization: it records paths only. Two
+explicit lifecycle entry points perform all managed, side-effecting work:
+
+* ``create()`` -- initialize an empty authoritative ledger. Performed exactly
+  once under the publication lock. A subsequent ``create()`` against an
+  existing valid ledger raises ``ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED``.
+  A ``create()`` against a corrupt or partial ledger raises the appropriate
+  reconstruction error rather than silently re-initializing.
+* ``open()`` -- open an existing store. Never initializes. A missing ledger
+  raises ``ASSUMPTION_POLICY_STORED_BYTES_MISSING``.
+
+Read and publish operations reconstruct the authoritative ledger from bytes on
+every call (full revalidation, no in-memory cache), so an unmodified store can
+be reopened from any process at any time.
+
+Atomic publication sequence
+===========================
+
+All steps run under a single ``advisory_lock`` acquisition:
+
+  1. acquire exclusive publication lock
+  2. read authoritative stored ledger bytes
+  3. reconstruct and fully validate ledger/3 (every nested contract revalidated)
+  4. derive exact current root and head
+  5. run V3 exact idempotence (via the A1.3-A oracle)
+  6. compare exact expected state
+  7. validate predecessor pair and sequence
+  8. construct updated ledger/3 bytes
+  9. ``_checkpoint("pre-commit")`` -- fault injection point
+ 10. write managed temporary file ``.policy-ledger.<uuid>.tmp``
+ 11. flush and fsync the temporary file
+ 12. ``os.replace`` atomically swaps the authoritative file
+ 13. ``_checkpoint("post-commit")`` -- fault injection point
+ 14. perform supported directory durability operation
+ 15. reread authoritative bytes
+ 16. reconstruct and verify exact bytes + entries + root + head + predecessor
+ 17. return the activation result
+ 18. release the lock
+
+Pre-commit failure (steps 1-11): the old ledger is intact, no result is
+returned, no rollback is required. Post-commit failure (steps 12+): the
+replacement may or may not have been durably installed; the publisher raises
+``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` and never attempts a
+rollback (which could itself corrupt a successfully-installed ledger).
 """
 
 from __future__ import annotations
@@ -28,19 +93,26 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from csd_foundry._platform import advisory_lock, fsync_directory
 from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
+    CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION,
+    SIGNATURE_PROFILE_SCHEMA_VERSION,
     AssumptionChallengeClassificationPolicy,
+    AssumptionChallengeClassificationRule,
     AssumptionPolicyActivationContractError,
+    AssumptionPolicyAlgorithmProfile,
     AssumptionPolicySignatureProfile,
 )
 from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
     ACTIVATION_PROOF_V2_SCHEMA_VERSION,
     AUTHORITY_POLICY_COMMIT_V3_SCHEMA_VERSION,
     POLICY_LEDGER_ENTRY_V3_SCHEMA_VERSION,
+    POLICY_LEDGER_V3_SCHEMA_VERSION,
     SIGNING_PAYLOAD_SCHEMA_VERSION,
     AssumptionAuthorityPolicyCommitV3,
     AssumptionPolicyActivationProofV2,
@@ -52,9 +124,18 @@ from csd_foundry.governance.v0_5._assumption_policy_activation_ledger import (
     AssumptionPolicyActivationResult,
 )
 from csd_foundry.governance.v0_5.assumption_governance_contracts import (
+    AUTHORITY_GRANT_SCHEMA_VERSION,
+    AUTHORITY_POLICY_SCHEMA_VERSION,
+    DUTY_EXCEPTION_SCHEMA_VERSION,
+    SEPARATION_DUTY_RULE_SCHEMA_VERSION,
+    AssumptionAuthorityGrant,
     AssumptionAuthorityPolicy,
+    AssumptionDutyException,
+    AssumptionSeparationDutyRule,
 )
 from csd_foundry.governance.v0_5.assumption_governance_execution_contracts import (
+    APPROVAL_POLICY_SCHEMA_VERSION,
+    APPROVAL_RULE_SCHEMA_VERSION,
     AssumptionPolicyApprovalPolicy,
     AssumptionPolicyApprovalRule,
 )
@@ -67,11 +148,220 @@ from csd_foundry.governance.v0_5.assumption_policy_activation_publication import
     compare_and_append_policy_entry_v3,
 )
 
-_LEDGER_SCHEMA_VERSION = "assumption-policy-ledger/3"
+# Stable field-set and schema-version constants for every closed object the
+# publisher must parse from canonical stored bytes. These are kept here (rather
+# than imported piecemeal) so that the JSON boundary validation is auditable in
+# one place.
+
+_LEDGER_SCHEMA_VERSION = POLICY_LEDGER_V3_SCHEMA_VERSION
+
+_LEDGER_FIELDS = frozenset({"schema_version", "entries", "ledger_root_digest"})
+_LEDGER_ENTRY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "policy",
+        "signing_payload",
+        "policy_commit",
+        "approval_policy",
+        "signature_profile",
+        "challenge_classification_policy",
+        "activation_proof",
+        "ledger_entry_digest",
+    }
+)
+_SIGNING_PAYLOAD_FIELDS = frozenset(
+    {
+        "schema_version",
+        "policy_id",
+        "policy_digest",
+        "predecessor_policy_digest",
+        "predecessor_commit_receipt_digest",
+        "authority_root_digest",
+        "grant_set_digest",
+        "separation_duty_rule_set_digest",
+        "exception_set_digest",
+        "exception_count",
+        "approval_class",
+        "effective_from_sequence",
+        "approval_policy_digest",
+        "signature_profile_digest",
+        "challenge_classification_policy_digest",
+        "signing_payload_digest",
+    }
+)
+_POLICY_COMMIT_V3_FIELDS = frozenset(
+    {
+        "schema_version",
+        "signing_payload_digest",
+        "signature_set_digest",
+        "commit_receipt_digest",
+    }
+)
+_ACTIVATION_PROOF_V2_FIELDS = frozenset(
+    {
+        "schema_version",
+        "signing_payload_digest",
+        "policy_commit_receipt_digest",
+        "approval_policy_digest",
+        "approval_rule_digest",
+        "signature_profile_digest",
+        "challenge_classification_policy_digest",
+        "authority_root_digest",
+        "signature_set_digest",
+        "valid_signer_ids",
+        "rejected_signer_codes",
+        "activation_proof_digest",
+    }
+)
+_AUTHORITY_POLICY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "policy_id",
+        "authority_root_digest",
+        "grants",
+        "separation_duty_rules",
+        "duty_exceptions",
+        "grant_set_digest",
+        "separation_duty_rule_set_digest",
+        "exception_set_digest",
+        "policy_digest",
+    }
+)
+_AUTHORITY_GRANT_FIELDS = frozenset(
+    {
+        "schema_version",
+        "grant_id",
+        "action",
+        "authority_id",
+        "scope_ids",
+        "assumption_materialities",
+        "challenge_materialities",
+        "effective_from_sequence",
+        "effective_until_sequence",
+        "grant_digest",
+    }
+)
+_SEPARATION_DUTY_RULE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "rule_id",
+        "action",
+        "conflicting_roles",
+        "scope_ids",
+        "assumption_materialities",
+        "rule_digest",
+    }
+)
+_DUTY_EXCEPTION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "exception_id",
+        "rule_id",
+        "action",
+        "authority_id",
+        "conflicting_roles",
+        "scope_ids",
+        "assumption_ids",
+        "assumption_materialities",
+        "reason_code",
+        "effective_from_sequence",
+        "effective_until_sequence",
+        "exception_digest",
+    }
+)
+_APPROVAL_POLICY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "approval_policy_id",
+        "authority_root_digest",
+        "rules",
+        "approval_policy_digest",
+    }
+)
+_APPROVAL_RULE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "approval_class",
+        "eligible_signer_ids",
+        "required_signature_count",
+        "required_signer_ids",
+        "rule_digest",
+    }
+)
+_SIGNATURE_PROFILE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "signature_set_schema_version",
+        "signature_record_semantics_version",
+        "algorithm_profiles",
+        "required_authority_scope",
+        "key_authority_root_digest",
+        "duplicate_signer_rule",
+        "profile_digest",
+    }
+)
+_ALGORITHM_PROFILE_FIELDS = frozenset({"algorithm", "verification_profile"})
+_CHALLENGE_POLICY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "reason_rules",
+        "unknown_reason_behavior",
+        "policy_digest",
+    }
+)
+_CHALLENGE_RULE_FIELDS = frozenset({"reason_code", "materiality"})
+
+# Managed temporary-file naming pattern. Every temp file the publisher writes
+# matches this prefix so that orphan cleanup at open() is both safe (only files
+# the publisher could have created are touched) and complete.
+_TEMP_PREFIX = ".policy-ledger."
+_TEMP_SUFFIX = ".tmp"
+
+# Deterministic fault-injection checkpoints. Tests may install a callback via
+# ``with_fault_injection`` that raises at a named checkpoint to verify pre- and
+# post-commit failure behavior.
+_CHECKPOINT_PRE_COMMIT = "pre-commit"
+_CHECKPOINT_POST_COMMIT = "post-commit"
 
 
 class PolicyStoreError(RuntimeError):
-    """Stable error for filesystem policy-store failures."""
+    """Stable, normalized error for filesystem policy-store failures.
+
+    Every filesystem, locking, and parser failure is normalized to a stable
+    ``code`` so callers can switch on outcomes without parsing messages. The
+    set of codes a caller may observe from this module is:
+
+    * ``ASSUMPTION_POLICY_STORE_ROOT_INVALID`` -- constructor root argument was
+      not a ``pathlib.Path``.
+    * ``ASSUMPTION_POLICY_STORE_ROOT_NOT_DIRECTORY`` -- root exists but is not
+      a directory.
+    * ``ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED`` -- the root directory or
+      its parent could not be created or synced.
+    * ``ASSUMPTION_POLICY_STORE_LOCK_FAILED`` -- the publication lock could not
+      be acquired (raised by the lock helper as ``OSError``).
+    * ``ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED`` -- ``create()`` was called
+      against a store that already holds a valid authoritative ledger.
+    * ``ASSUMPTION_POLICY_STORED_BYTES_MISSING`` -- the authoritative ledger
+      file does not exist (``open()`` on an uninitialized store, or any read
+      before ``create()``).
+    * ``ASSUMPTION_POLICY_STORED_BYTES_INVALID`` -- the stored bytes are not
+      valid UTF-8 JSON, or the top-level value is not a JSON object.
+    * ``ASSUMPTION_POLICY_STORED_BYTES_NONCANONICAL`` -- the stored bytes are
+      valid JSON but not the canonical byte sequence the contract would emit.
+    * ``ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED`` -- a stored object's
+      ``schema_version`` is not the version this publisher activates.
+    * ``ASSUMPTION_POLICY_STORED_FIELD_INVALID`` -- a stored object is missing
+      a required field, has an extra/unknown field, or has a field of the
+      wrong type.
+    * ``ASSUMPTION_POLICY_STORED_CONTRACT_INVALID`` -- a stored object parsed
+      structurally but failed frozen-contract self-validation.
+    * ``ASSUMPTION_POLICY_STORED_ROOT_MISMATCH`` -- the stored ledger root
+      digest does not match the rebuilt root.
+    * ``ASSUMPTION_POLICY_STORED_VERIFICATION_FAILED`` -- post-write
+      verification did not observe the exact ledger the publisher intended.
+    * ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` -- a failure occurred
+      after ``os.replace``; the publication may or may not have landed.
+    """
 
     def __init__(self, code: str, detail: str | None = None) -> None:
         super().__init__(code if detail is None else f"{code}: {detail}")
@@ -79,7 +369,54 @@ class PolicyStoreError(RuntimeError):
         self.detail = detail
 
 
-# --- V3 parsers (reconstruct typed objects from canonical bytes) ------------
+# ===========================================================================
+# Hardened JSON parser boundary helpers
+# ===========================================================================
+#
+# Every value entering the typed contract layer from canonical stored bytes
+# passes through these helpers. They enforce, in order:
+#
+#   1. the value is exactly a JSON object (``dict``);
+#   2. the object's field set is exactly the closed schema's field set (no
+#      missing fields, no unknown fields);
+#   3. the object's ``schema_version`` is exactly the supported version;
+#   4. each scalar field is the exact Python type the contract expects;
+#   5. each list field is a list of the exact expected element type.
+#
+# Only after a value passes all five gates is it handed to the frozen contract
+# constructor, which performs digest self-validation.
+
+
+def _require_object(value: object, code: str, detail: str | None = None) -> dict[str, Any]:
+    """Require ``value`` to be exactly a ``dict`` (a JSON object)."""
+
+    if type(value) is not dict:
+        raise PolicyStoreError(code, detail)
+    return value
+
+
+def _require_closed_object(
+    value: dict[str, Any],
+    expected_fields: frozenset[str],
+    code: str,
+) -> None:
+    """Require ``value``'s key set to equal ``expected_fields`` exactly."""
+
+    actual = set(value)
+    unknown = actual - expected_fields
+    if unknown:
+        raise PolicyStoreError(code, sorted(unknown)[0])
+    missing = expected_fields - actual
+    if missing:
+        raise PolicyStoreError(code, sorted(missing)[0])
+
+
+def _require_schema_version(value: dict[str, Any], expected: str) -> None:
+    """Require the ``schema_version`` field to equal ``expected`` exactly."""
+
+    sv = value.get("schema_version")
+    if type(sv) is not str or sv != expected:
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED", expected)
 
 
 def _require_str(value: dict[str, Any], key: str, code: str) -> str:
@@ -100,159 +437,201 @@ def _require_optional_str(value: dict[str, Any], key: str, code: str) -> str | N
 
 def _require_int(value: dict[str, Any], key: str, code: str) -> int:
     v = value.get(key)
-    if type(v) is not int or v < 0:
+    # ``bool`` is a subclass of ``int`` in Python; reject it explicitly so a
+    # stored ``true`` cannot masquerade as ``1``.
+    if type(v) is not int or isinstance(v, bool) or v < 0:
         raise PolicyStoreError(code, key)
     return v
+
+
+def _require_optional_nonnegative_int(value: dict[str, Any], key: str, code: str) -> int | None:
+    v = value.get(key)
+    if v is None:
+        return None
+    if type(v) is not int or isinstance(v, bool) or v < 0:
+        raise PolicyStoreError(code, key)
+    return v
+
+
+def _require_list(value: dict[str, Any], key: str, code: str) -> list[Any]:
+    v = value.get(key)
+    if type(v) is not list:
+        raise PolicyStoreError(code, key)
+    return v
+
+
+def _require_list_of_objects(value: dict[str, Any], key: str, code: str) -> list[dict[str, Any]]:
+    raw = _require_list(value, key, code)
+    out: list[dict[str, Any]] = []
+    for element in raw:
+        if type(element) is not dict:
+            raise PolicyStoreError(code, key)
+        out.append(element)
+    return out
+
+
+def _require_list_of_strings(value: dict[str, Any], key: str, code: str) -> list[str]:
+    raw = _require_list(value, key, code)
+    out: list[str] = []
+    for element in raw:
+        if type(element) is not str:
+            raise PolicyStoreError(code, key)
+        out.append(element)
+    return out
+
+
+_FIELD_INVALID = "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
+
+
+# ===========================================================================
+# V3 parsers (reconstruct typed objects from canonical bytes)
+# ===========================================================================
 
 
 def parse_signing_payload(value: dict[str, Any]) -> AssumptionPolicySigningPayload:
     """Parse and self-validate a signing-payload/1 from canonical JSON."""
 
-    if value.get("schema_version") != SIGNING_PAYLOAD_SCHEMA_VERSION:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED")
+    _require_closed_object(value, _SIGNING_PAYLOAD_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, SIGNING_PAYLOAD_SCHEMA_VERSION)
+    policy_id = _require_str(value, "policy_id", _FIELD_INVALID)
+    policy_digest = _require_str(value, "policy_digest", _FIELD_INVALID)
+    predecessor_policy_digest = _require_optional_str(
+        value, "predecessor_policy_digest", _FIELD_INVALID
+    )
+    predecessor_commit_receipt_digest = _require_optional_str(
+        value, "predecessor_commit_receipt_digest", _FIELD_INVALID
+    )
+    authority_root_digest = _require_str(value, "authority_root_digest", _FIELD_INVALID)
+    grant_set_digest = _require_str(value, "grant_set_digest", _FIELD_INVALID)
+    separation_duty_rule_set_digest = _require_str(
+        value, "separation_duty_rule_set_digest", _FIELD_INVALID
+    )
+    exception_set_digest = _require_str(value, "exception_set_digest", _FIELD_INVALID)
+    exception_count = _require_int(value, "exception_count", _FIELD_INVALID)
+    approval_class = _require_str(value, "approval_class", _FIELD_INVALID)
+    effective_from_sequence = _require_int(value, "effective_from_sequence", _FIELD_INVALID)
+    approval_policy_digest = _require_str(value, "approval_policy_digest", _FIELD_INVALID)
+    signature_profile_digest = _require_str(value, "signature_profile_digest", _FIELD_INVALID)
+    challenge_classification_policy_digest = _require_str(
+        value, "challenge_classification_policy_digest", _FIELD_INVALID
+    )
+    signing_payload_digest = _require_str(value, "signing_payload_digest", _FIELD_INVALID)
     try:
         return AssumptionPolicySigningPayload(
-            policy_id=_require_str(value, "policy_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            policy_digest=_require_str(
-                value, "policy_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            predecessor_policy_digest=_require_optional_str(
-                value, "predecessor_policy_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            predecessor_commit_receipt_digest=_require_optional_str(
-                value, "predecessor_commit_receipt_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            authority_root_digest=_require_str(
-                value, "authority_root_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            grant_set_digest=_require_str(
-                value, "grant_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            separation_duty_rule_set_digest=_require_str(
-                value, "separation_duty_rule_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            exception_set_digest=_require_str(
-                value, "exception_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            exception_count=_require_int(
-                value, "exception_count", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            approval_class=_require_str(
-                value, "approval_class", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            effective_from_sequence=_require_int(
-                value, "effective_from_sequence", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            approval_policy_digest=_require_str(
-                value, "approval_policy_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            signature_profile_digest=_require_str(
-                value, "signature_profile_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            challenge_classification_policy_digest=_require_str(
-                value,
-                "challenge_classification_policy_digest",
-                "ASSUMPTION_POLICY_STORED_FIELD_INVALID",
-            ),
-            signing_payload_digest=_require_str(
-                value, "signing_payload_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            policy_id=policy_id,
+            policy_digest=policy_digest,
+            predecessor_policy_digest=predecessor_policy_digest,
+            predecessor_commit_receipt_digest=predecessor_commit_receipt_digest,
+            authority_root_digest=authority_root_digest,
+            grant_set_digest=grant_set_digest,
+            separation_duty_rule_set_digest=separation_duty_rule_set_digest,
+            exception_set_digest=exception_set_digest,
+            exception_count=exception_count,
+            approval_class=approval_class,
+            effective_from_sequence=effective_from_sequence,
+            approval_policy_digest=approval_policy_digest,
+            signature_profile_digest=signature_profile_digest,
+            challenge_classification_policy_digest=challenge_classification_policy_digest,
+            signing_payload_digest=signing_payload_digest,
         )
     except AssumptionPolicyActivationContractError as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
 
 
 def parse_policy_commit_v3(value: dict[str, Any]) -> AssumptionAuthorityPolicyCommitV3:
-    if value.get("schema_version") != AUTHORITY_POLICY_COMMIT_V3_SCHEMA_VERSION:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED")
+    """Parse and self-validate an authority-policy-commit/3 from canonical JSON."""
+
+    _require_closed_object(value, _POLICY_COMMIT_V3_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, AUTHORITY_POLICY_COMMIT_V3_SCHEMA_VERSION)
+    signing_payload_digest = _require_str(value, "signing_payload_digest", _FIELD_INVALID)
+    signature_set_digest = _require_str(value, "signature_set_digest", _FIELD_INVALID)
+    commit_receipt_digest = _require_str(value, "commit_receipt_digest", _FIELD_INVALID)
     try:
         return AssumptionAuthorityPolicyCommitV3(
-            signing_payload_digest=_require_str(
-                value, "signing_payload_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            signature_set_digest=_require_str(
-                value, "signature_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            commit_receipt_digest=_require_str(
-                value, "commit_receipt_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            signing_payload_digest=signing_payload_digest,
+            signature_set_digest=signature_set_digest,
+            commit_receipt_digest=commit_receipt_digest,
         )
     except AssumptionPolicyActivationContractError as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
 
 
 def parse_activation_proof_v2(value: dict[str, Any]) -> AssumptionPolicyActivationProofV2:
-    if value.get("schema_version") != ACTIVATION_PROOF_V2_SCHEMA_VERSION:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED")
-    raw_signers = value.get("valid_signer_ids")
-    if type(raw_signers) is not list:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_FIELD_INVALID", "valid_signer_ids")
-    raw_rejected = value.get("rejected_signer_ids")
-    if type(raw_rejected) is not list:
-        raw_rejected = value.get("rejected_signer_codes", [])
-        if type(raw_rejected) is not list:
-            raise PolicyStoreError(
-                "ASSUMPTION_POLICY_STORED_FIELD_INVALID", "rejected_signer_codes"
-            )
+    """Parse and self-validate an activation-proof/2 from canonical JSON."""
+
+    _require_closed_object(value, _ACTIVATION_PROOF_V2_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, ACTIVATION_PROOF_V2_SCHEMA_VERSION)
+    proof_signing_payload_digest = _require_str(value, "signing_payload_digest", _FIELD_INVALID)
+    policy_commit_receipt_digest = _require_str(
+        value, "policy_commit_receipt_digest", _FIELD_INVALID
+    )
+    approval_policy_digest = _require_str(value, "approval_policy_digest", _FIELD_INVALID)
+    approval_rule_digest = _require_str(value, "approval_rule_digest", _FIELD_INVALID)
+    signature_profile_digest = _require_str(value, "signature_profile_digest", _FIELD_INVALID)
+    challenge_classification_policy_digest = _require_str(
+        value, "challenge_classification_policy_digest", _FIELD_INVALID
+    )
+    authority_root_digest = _require_str(value, "authority_root_digest", _FIELD_INVALID)
+    signature_set_digest = _require_str(value, "signature_set_digest", _FIELD_INVALID)
+    valid_signers = tuple(_require_list_of_strings(value, "valid_signer_ids", _FIELD_INVALID))
+    rejected_codes = tuple(_require_list_of_strings(value, "rejected_signer_codes", _FIELD_INVALID))
+    activation_proof_digest = _require_str(value, "activation_proof_digest", _FIELD_INVALID)
     try:
         return AssumptionPolicyActivationProofV2(
-            signing_payload_digest=_require_str(
-                value, "signing_payload_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            policy_commit_receipt_digest=_require_str(
-                value, "policy_commit_receipt_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            approval_policy_digest=_require_str(
-                value, "approval_policy_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            approval_rule_digest=_require_str(
-                value, "approval_rule_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            signature_profile_digest=_require_str(
-                value, "signature_profile_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            challenge_classification_policy_digest=_require_str(
-                value,
-                "challenge_classification_policy_digest",
-                "ASSUMPTION_POLICY_STORED_FIELD_INVALID",
-            ),
-            authority_root_digest=_require_str(
-                value, "authority_root_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            signature_set_digest=_require_str(
-                value, "signature_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            valid_signer_ids=tuple(cast(list[str], raw_signers)),
-            rejected_signer_codes=tuple(cast(list[str], raw_rejected)),
-            activation_proof_digest=_require_str(
-                value, "activation_proof_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            signing_payload_digest=proof_signing_payload_digest,
+            policy_commit_receipt_digest=policy_commit_receipt_digest,
+            approval_policy_digest=approval_policy_digest,
+            approval_rule_digest=approval_rule_digest,
+            signature_profile_digest=signature_profile_digest,
+            challenge_classification_policy_digest=challenge_classification_policy_digest,
+            authority_root_digest=authority_root_digest,
+            signature_set_digest=signature_set_digest,
+            valid_signer_ids=valid_signers,
+            rejected_signer_codes=rejected_codes,
+            activation_proof_digest=activation_proof_digest,
         )
     except AssumptionPolicyActivationContractError as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
 
 
 def parse_ledger_entry_v3(value: dict[str, Any]) -> AssumptionPolicyLedgerEntryV3:
-    if value.get("schema_version") != POLICY_LEDGER_ENTRY_V3_SCHEMA_VERSION:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED")
+    """Parse and self-validate a policy-ledger-entry/3 from canonical JSON."""
+
+    _require_closed_object(value, _LEDGER_ENTRY_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, POLICY_LEDGER_ENTRY_V3_SCHEMA_VERSION)
+    policy = _parse_authority_policy(_require_object(value.get("policy"), _FIELD_INVALID, "policy"))
+    signing_payload = parse_signing_payload(
+        _require_object(value.get("signing_payload"), _FIELD_INVALID, "signing_payload")
+    )
+    policy_commit = parse_policy_commit_v3(
+        _require_object(value.get("policy_commit"), _FIELD_INVALID, "policy_commit")
+    )
+    approval_policy = _parse_approval_policy(
+        _require_object(value.get("approval_policy"), _FIELD_INVALID, "approval_policy")
+    )
+    signature_profile = _parse_signature_profile(
+        _require_object(value.get("signature_profile"), _FIELD_INVALID, "signature_profile")
+    )
+    challenge_policy = _parse_challenge_policy(
+        _require_object(
+            value.get("challenge_classification_policy"),
+            _FIELD_INVALID,
+            "challenge_classification_policy",
+        )
+    )
+    activation_proof = parse_activation_proof_v2(
+        _require_object(value.get("activation_proof"), _FIELD_INVALID, "activation_proof")
+    )
     try:
         return AssumptionPolicyLedgerEntryV3(
-            policy=_parse_authority_policy(cast(dict[str, Any], value["policy"])),
-            signing_payload=parse_signing_payload(cast(dict[str, Any], value["signing_payload"])),
-            policy_commit=parse_policy_commit_v3(cast(dict[str, Any], value["policy_commit"])),
-            approval_policy=_parse_approval_policy(cast(dict[str, Any], value["approval_policy"])),
-            signature_profile=_parse_signature_profile(
-                cast(dict[str, Any], value["signature_profile"])
-            ),
-            challenge_classification_policy=_parse_challenge_policy(
-                cast(dict[str, Any], value["challenge_classification_policy"])
-            ),
-            activation_proof=parse_activation_proof_v2(
-                cast(dict[str, Any], value["activation_proof"])
-            ),
-            ledger_entry_digest=_require_str(
-                value, "ledger_entry_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            policy=policy,
+            signing_payload=signing_payload,
+            policy_commit=policy_commit,
+            approval_policy=approval_policy,
+            signature_profile=signature_profile,
+            challenge_classification_policy=challenge_policy,
+            activation_proof=activation_proof,
+            ledger_entry_digest=_require_str(value, "ledger_entry_digest", _FIELD_INVALID),
         )
     except AssumptionPolicyActivationContractError as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
@@ -260,23 +639,24 @@ def parse_ledger_entry_v3(value: dict[str, Any]) -> AssumptionPolicyLedgerEntryV
 
 def parse_ledger_v3(payload: bytes) -> AssumptionPolicyLedgerV3:
     """Parse, revalidate, and reconstruct a complete ``AssumptionPolicyLedgerV3``
-    from canonical stored bytes."""
+    from canonical stored bytes.
+
+    Every nested contract is re-parsed through its hardened parser, which
+    enforces exact object type, exact closed field set, exact schema version,
+    and exact scalar/list types before handing the value to the frozen
+    contract constructor for digest self-validation.
+    """
 
     try:
         value = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID") from exc
-    if type(value) is not dict:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID")
-    if value.get("schema_version") != _LEDGER_SCHEMA_VERSION:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_SCHEMA_UNSUPPORTED")
-    raw_entries = value.get("entries")
-    if type(raw_entries) is not list:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_FIELD_INVALID", "entries")
-    entries = tuple(parse_ledger_entry_v3(cast(dict[str, Any], e)) for e in raw_entries)
-    stored_root = _require_str(
-        value, "ledger_root_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-    )
+    top = _require_object(value, "ASSUMPTION_POLICY_STORED_BYTES_INVALID")
+    _require_closed_object(top, _LEDGER_FIELDS, _FIELD_INVALID)
+    _require_schema_version(top, _LEDGER_SCHEMA_VERSION)
+    raw_entries = _require_list_of_objects(top, "entries", _FIELD_INVALID)
+    entries = tuple(parse_ledger_entry_v3(e) for e in raw_entries)
+    stored_root = _require_str(top, "ledger_root_digest", _FIELD_INVALID)
     try:
         ledger = AssumptionPolicyLedgerV3.build(entries)
     except AssumptionPolicyActivationContractError as exc:
@@ -290,212 +670,275 @@ def parse_ledger_v3(payload: bytes) -> AssumptionPolicyLedgerV3:
     return ledger
 
 
-# --- helpers for parsing embedded sub-objects ------------------------------
+# ---------------------------------------------------------------------------
+# Helpers for parsing embedded sub-objects.
+#
+# Each helper validates its own closed field set and schema version, then
+# delegates to the frozen contract constructor for digest self-validation.
+# The frozen-contract errors are normalized to ``PolicyStoreError`` so the
+# filesystem boundary never leaks contract-layer exception types.
+# ---------------------------------------------------------------------------
+
+
+def _parse_algorithm_profile(value: dict[str, Any]) -> AssumptionPolicyAlgorithmProfile:
+    _require_closed_object(value, _ALGORITHM_PROFILE_FIELDS, _FIELD_INVALID)
+    algorithm = _require_str(value, "algorithm", _FIELD_INVALID)
+    verification_profile = _require_str(value, "verification_profile", _FIELD_INVALID)
+    try:
+        return AssumptionPolicyAlgorithmProfile(
+            algorithm=algorithm,
+            verification_profile=verification_profile,
+        )
+    except AssumptionPolicyActivationContractError as exc:
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
+
+
+def _parse_challenge_rule(value: dict[str, Any]) -> AssumptionChallengeClassificationRule:
+    _require_closed_object(value, _CHALLENGE_RULE_FIELDS, _FIELD_INVALID)
+    reason_code = _require_str(value, "reason_code", _FIELD_INVALID)
+    materiality = _require_str(value, "materiality", _FIELD_INVALID)
+    try:
+        return AssumptionChallengeClassificationRule(
+            reason_code=reason_code,
+            materiality=materiality,
+        )
+    except AssumptionPolicyActivationContractError as exc:
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
+
+
+def _parse_grant(value: dict[str, Any]) -> AssumptionAuthorityGrant:
+    _require_closed_object(value, _AUTHORITY_GRANT_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, AUTHORITY_GRANT_SCHEMA_VERSION)
+    grant_id = _require_str(value, "grant_id", _FIELD_INVALID)
+    action = _require_str(value, "action", _FIELD_INVALID)
+    authority_id = _require_str(value, "authority_id", _FIELD_INVALID)
+    scope_ids = tuple(_require_list_of_strings(value, "scope_ids", _FIELD_INVALID))
+    assumption_mat = tuple(
+        _require_list_of_strings(value, "assumption_materialities", _FIELD_INVALID)
+    )
+    challenge_mat = tuple(
+        _require_list_of_strings(value, "challenge_materialities", _FIELD_INVALID)
+    )
+    effective_from = _require_int(value, "effective_from_sequence", _FIELD_INVALID)
+    effective_until = _require_optional_nonnegative_int(
+        value, "effective_until_sequence", _FIELD_INVALID
+    )
+    grant_digest = _require_str(value, "grant_digest", _FIELD_INVALID)
+    try:
+        return AssumptionAuthorityGrant(
+            grant_id=grant_id,
+            action=action,
+            authority_id=authority_id,
+            scope_ids=scope_ids,
+            assumption_materialities=assumption_mat,
+            challenge_materialities=challenge_mat,
+            effective_from_sequence=effective_from,
+            effective_until_sequence=effective_until,
+            grant_digest=grant_digest,
+        )
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", code) from exc
+
+
+def _parse_separation_duty_rule(value: dict[str, Any]) -> AssumptionSeparationDutyRule:
+    _require_closed_object(value, _SEPARATION_DUTY_RULE_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, SEPARATION_DUTY_RULE_SCHEMA_VERSION)
+    rule_id = _require_str(value, "rule_id", _FIELD_INVALID)
+    action = _require_str(value, "action", _FIELD_INVALID)
+    conflicting_roles = tuple(_require_list_of_strings(value, "conflicting_roles", _FIELD_INVALID))
+    scope_ids = tuple(_require_list_of_strings(value, "scope_ids", _FIELD_INVALID))
+    materialities = tuple(
+        _require_list_of_strings(value, "assumption_materialities", _FIELD_INVALID)
+    )
+    rule_digest = _require_str(value, "rule_digest", _FIELD_INVALID)
+    try:
+        return AssumptionSeparationDutyRule(
+            rule_id=rule_id,
+            action=action,
+            conflicting_roles=conflicting_roles,
+            scope_ids=scope_ids,
+            assumption_materialities=materialities,
+            rule_digest=rule_digest,
+        )
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", code) from exc
+
+
+def _parse_duty_exception(value: dict[str, Any]) -> AssumptionDutyException:
+    _require_closed_object(value, _DUTY_EXCEPTION_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, DUTY_EXCEPTION_SCHEMA_VERSION)
+    exception_id = _require_str(value, "exception_id", _FIELD_INVALID)
+    rule_id = _require_str(value, "rule_id", _FIELD_INVALID)
+    action = _require_str(value, "action", _FIELD_INVALID)
+    authority_id = _require_str(value, "authority_id", _FIELD_INVALID)
+    conflicting_roles = tuple(_require_list_of_strings(value, "conflicting_roles", _FIELD_INVALID))
+    scope_ids = tuple(_require_list_of_strings(value, "scope_ids", _FIELD_INVALID))
+    assumption_ids = tuple(_require_list_of_strings(value, "assumption_ids", _FIELD_INVALID))
+    materialities = tuple(
+        _require_list_of_strings(value, "assumption_materialities", _FIELD_INVALID)
+    )
+    reason_code = _require_str(value, "reason_code", _FIELD_INVALID)
+    effective_from = _require_int(value, "effective_from_sequence", _FIELD_INVALID)
+    effective_until = _require_int(value, "effective_until_sequence", _FIELD_INVALID)
+    exception_digest = _require_str(value, "exception_digest", _FIELD_INVALID)
+    try:
+        return AssumptionDutyException(
+            exception_id=exception_id,
+            rule_id=rule_id,
+            action=action,
+            authority_id=authority_id,
+            conflicting_roles=conflicting_roles,
+            scope_ids=scope_ids,
+            assumption_ids=assumption_ids,
+            assumption_materialities=materialities,
+            reason_code=reason_code,
+            effective_from_sequence=effective_from,
+            effective_until_sequence=effective_until,
+            exception_digest=exception_digest,
+        )
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", code) from exc
 
 
 def _parse_authority_policy(value: dict[str, Any]) -> AssumptionAuthorityPolicy:
-    """Parse an AssumptionAuthorityPolicy from its to_json_value dict."""
+    """Parse an ``AssumptionAuthorityPolicy`` from its canonical JSON value."""
 
-    from csd_foundry.governance.v0_5.assumption_governance_contracts import (
-        AssumptionAuthorityGrant,
-        AssumptionDutyException,
-        AssumptionSeparationDutyRule,
+    _require_closed_object(value, _AUTHORITY_POLICY_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, AUTHORITY_POLICY_SCHEMA_VERSION)
+    policy_id = _require_str(value, "policy_id", _FIELD_INVALID)
+    authority_root_digest = _require_str(value, "authority_root_digest", _FIELD_INVALID)
+    grants = tuple(
+        _parse_grant(g) for g in _require_list_of_objects(value, "grants", _FIELD_INVALID)
     )
-
-    def _parse_grant(g: dict[str, Any]) -> AssumptionAuthorityGrant:
-        scopes_raw = g.get("scope_ids", [])
-        scopes = tuple(cast(list[str], scopes_raw))
-        mat_raw = g.get("assumption_materialities", [])
-        chal_raw = g.get("challenge_materialities", [])
-        return AssumptionAuthorityGrant(
-            grant_id=_require_str(g, "grant_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            action=_require_str(g, "action", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            authority_id=_require_str(g, "authority_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            scope_ids=scopes,
-            assumption_materialities=tuple(cast(list[str], mat_raw)),
-            challenge_materialities=tuple(cast(list[str], chal_raw)),
-            effective_from_sequence=_require_int(
-                g, "effective_from_sequence", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            effective_until_sequence=(
-                g["effective_until_sequence"]
-                if g.get("effective_until_sequence") is not None
-                else None
-            ),
-            grant_digest=_require_str(g, "grant_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-        )
-
-    def _parse_rule(r: dict[str, Any]) -> AssumptionSeparationDutyRule:
-        return AssumptionSeparationDutyRule(
-            rule_id=_require_str(r, "rule_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            action=_require_str(r, "action", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            conflicting_roles=tuple(cast(list[str], r.get("conflicting_roles", []))),
-            scope_ids=tuple(cast(list[str], r.get("scope_ids", []))),
-            assumption_materialities=tuple(cast(list[str], r.get("assumption_materialities", []))),
-            rule_digest=_require_str(r, "rule_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-        )
-
-    def _parse_exception(e: dict[str, Any]) -> AssumptionDutyException:
-        return AssumptionDutyException(
-            exception_id=_require_str(e, "exception_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            rule_id=_require_str(e, "rule_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            action=_require_str(e, "action", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            authority_id=_require_str(e, "authority_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            conflicting_roles=tuple(cast(list[str], e.get("conflicting_roles", []))),
-            scope_ids=tuple(cast(list[str], e.get("scope_ids", []))),
-            assumption_ids=tuple(cast(list[str], e.get("assumption_ids", []))),
-            assumption_materialities=tuple(cast(list[str], e.get("assumption_materialities", []))),
-            reason_code=_require_str(e, "reason_code", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            effective_from_sequence=_require_int(
-                e, "effective_from_sequence", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            effective_until_sequence=_require_int(
-                e, "effective_until_sequence", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            exception_digest=_require_str(
-                e, "exception_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-        )
-
-    grants_raw = value.get("grants", [])
-    rules_raw = value.get("separation_duty_rules", [])
-    exceptions_raw = value.get("duty_exceptions", [])
+    rules = tuple(
+        _parse_separation_duty_rule(r)
+        for r in _require_list_of_objects(value, "separation_duty_rules", _FIELD_INVALID)
+    )
+    exceptions = tuple(
+        _parse_duty_exception(e)
+        for e in _require_list_of_objects(value, "duty_exceptions", _FIELD_INVALID)
+    )
+    grant_set_digest = _require_str(value, "grant_set_digest", _FIELD_INVALID)
+    separation_duty_rule_set_digest = _require_str(
+        value, "separation_duty_rule_set_digest", _FIELD_INVALID
+    )
+    exception_set_digest = _require_str(value, "exception_set_digest", _FIELD_INVALID)
+    policy_digest = _require_str(value, "policy_digest", _FIELD_INVALID)
     try:
         return AssumptionAuthorityPolicy(
-            policy_id=_require_str(value, "policy_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            authority_root_digest=_require_str(
-                value, "authority_root_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            grants=tuple(_parse_grant(g) for g in grants_raw),
-            separation_duty_rules=tuple(_parse_rule(r) for r in rules_raw),
-            duty_exceptions=tuple(_parse_exception(e) for e in exceptions_raw),
-            grant_set_digest=_require_str(
-                value, "grant_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            separation_duty_rule_set_digest=_require_str(
-                value, "separation_duty_rule_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            exception_set_digest=_require_str(
-                value, "exception_set_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            policy_digest=_require_str(
-                value, "policy_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            policy_id=policy_id,
+            authority_root_digest=authority_root_digest,
+            grants=grants,
+            separation_duty_rules=rules,
+            duty_exceptions=exceptions,
+            grant_set_digest=grant_set_digest,
+            separation_duty_rule_set_digest=separation_duty_rule_set_digest,
+            exception_set_digest=exception_set_digest,
+            policy_digest=policy_digest,
         )
     except Exception as exc:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID") from exc
+        code = getattr(exc, "code", None)
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", code) from exc
+
+
+def _parse_approval_rule(value: dict[str, Any]) -> AssumptionPolicyApprovalRule:
+    _require_closed_object(value, _APPROVAL_RULE_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, APPROVAL_RULE_SCHEMA_VERSION)
+    approval_class = _require_str(value, "approval_class", _FIELD_INVALID)
+    eligible = tuple(_require_list_of_strings(value, "eligible_signer_ids", _FIELD_INVALID))
+    required_count = _require_int(value, "required_signature_count", _FIELD_INVALID)
+    required = tuple(_require_list_of_strings(value, "required_signer_ids", _FIELD_INVALID))
+    rule_digest = _require_str(value, "rule_digest", _FIELD_INVALID)
+    try:
+        return AssumptionPolicyApprovalRule(
+            approval_class=approval_class,
+            eligible_signer_ids=eligible,
+            required_signature_count=required_count,
+            required_signer_ids=required,
+            rule_digest=rule_digest,
+        )
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", code) from exc
 
 
 def _parse_approval_policy(value: dict[str, Any]) -> AssumptionPolicyApprovalPolicy:
-    rules_raw = value.get("rules")
-    if type(rules_raw) is not list:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_FIELD_INVALID", "rules")
+    _require_closed_object(value, _APPROVAL_POLICY_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, APPROVAL_POLICY_SCHEMA_VERSION)
+    approval_policy_id = _require_str(value, "approval_policy_id", _FIELD_INVALID)
+    authority_root_digest = _require_str(value, "authority_root_digest", _FIELD_INVALID)
     rules = tuple(
-        AssumptionPolicyApprovalRule(
-            approval_class=_require_str(
-                r, "approval_class", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            eligible_signer_ids=tuple(cast(list[str], r.get("eligible_signer_ids", []))),
-            required_signature_count=_require_int(
-                r, "required_signature_count", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            required_signer_ids=tuple(cast(list[str], r.get("required_signer_ids", []))),
-            rule_digest=_require_str(r, "rule_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-        )
-        for r in rules_raw
+        _parse_approval_rule(r) for r in _require_list_of_objects(value, "rules", _FIELD_INVALID)
     )
+    approval_policy_digest = _require_str(value, "approval_policy_digest", _FIELD_INVALID)
     try:
         return AssumptionPolicyApprovalPolicy(
-            approval_policy_id=_require_str(
-                value, "approval_policy_id", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            authority_root_digest=_require_str(
-                value, "authority_root_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            approval_policy_id=approval_policy_id,
+            authority_root_digest=authority_root_digest,
             rules=rules,
-            approval_policy_digest=_require_str(
-                value, "approval_policy_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            approval_policy_digest=approval_policy_digest,
         )
     except Exception as exc:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID") from exc
+        code = getattr(exc, "code", None)
+        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", code) from exc
 
 
 def _parse_signature_profile(value: dict[str, Any]) -> AssumptionPolicySignatureProfile:
-    from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
-        AssumptionPolicyAlgorithmProfile,
+    _require_closed_object(value, _SIGNATURE_PROFILE_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, SIGNATURE_PROFILE_SCHEMA_VERSION)
+    signature_set_schema_version = _require_str(
+        value, "signature_set_schema_version", _FIELD_INVALID
     )
-
-    profiles_raw = value.get("algorithm_profiles")
-    if type(profiles_raw) is not list:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_FIELD_INVALID", "algorithm_profiles")
+    signature_record_semantics_version = _require_str(
+        value, "signature_record_semantics_version", _FIELD_INVALID
+    )
     profiles = tuple(
-        AssumptionPolicyAlgorithmProfile(
-            algorithm=_require_str(p, "algorithm", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            verification_profile=_require_str(
-                p, "verification_profile", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-        )
-        for p in profiles_raw
+        _parse_algorithm_profile(p)
+        for p in _require_list_of_objects(value, "algorithm_profiles", _FIELD_INVALID)
     )
+    required_authority_scope = _require_str(value, "required_authority_scope", _FIELD_INVALID)
+    key_authority_root_digest = _require_str(value, "key_authority_root_digest", _FIELD_INVALID)
+    duplicate_signer_rule = _require_str(value, "duplicate_signer_rule", _FIELD_INVALID)
+    profile_digest = _require_str(value, "profile_digest", _FIELD_INVALID)
     try:
         return AssumptionPolicySignatureProfile(
-            signature_set_schema_version=_require_str(
-                value, "signature_set_schema_version", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            signature_record_semantics_version=_require_str(
-                value,
-                "signature_record_semantics_version",
-                "ASSUMPTION_POLICY_STORED_FIELD_INVALID",
-            ),
+            signature_set_schema_version=signature_set_schema_version,
+            signature_record_semantics_version=signature_record_semantics_version,
             algorithm_profiles=profiles,
-            required_authority_scope=_require_str(
-                value, "required_authority_scope", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            key_authority_root_digest=_require_str(
-                value, "key_authority_root_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            duplicate_signer_rule=_require_str(
-                value, "duplicate_signer_rule", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            profile_digest=_require_str(
-                value, "profile_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            required_authority_scope=required_authority_scope,
+            key_authority_root_digest=key_authority_root_digest,
+            duplicate_signer_rule=duplicate_signer_rule,
+            profile_digest=profile_digest,
         )
     except AssumptionPolicyActivationContractError as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
 
 
 def _parse_challenge_policy(value: dict[str, Any]) -> AssumptionChallengeClassificationPolicy:
-    from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
-        AssumptionChallengeClassificationRule,
-    )
-
-    rules_raw = value.get("reason_rules")
-    if type(rules_raw) is not list:
-        raise PolicyStoreError("ASSUMPTION_POLICY_STORED_FIELD_INVALID", "reason_rules")
+    _require_closed_object(value, _CHALLENGE_POLICY_FIELDS, _FIELD_INVALID)
+    _require_schema_version(value, CHALLENGE_CLASSIFICATION_POLICY_SCHEMA_VERSION)
     rules = tuple(
-        AssumptionChallengeClassificationRule(
-            reason_code=_require_str(r, "reason_code", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-            materiality=_require_str(r, "materiality", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"),
-        )
-        for r in rules_raw
+        _parse_challenge_rule(r)
+        for r in _require_list_of_objects(value, "reason_rules", _FIELD_INVALID)
     )
+    unknown_reason_behavior = _require_str(value, "unknown_reason_behavior", _FIELD_INVALID)
+    policy_digest = _require_str(value, "policy_digest", _FIELD_INVALID)
     try:
         return AssumptionChallengeClassificationPolicy(
             reason_rules=rules,
-            unknown_reason_behavior=_require_str(
-                value, "unknown_reason_behavior", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
-            policy_digest=_require_str(
-                value, "policy_digest", "ASSUMPTION_POLICY_STORED_FIELD_INVALID"
-            ),
+            unknown_reason_behavior=unknown_reason_behavior,
+            policy_digest=policy_digest,
         )
     except AssumptionPolicyActivationContractError as exc:
         raise PolicyStoreError("ASSUMPTION_POLICY_STORED_CONTRACT_INVALID", exc.code) from exc
 
 
-# --- filesystem publisher --------------------------------------------------
+# ===========================================================================
+# Filesystem publisher
+# ===========================================================================
 
 
 class FilesystemAssumptionPolicyPublisher:
@@ -505,70 +948,240 @@ class FilesystemAssumptionPolicyPublisher:
     JSON file. Uses ``_platform.advisory_lock`` for exclusive interprocess
     access and ``os.replace`` for atomic file replacement.
 
-    Atomic publication sequence (all under one lock):
-
-      1. acquire exclusive publication lock
-      2. read authoritative stored ledger bytes
-      3. reconstruct and fully validate ledger/3
-      4. derive exact current root and head
-      5. run V3 exact idempotence (via the A1.3-A oracle)
-      6. compare exact expected state
-      7. validate predecessor pair and sequence
-      8. construct updated ledger/3 bytes
-      9. write temporary file
-     10. flush and fsync the temporary file
-     11. atomically replace the authoritative file
-     12. perform supported directory durability operation
-     13. reread authoritative bytes
-     14. reconstruct and verify exact root/head/bytes
-     15. return the activation result
-     16. release the lock
+    See the module docstring for the full claim boundary, lifecycle, and the
+    atomic publication sequence.
     """
 
     def __init__(self, root: Path) -> None:
+        """Record store paths only. Perform no initialization and no I/O.
+
+        Use :meth:`create` to initialize an empty authoritative ledger or
+        :meth:`open` to open an existing store. :meth:`read_state`,
+        :meth:`read_ledger`, and :meth:`publish` reconstruct the ledger from
+        bytes on every call, so they may be called after either lifecycle
+        entry point (or directly, treating a missing ledger as a missing-store
+        error).
+        """
+
         if not isinstance(root, Path):
             raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_INVALID")
         self.root = root
         self.ledger_path = root / "ledger.json"
         self.lock_path = root / "publication.lock"
-        self.temporary = root / ".tmp"
-        for directory in (root, self.temporary):
-            directory.mkdir(parents=True, exist_ok=True)
-            fsync_directory(directory)
-        self.lock_path.touch(exist_ok=True)
-        # Clean orphan temp files from a previous crash.
-        for orphan in self.temporary.glob("*.tmp"):
-            orphan.unlink(missing_ok=True)
-        # Initialize empty ledger if missing.
-        if not self.ledger_path.exists():
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def _validate_root(self) -> None:
+        """Pre-lock validation that the root is usable.
+
+        Runs before the publication lock is acquired so that a root that is a
+        regular file (or otherwise unusable) surfaces the precise
+        ``ROOT_NOT_DIRECTORY`` code rather than being masked as a lock
+        acquisition failure (the lock helper would try to create the lock
+        file's parent, which is the bad root).
+        """
+
+        if self.root.exists() and not self.root.is_dir():
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_NOT_DIRECTORY")
+
+    def _ensure_root(self) -> None:
+        """Create the store root directory if needed and sync it.
+
+        Performed under the publication lock by both ``create()`` and
+        ``open()`` so that concurrent first-openers do not race on directory
+        creation. The lock file is created by ``advisory_lock`` itself when it
+        opens the lock path.
+        """
+
+        try:
+            self.root.mkdir(parents=True, exist_ok=True)
+            fsync_directory(self.root)
+        except OSError as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ROOT_CREATE_FAILED", str(exc)) from exc
+
+    def _cleanup_orphans(self) -> None:
+        """Remove any managed temporary files left by a previous crash.
+
+        Only files matching the exact managed pattern
+        ``.policy-ledger.<uuid>.tmp`` are removed, so unrelated files in the
+        store root are never touched.
+        """
+
+        if not self.root.exists():
+            return
+        for candidate in self.root.iterdir():
+            name = candidate.name
+            if (
+                name.startswith(_TEMP_PREFIX)
+                and name.endswith(_TEMP_SUFFIX)
+                and name != _TEMP_PREFIX + _TEMP_SUFFIX
+            ):
+                middle = name[len(_TEMP_PREFIX) : -len(_TEMP_SUFFIX)]
+                # The middle segment must be a non-empty hex uuid string.
+                if middle and all(c in "0123456789abcdef" for c in middle):
+                    with suppress(OSError):
+                        candidate.unlink(missing_ok=True)
+
+    def create(self) -> None:
+        """Initialize an empty authoritative ledger, exactly once.
+
+        Performed under the publication lock. If a valid authoritative ledger
+        already exists, raises ``ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED``
+        rather than clobbering it. If a corrupt or partial ledger exists,
+        surfaces the reconstruction error so the operator can decide rather
+        than silently re-initializing.
+        """
+
+        self._validate_root()
+        with self._locked():
+            self._ensure_root()
+            self._cleanup_orphans()
+            if self.ledger_path.exists():
+                # An authoritative file exists. If it reconstructs cleanly,
+                # the store is already initialized and create() must refuse.
+                # If it fails to reconstruct, surface that error.
+                self._reconstruct()
+                raise PolicyStoreError("ASSUMPTION_POLICY_STORE_ALREADY_INITIALIZED")
             empty = AssumptionPolicyLedgerV3.build(())
             self._write_atomic(empty.canonical_bytes)
+
+    def open(self) -> None:
+        """Open an existing store. Never initializes.
+
+        Reconstructs the authoritative ledger under the publication lock to
+        fail fast on corruption and to remove any orphan temp files. A missing
+        authoritative ledger raises
+        ``ASSUMPTION_POLICY_STORED_BYTES_MISSING``.
+        """
+
+        self._validate_root()
+        with self._locked():
+            self._ensure_root()
+            self._cleanup_orphans()
+            self._reconstruct()
+
+    # ------------------------------------------------------------------
+    # Locking context manager
+    # ------------------------------------------------------------------
+
+    @contextmanager
+    def _locked(self) -> Iterator[None]:
+        """Context manager wrapping the publication lock, normalizing failures."""
+
+        try:
+            with advisory_lock(self.lock_path):
+                yield
+        except OSError as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORE_LOCK_FAILED", str(exc)) from exc
+
+    # ------------------------------------------------------------------
+    # Fault injection
+    # ------------------------------------------------------------------
+
+    #: Class-level fault-injection hook. When set to a callable, it is invoked
+    #: at each :meth:`_checkpoint` with the checkpoint name. A test installs a
+    #: hook via :meth:`with_fault_injection` (context manager) so the hook is
+    #: always cleared on exit. The hook is intentionally class-level so a fault
+    #: injected from a child process is observable; production code never sets
+    #: it.
+    _fault_hook: Callable[[str], None] | None = None
+
+    @classmethod
+    def _checkpoint(cls, name: str) -> None:
+        """Deterministic fault-injection checkpoint.
+
+        Invoked at well-defined points in the publication sequence so tests
+        can assert pre- and post-commit failure behavior without arbitrary
+        monkey-patching of internal methods. A no-op in production (the hook
+        is ``None``).
+        """
+
+        hook = cls._fault_hook
+        if hook is not None:
+            hook(name)
+
+    class _FaultInjectionCtx:
+        """Context manager installing a fault-injection hook for its scope."""
+
+        def __init__(self, hook: Callable[[str], None]) -> None:
+            self._hook = hook
+            self._prev: Callable[[str], None] | None = None
+
+        def __enter__(self) -> FilesystemAssumptionPolicyPublisher._FaultInjectionCtx:
+            self._prev = FilesystemAssumptionPolicyPublisher._fault_hook
+            FilesystemAssumptionPolicyPublisher._fault_hook = self._hook
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            FilesystemAssumptionPolicyPublisher._fault_hook = self._prev
+
+    @classmethod
+    def with_fault_injection(
+        cls, hook: Callable[[str], None]
+    ) -> FilesystemAssumptionPolicyPublisher._FaultInjectionCtx:
+        """Install ``hook`` as the fault-injection callback for a ``with`` block."""
+
+        return cls._FaultInjectionCtx(hook)
+
+    # ------------------------------------------------------------------
+    # Atomic file I/O
+    # ------------------------------------------------------------------
 
     def _read_ledger_bytes(self) -> bytes:
         if not self.ledger_path.exists():
             raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_MISSING")
-        return self.ledger_path.read_bytes()
+        try:
+            return self.ledger_path.read_bytes()
+        except OSError as exc:
+            raise PolicyStoreError("ASSUMPTION_POLICY_STORED_BYTES_INVALID", str(exc)) from exc
 
     def _write_atomic(self, payload: bytes) -> None:
-        temp = self.temporary / f"{uuid.uuid4().hex}.tmp"
-        with open(temp, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp, self.ledger_path)
-        fsync_directory(self.root)
+        """Write ``payload`` to the authoritative file via atomic replace.
+
+        The temporary file is named ``.policy-ledger.<uuid>.tmp`` in the store
+        root (same filesystem as the destination, so ``os.replace`` is atomic).
+        The temp file is fsynced before the replace so the replacement is
+        durable up to the supported durability boundary.
+        """
+
+        temp = self.root / f"{_TEMP_PREFIX}{uuid.uuid4().hex}{_TEMP_SUFFIX}"
+        try:
+            with open(temp, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, self.ledger_path)
+            fsync_directory(self.root)
+        except OSError as exc:
+            # Best-effort cleanup of the temp file on any write-side failure.
+            # A post-replace failure is handled by the caller, not here.
+            with suppress(OSError):
+                temp.unlink(missing_ok=True)
+            raise PolicyStoreError("ASSUMPTION_POLICY_PUBLICATION_WRITE_FAILED", str(exc)) from exc
 
     def _reconstruct(self) -> AssumptionPolicyLedgerV3:
         payload = self._read_ledger_bytes()
         return parse_ledger_v3(payload)
 
+    # ------------------------------------------------------------------
+    # Read API
+    # ------------------------------------------------------------------
+
     def read_state(self) -> ExpectedPolicyLedgerStateV3:
-        with advisory_lock(self.lock_path):
+        self._validate_root()
+        with self._locked():
             return ExpectedPolicyLedgerStateV3.from_ledger(self._reconstruct())
 
     def read_ledger(self) -> AssumptionPolicyLedgerV3:
-        with advisory_lock(self.lock_path):
+        self._validate_root()
+        with self._locked():
             return self._reconstruct()
+
+    # ------------------------------------------------------------------
+    # Publish API
+    # ------------------------------------------------------------------
 
     def publish(
         self,
@@ -581,7 +1194,10 @@ class FilesystemAssumptionPolicyPublisher:
             raise AssumptionPolicyPublicationConflict(
                 "ASSUMPTION_POLICY_LEDGER_ENTRY_VERSION_NOT_ACTIVATABLE"
             )
-        with advisory_lock(self.lock_path):
+        self._validate_root()
+        with self._locked():
+            self._ensure_root()
+            self._cleanup_orphans()
             ledger = self._reconstruct()
             updated, result = compare_and_append_policy_entry_v3(
                 ledger=ledger,
@@ -589,9 +1205,80 @@ class FilesystemAssumptionPolicyPublisher:
                 candidate=entry,
             )
             if result.append_result == "COMMITTED":
-                self._write_atomic(updated.canonical_bytes)
-                # Post-write verification: reread and confirm.
-                verified = self._reconstruct()
-                if verified.ledger_root_digest != updated.ledger_root_digest:
-                    raise PolicyStoreError("ASSUMPTION_POLICY_STORED_VERIFICATION_FAILED")
+                self._commit(updated)
             return result
+
+    def _commit(self, updated: AssumptionPolicyLedgerV3) -> None:
+        """Write ``updated`` atomically and verify the write landed.
+
+        Pre-commit checkpoint is before the atomic replace: a failure there
+        leaves the old ledger intact and the caller sees a normal error. The
+        post-commit checkpoint is after the atomic replace: any failure there
+        (including verification failure) raises
+        ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN`` and never attempts
+        a rollback, because the replacement may have partially or fully landed
+        and a rollback could destroy a successful publication.
+        """
+
+        intended_bytes = updated.canonical_bytes
+        self._checkpoint(_CHECKPOINT_PRE_COMMIT)
+        self._write_atomic(intended_bytes)
+        # Everything from here on runs after os.replace: the publication may
+        # have landed, so any failure (including a fault-hook exception or a
+        # verification mismatch) is normalized to OUTCOME_UNCERTAIN. No
+        # rollback is attempted: a rollback could destroy a successful
+        # publication, and the caller must reconcile the uncertain outcome.
+        try:
+            self._checkpoint(_CHECKPOINT_POST_COMMIT)
+            verified = self._reconstruct()
+            self._verify_post_write(updated, intended_bytes, verified)
+        except PolicyStoreError as exc:
+            # A verification failure that already carries the uncertain code
+            # is re-raised unchanged; any other PolicyStoreError (e.g. a
+            # reconstruction failure) is re-classified as uncertain.
+            if exc.code == "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN":
+                raise
+            raise PolicyStoreError(
+                "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN", exc.code
+            ) from exc
+        except Exception as exc:
+            # A fault-hook RuntimeError or any other post-commit surprise.
+            raise PolicyStoreError(
+                "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN", repr(exc)
+            ) from exc
+
+    @staticmethod
+    def _verify_post_write(
+        updated: AssumptionPolicyLedgerV3,
+        intended_bytes: bytes,
+        verified: AssumptionPolicyLedgerV3,
+    ) -> None:
+        """Strengthened post-write verification: bytes + entries + root + head
+        + predecessor binding.
+
+        Every check here raises ``ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN``
+        so that any divergence after ``os.replace`` surfaces as the uncertain
+        outcome rather than a successful return.
+        """
+
+        _uncertain = "ASSUMPTION_POLICY_PUBLICATION_OUTCOME_UNCERTAIN"
+        if verified.canonical_bytes != intended_bytes:
+            raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+        if tuple(verified.entries) != tuple(updated.entries):
+            raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+        if verified.ledger_root_digest != updated.ledger_root_digest:
+            raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+        # Head + predecessor binding: if there is a head entry, its digest and
+        # the (predecessor -> head) chain position must match the oracle.
+        if updated.entries:
+            head = updated.entries[-1]
+            verified_head = verified.entries[-1]
+            if verified_head.ledger_entry_digest != head.ledger_entry_digest:
+                raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+            if (
+                head.signing_payload.predecessor_commit_receipt_digest
+                != verified_head.signing_payload.predecessor_commit_receipt_digest
+            ):
+                raise PolicyStoreError(_uncertain, "STORED_VERIFICATION_FAILED")
+        # Directory fsync is invoked inside _write_atomic; on POSIX it makes
+        # the rename durable. On Windows it is a no-op (see claim boundary).
