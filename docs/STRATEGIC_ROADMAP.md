@@ -1,24 +1,37 @@
 # CSD Foundry Strategic Roadmap
 
 **Status:** Proposed program roadmap  
-**Version:** 1.1  
-**Date:** 2026-08-02  
-**Governing architecture:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.0.md`
+**Version:** 1.2  
+**Date:** 2026-08-04  
+**Governing architecture:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`  
+**Distributional doctrine:** `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`
 
 ## 1. Strategic objective
 
 Build CSD Foundry in two successive stages:
 
-1. complete CSD as a verifier-backed cognition-data manufacturing and runtime-governance domain; and
-2. extract the reusable platform boundaries required for multi-domain, oracle-federated, and governed open-ended reasoning.
+1. complete CSD as a verifier-backed, structurally assured, distributionally governed cognition-data manufacturing and runtime-governance domain; and
+2. extract the reusable platform boundaries required for multi-domain, oracle-federated, distributionally assured, and governed open-ended reasoning.
 
 The immediate objective remains to execute governed CSD semantics, synthesize deterministic trajectories, challenge declared models without claiming external truth, quarantine invalidated assets, compile governed releases, and produce multiple training and evaluation products from one verified episode.
 
 The longer-term platform objective is:
 
-> A proof-carrying cognition manufacturing and governance platform that combines bounded executable semantics, external specialist oracles, empirical evidence, adjudicated processes, and governed exploration while preserving an exact claim boundary for every material result.
+> A proof-carrying cognition manufacturing and governance platform that combines bounded executable semantics, external specialist oracles, empirical evidence, adjudicated processes, governed exploration, and distributionally assured cognition manufacturing while preserving an exact claim boundary for every material result.
 
-The platform charter is normative for strategic direction and constitutional boundaries. This roadmap remains normative for sequencing and release gates. Exact syntax, schemas, algorithms, model choices, and deployment topology remain versioned implementation decisions.
+The platform charter is normative for strategic direction and constitutional boundaries. `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` defines the proposed subsystem doctrine and initial contract model. This roadmap remains normative for sequencing and release gates. Exact syntax, schemas, algorithms, model choices, thresholds, quotas, and deployment topology remain versioned implementation decisions.
+
+The governing quality model is:
+
+```text
+Foundry quality
+=
+Oracle integrity
+× Structural assurance
+× Distributional assurance
+```
+
+No plane substitutes for another.
 
 ## 2. Current position
 
@@ -35,16 +48,19 @@ The repository has completed:
 
 The current implementation frontier is v0.5-D: substantive evidence-unit, assumption, and alternative-model registries.
 
+The repository now contains proposed architecture documents for Distributional Assurance, but it has not implemented their executable contracts or empirical gates.
+
 The repository has not yet completed:
 
 - substantive governed registries;
 - a substantive disposition oracle;
 - synchronous quarantine eligibility;
-- the committed M-03/M-15 vertical slice;
+- the committed M-03/M-15 governed vertical slice;
 - event-triggered release and promotion;
 - complete trajectory planning and construction;
 - structural canonicalization and holdouts;
-- the Verified Cognition Episode and data compilers;
+- executable Distributional Assurance schemas, validators, contracts, contrasts, or reports;
+- a canonical Verified Cognition Episode and data compilers;
 - an empirical model-training pilot;
 - a domain-neutral microkernel/domain-pack split;
 - CognitionDL or the Domain Entry Compiler;
@@ -64,14 +80,14 @@ Phase 2C  Implement atomic temporal claim and completion
 Current CSD milestone
 Phase 3   Implement evidence, assumption, and alternative-model registries
 Phase 4   Implement the separate disposition oracle and quarantine
-Phase 5   Prove the committed M-03 / M-15 vertical slice
+Phase 5   Prove the committed M-03 / M-15 governed vertical slice
 Phase 6   Implement event-triggered release and promotion
 Phase 7   Build performance harness and constraint-valid synthesis
-Phase 8   Add structural canonicalization, holdouts, and mutation assurance
+Phase 8   Add structural and distributional assurance
 Phase 9   Build Verified Cognition Episode and data compilers
 Phase 10  Run the empirical model-training pilot
 Phase 11  Freeze scale policies and compile the governed corpus
-Phase 12  Deploy runtime governance and failure harvesting
+Phase 12  Deploy runtime governance and failure/distribution-gap harvesting
 
 Platform extraction and breadth
 Phase 13  Extract the domain-neutral microkernel and make CSD the first domain pack
@@ -79,10 +95,12 @@ Phase 14  Implement CognitionDL and the minimal Domain Entry Compiler
 Phase 15  Implement the Reasoning ABI, assurance classes, and cross-domain composition
 Phase 16  Prove a second domain and one cross-domain governed decision
 Phase 17  Implement the governed exploration plane and Open Reasoning Episode
-Phase 18  Connect domain-gap harvesting to progressive formalization
+Phase 18  Connect domain and distribution gaps to progressive formalization
 ```
 
 Phases 13–18 must not interrupt completion of the governed CSD vertical slice. New v0.5 work should avoid unnecessary CSD-specific coupling where the domain-neutral boundary is already clear, but premature refactoring is prohibited.
+
+Distributional Assurance implementation belongs in Phases 7–12. Its documentation work may proceed earlier, but its executable work may not displace Phases 3–6.
 
 ## 4. Program gates
 
@@ -117,24 +135,65 @@ Proceed to synthesis scaling only after:
 - M-03 and M-15 pass end to end;
 - promotion uses current evidence and creates a new manifest.
 
-### Gate C — Synthesis pilot ready
+### Gate C1 — Semantic synthesis readiness
 
-Proceed to training only after joint coverage planning, constraint-valid state/event construction, complete oracle rollout, structural canonicalization, split isolation, and severity-aware mutation gates pass.
+Proceed to structural and distributional assurance only after:
+
+- joint semantic coverage planning is complete;
+- constraint-valid state and event construction is executable;
+- complete semantic and disposition rollout is available;
+- failed attempts produce typed rejection evidence;
+- search exhaustion remains distinct from infeasibility;
+- accepted trajectories replay deterministically.
+
+### Gate C2 — Structural readiness
+
+Proceed to the empirical model pilot only after:
+
+- state, basis, dependency, event, assumption, disposition, and trajectory structures are canonicalized;
+- train, validation, and test splits are structurally isolated;
+- severity-aware mutation gates pass;
+- right-answer/wrong-basis defects are represented and killed;
+- structural holdout identities are frozen and reproducible.
+
+### Gate C3 — Distributional readiness
+
+Proceed to the empirical model pilot only after:
+
+- a versioned descriptor ontology and distribution contract exist;
+- required marginal, pairwise, selected three-way, and risk-selected higher-order cells are resolved;
+- causal invariance, sensitivity, information-removal, and failure/repair families are compiled;
+- typed failure ecology and minimal-repair conformance vectors pass;
+- generating-process and recursive-ancestry provenance is complete;
+- filter stages emit before-and-after coverage loss;
+- required rare cells remain present or carry approved exceptions;
+- distributional holdouts remain isolated;
+- no unresolved critical distributional gap remains.
 
 ### Gate D — Scale authorized
 
-Proceed to release-scale generation only after the model pilot demonstrates:
+Proceed to release-scale generation only after the controlled model pilot demonstrates:
 
 - structural-holdout improvement;
 - reduced forbidden inference;
-- controlled abstention;
+- controlled abstention and over-conservatism;
+- causal invariance consistency;
+- counterfactual sensitivity correctness;
+- ambiguity handling with bounded missed and unnecessary clarification;
+- failure localization and minimal-repair fidelity;
+- reduced right-answer/wrong-basis defects;
+- independent source, process, discourse, tool, temporal, and structural transfer where declared;
+- rare-cell and worst-group retention;
+- actual optimizer exposure consistent with the approved contract;
 - acceptable verified-episode economics;
 - reproducible results;
 - zero unresolved critical mutation escapes.
 
+Training loss, aggregate accuracy, row count, or one scalar entropy score cannot authorize scale.
+
 ### Gate E — Runtime deployment authorized
 
-Deploy runtime governance only after deterministic receipts, escalation ownership, quarantine, historical reconstruction, and incident replay pass production-like fault testing.
+Deploy runtime governance only after deterministic receipts, escalation ownership, quarantine, historical reconstruction, incident replay, and distribution-gap capture pass production-like fault testing.
 
 ### Gate F — Multi-domain platform architecture proven
 
@@ -144,7 +203,8 @@ Proceed to broad domain expansion only after:
 - a second domain is compiled through the domain-definition toolchain;
 - at least one external oracle is integrated through the Reasoning ABI;
 - one cross-domain decision is composed under assurance policy;
-- domain-pack constitutional violations fail closed.
+- domain-pack constitutional violations fail closed;
+- cross-domain distributional claims remain contract-bounded.
 
 ### Gate G — Governed exploration proven
 
@@ -155,7 +215,8 @@ Proceed to open-ended curriculum scaling only after:
 - structurally distinct hypotheses are distinguished from paraphrases;
 - a selected question or test updates the hypothesis graph;
 - unsupported epistemic promotion is mechanically rejected;
-- outcome and search-quality evaluation are defined.
+- outcome and search-quality evaluation are defined;
+- novelty and distribution-gap discovery cannot override relevance, coherence, or claim boundaries.
 
 ## 5. Completed foundation
 
@@ -234,7 +295,7 @@ It may not establish or replace a substantive CSD verdict.
 
 Implement synchronous quarantine epochs and `may_use_asset()` so known-questionable assets become immediately ineligible while exact impact materialization and replay continue asynchronously.
 
-### Phase 5 — M-03/M-15 vertical slice
+### Phase 5 — M-03/M-15 governed vertical slice
 
 Use M-03 to prove:
 
@@ -259,6 +320,8 @@ primary graph
 → invariant or divergent classification
 → disposition change without external-truth assertion
 ```
+
+Phase 5 proves the governed execution substrate. Later Distributional Assurance work reuses M-03 and M-15 to create controlled world and contrast families; it does not weaken or redefine this governed proof.
 
 ### Phase 6 — Event-triggered release and promotion
 
@@ -286,7 +349,9 @@ Measure before freezing policy. Benchmark:
 - release compilation;
 - verified-episode cost.
 
-Build a joint coverage planner across:
+Build a joint semantic and distributional planning boundary across:
+
+### Semantic and structural dimensions
 
 - rule composition;
 - state topology;
@@ -300,11 +365,37 @@ Build a joint coverage planner across:
 - assumption fragility;
 - mutation family.
 
-Every accepted trajectory requires a target, constraint proof, eligibility proof, deterministic identities, validated events, complete semantic/disposition replay, and typed rejection evidence for failed attempts.
+### Scenario-world dimensions
 
-## 8. Phase 8 — Structural assurance
+- context family;
+- actor intention;
+- information state;
+- ambiguity class;
+- expertise relation;
+- discourse form;
+- tool condition;
+- authority state;
+- risk class;
+- reasoning-policy family;
+- failure topology;
+- outcome class.
 
-Canonicalize state, basis, dependency, event, assumption, and disposition structures before split assignment.
+Implement:
+
+- canonical scenario-world descriptors;
+- generating-process and recursive-ancestry provenance;
+- a versioned distribution-contract compiler;
+- marginal, weighted pairwise, selected three-way, and risk-selected higher-order planning;
+- separate `OBSERVED_FREQUENCY`, `RISK_WEIGHTED`, `CURRICULUM`, `TRANSFER`, `ASSURANCE`, and `EXPLORATION` quota authorities;
+- explicit impossible, forbidden, unsupported, unresolved, required, and holdout dispositions.
+
+Every accepted trajectory requires a target, constraint proof, eligibility proof, deterministic identities, validated events, complete semantic/disposition replay, process provenance, contract-cell assignment, and typed rejection evidence for failed attempts.
+
+## 8. Phase 8 — Structural and Distributional Assurance
+
+### 8.1 Structural assurance
+
+Canonicalize state, basis, dependency, event, assumption, disposition, and reasoning-policy structures before split assignment.
 
 Hold out:
 
@@ -320,9 +411,52 @@ Run deterministic and stochastic mutation campaigns across semantic decisions, e
 
 Search exhaustion remains unresolved and never becomes infeasibility without a machine-checkable witness.
 
+### 8.2 Distributional Assurance
+
+Implement:
+
+- causal `INVARIANCE` families for irrelevant changes;
+- causal `SENSITIVITY` families for consequential changes;
+- `INFORMATION_REMOVAL` families for clarification, observation, qualification, abstention, or escalation;
+- `FAILURE_AND_REPAIR` families with exact failure point, affected consequences, unaffected work, minimum legal repair, prohibited overcorrection, and post-repair conformance;
+- typed failure ecology;
+- conditional coverage matrices;
+- source and generating-process concentration reports;
+- recursive-ancestry reports;
+- pre-filter and post-filter coverage-loss reports;
+- rare-cell retention and explicit exception receipts;
+- distributional holdouts across source, process, discourse, tool, time, organization, and selected high-order worlds.
+
+Do not count surface paraphrases as new causal worlds. Do not maximize friction or path diversity when the governed problem has one valid efficient route.
+
+### 8.3 Initial CSD distributional families
+
+Use the governed M-03 and M-15 slices as the first executable Distributional Assurance families.
+
+M-03 shall cover selected:
+
+- complete, incomplete, contradictory, stale, and ambiguous evidence states;
+- available, partial, malformed, unavailable, timeout, and unknown-commit tool conditions;
+- sufficient, insufficient, and contested authority;
+- novice, peer, expert, and mixed-audience interactions;
+- unsupported verdict, wrong basis, right-answer/wrong-basis, missed clarification, unnecessary clarification, failed repair, and overbroad rollback cases.
+
+M-15 shall cover selected:
+
+- hidden-dependency changes;
+- materially different alternative models;
+- inappropriate irrelevance certification;
+- correct conclusions from incomplete structures;
+- invariant versus divergent classifications;
+- unresolved external truth without unsupported promotion.
+
 ## 9. Phase 9 — Verified Cognition Episode and compilers
 
-Make the Verified Cognition Episode the canonical CSD product. It contains:
+Make the Verified Cognition Episode the canonical CSD product.
+
+Each episode contains linked views over one immutable identity.
+
+### Semantic view
 
 - initial state;
 - validated events;
@@ -330,11 +464,39 @@ Make the Verified Cognition Episode the canonical CSD product. It contains:
 - operation traces;
 - final state;
 - registry roots;
-- shadow replays;
+- shadow replays.
+
+### Epistemic view
+
+- active and eliminated hypotheses where applicable;
+- support status;
+- ambiguity class;
+- permitted and forbidden commitments;
+- abstention or escalation basis.
+
+### Interaction view
+
+- user or actor turns;
+- tool calls and environment observations;
+- failures, retries, fallback, escalation, and repair;
+- exact execution receipts where applicable.
+
+### Distributional view
+
+- scenario-world digest;
+- distribution-contract digest and contract-cell identities;
+- causal contrast-family identity;
+- failure-topology identity;
+- reasoning-policy family;
+- generating-process identity and ancestry;
+- distributional claim boundary.
+
+The episode also binds:
+
 - disposition receipts;
 - quarantine context;
 - release eligibility;
-- provenance.
+- complete provenance.
 
 Compile each episode into:
 
@@ -344,11 +506,15 @@ Compile each episode into:
 - verifier-positive and verifier-negative records;
 - critique and repair trajectories;
 - verifiable-reward episodes;
-- benchmark records.
+- uncertainty and epistemic-status tasks;
+- causal contrast and failure-repair benchmarks;
+- distributional transfer records.
 
-Every rendered artifact must trace to one immutable episode digest.
+Every rendered artifact must trace to one immutable episode digest. Rendered wording cannot change semantic or distributional identity without a new episode or explicit rendering contract.
 
 ## 10. Phase 10 — Empirical model pilot
+
+### 10.1 Training-method comparison
 
 Compare:
 
@@ -358,32 +524,83 @@ Compare:
 4. SFT plus trained verifier;
 5. verifiable-reward training when stable.
 
-Primary metrics:
+### 10.2 Corpus ablations
+
+For the selected model methods, compare controlled corpus variants:
+
+1. current structural baseline;
+2. surface-expanded baseline;
+3. scenario-world contract coverage;
+4. causal contrast coverage;
+5. failure-and-repair coverage;
+6. full Distributional Assurance vertical slice.
+
+Control accepted episode or token volume where practical.
+
+### 10.3 Primary semantic and structural metrics
 
 - forbidden-inference rate;
 - evidence-impact accuracy;
 - basis-survival accuracy;
 - restoration integrity;
 - assumption-boundary accuracy;
-- repair success;
+- right-answer/wrong-basis rejection;
 - verifier discrimination;
-- abstention and over-conservatism;
-- in-distribution versus structural-holdout gap;
-- cost per accepted episode.
+- in-distribution versus structural-holdout gap.
 
-Do not authorize scale from training loss alone.
+### 10.4 Distributional and behavioral metrics
+
+- invariance consistency;
+- counterfactual sensitivity;
+- ambiguity detection;
+- clarification precision;
+- missed clarification;
+- unnecessary clarification;
+- abstention and over-abstention;
+- failure localization;
+- minimal-repair fidelity;
+- preservation of unaffected valid work;
+- tool recovery and escalation;
+- unseen-world transfer;
+- leave-source-out and leave-process-out transfer;
+- temporal and tool-environment transfer;
+- worst-group and rare-cell performance;
+- clean-case regression.
+
+### 10.5 Economics and exposure
+
+- cost per accepted episode;
+- token and tool-call cost;
+- retry and branching overhead;
+- planned versus actual training mixture;
+- cumulative optimizer exposure by contract cell, source, process, failure, and contrast family;
+- checkpoint retention and forgetting.
+
+Do not authorize scale from training loss, aggregate accuracy, output style, corpus inclusion, or one diversity score alone.
 
 ## 11. Phases 11–12 — Governed scale and runtime loop
 
-After pilot evidence, freeze:
+### Phase 11 — Measured scale-policy freeze
+
+After pilot evidence, freeze only the policies justified by measurements:
 
 - performance SLOs;
 - retry budgets;
 - exact-enumeration limits;
 - cache and replay policy;
 - mutation-risk thresholds;
-- quotas;
+- distribution-contract quotas;
+- source and generator concentration limits;
+- recursive-ancestry limits;
+- rare-cell floors;
+- filter-loss thresholds;
+- causal contrast and transfer thresholds;
+- regression tolerances;
 - release volume.
+
+Compile the governed corpus only after Gates C1, C2, C3, and D pass.
+
+### Phase 12 — Runtime governance and gap harvesting
 
 At runtime:
 
@@ -396,7 +613,21 @@ model proposal
   → permit / flag / request evidence / escalate / block
 ```
 
-Runtime failures feed assumption and dependency challenges, replay, quarantine, mutations, curriculum, retraining, and reevaluation.
+Runtime failures feed:
+
+- assumption and dependency challenges;
+- full replay;
+- quarantine;
+- mutation families;
+- curriculum and retraining;
+- reevaluation;
+- distribution-gap records;
+- new failure-topology candidates;
+- previously unseen high-order world combinations;
+- temporal-shift and tool-drift cases;
+- distribution-contract revision proposals.
+
+Runtime observations do not enter training automatically. They require privacy, provenance, semantic, disposition, and release governance.
 
 ## 12. Phases 13–16 — Extract the multi-domain platform
 
@@ -412,7 +643,7 @@ CSD domain pack
 
 The microkernel owns immutable identity, evidence lifecycle, support expressions, dependencies, temporal admissibility, authority, assumptions, alternative models, disposition, quarantine, release eligibility, and provenance.
 
-The CSD pack owns CSD states, events, invariants, policies, constructors, mutations, renderers, benchmarks, and claim boundaries.
+The CSD pack owns CSD states, events, invariants, policies, constructors, mutations, renderers, benchmarks, claim boundaries, and domain-specific distributional descriptors and contracts.
 
 ### Phase 14 — CognitionDL and Domain Entry Compiler
 
@@ -427,9 +658,10 @@ Implement a minimal declarative domain-definition toolchain with:
 - generated conformance vectors;
 - generated basic mutation families;
 - typed renderer interfaces;
+- scenario-world and causal-contrast interfaces;
 - versioned domain-pack manifests.
 
-LLMs may propose candidate doctrine from source materials, but independent approval is required before release.
+LLMs may propose candidate doctrine or descriptors from source materials, but independent approval is required before release.
 
 ### Phase 15 — Reasoning ABI and assurance composition
 
@@ -445,6 +677,8 @@ Implement:
 
 Exact tools, deterministic models, empirical systems, adjudicated processes, and heuristic models must retain distinct permitted claims.
 
+Cross-domain distributional claims must validate descriptor and contract compatibility and may not silently inherit broader coverage than their components support.
+
 ### Phase 16 — Second domain and composition proof
 
 Recommended first domains:
@@ -452,7 +686,7 @@ Recommended first domains:
 1. software release management;
 2. ML evaluation and data governance.
 
-Prove one composed model-release decision using receipts from both domains plus promotion authority and disposition.
+Prove one composed model-release decision using receipts from both domains plus promotion authority, disposition, and a bounded distribution contract.
 
 ## 13. Phases 17–18 — Governed open-ended reasoning
 
@@ -468,29 +702,30 @@ Implement a separate exploration plane that can produce:
 - questions;
 - experiments;
 - candidate oracles;
-- candidate doctrine gaps.
+- candidate doctrine gaps;
+- candidate scenario worlds and distribution gaps.
 
 Its canonical object is an Open Reasoning Episode or governed exploration graph. Every material node carries epistemic status, assumptions, evidence, provenance, and a discriminating test or explicit limitation where applicable.
 
-Exploration never becomes verification by model agreement alone.
+Exploration never becomes verification by model agreement, novelty, or distributional rarity alone.
 
-### Phase 18 — Formalization flywheel
+### Phase 18 — Formalization and distributional flywheel
 
-Connect unsupported runtime requests to structured domain-gap records:
+Connect unsupported runtime requests and repeated gaps to structured records:
 
 ```text
-unsupported request
+unsupported request or distribution gap
 → hypotheses and candidate concepts
 → repeated gap pattern
-→ candidate ontology or rule
+→ candidate ontology, descriptor, rule, contrast, or failure topology
 → counterexample-guided review
 → shadow execution
-→ approved formal island
-→ new domain-pack version
+→ approved formal island or distribution-contract revision
+→ new domain-pack or contract version
 → verified curriculum
 ```
 
-Domain breadth grows from observed demand and reusable structure rather than speculative ontology expansion.
+Domain breadth grows from observed demand, reusable structure, and measured gaps rather than speculative ontology expansion or indiscriminate row generation.
 
 ## 14. Workstreams
 
@@ -499,27 +734,31 @@ Domain breadth grows from observed demand and reusable structure rather than spe
 | Semantic Kernel | Current CSD states, events, transitions, traces, invariants |
 | Deterministic Substrate | Choice, identity, replay, execution, sharding, storage, publication |
 | Reality Assurance | Evidence, assumptions, alternative models, disposition, quarantine, promotion |
-| Synthesis and Data | Coverage, constructors, episodes, canonicalization, holdouts, mutations, compilers |
-| Learning and Evaluation | Training, verifiers, benchmarks, structural evaluation, runtime gate |
+| Synthesis and Data | Semantic targets, constructors, episodes, canonicalization, mutations, compilers |
+| Distributional Assurance | Scenario worlds, distribution contracts, causal contrasts, failure ecology, process provenance, conditional coverage, filter-loss audits, optimizer-exposure audits, independent transfer gates |
+| Learning and Evaluation | Training, verifiers, benchmarks, structural and distributional evaluation, runtime gate |
 | Platform Compiler | Microkernel extraction, CognitionDL, domain packs, static analysis |
 | Oracle Federation | Reasoning ABI, adapters, witness validation, assurance composition |
-| Governed Exploration | Hypothesis graphs, search control, epistemic typing, delayed outcomes |
+| Governed Exploration | Hypothesis graphs, search control, epistemic typing, delayed outcomes, gap discovery |
 
-No workstream may silently absorb another workstream's authority.
+No workstream may silently absorb another workstream's authority. Distributional Assurance may block a distributional release claim but may not rewrite semantic state or disposition policy.
 
 ## 15. Immediate repository sequence
 
 1. Implement evidence-unit, assumption, and alternative-model registry reducers and roots.
 2. Implement the separate disposition oracle and synchronous quarantine.
-3. Execute M-03 and M-15 through the committed pipeline.
+3. Execute M-03 and M-15 through the committed governed pipeline.
 4. Implement event-triggered release and promotion.
-5. Benchmark the governed vertical slice and freeze pilot policies only from measurements.
-6. Resume planner, constructor, rollout, structural assurance, and episode compilation.
-7. Run the empirical model pilot before authorizing release-scale generation.
-8. After the governed CSD vertical slice, extract the domain-neutral microkernel and make CSD the first domain pack.
-9. Implement the minimal domain compiler and Reasoning ABI.
-10. Prove one second domain and one cross-domain composition.
-11. Implement a minimal governed exploration vertical slice.
+5. Benchmark the governed vertical slice and freeze reference pilot policies only from measurements.
+6. Resume planner, constructor, rollout, semantic coverage, and structural assurance.
+7. Implement the Distributional Assurance contract, causal contrast, failure ecology, provenance, and report vertical slice over M-03/M-15.
+8. Extend the Verified Cognition Episode and compilers with epistemic, interaction, and distributional views.
+9. Run controlled corpus ablations and the empirical model pilot before authorizing release-scale generation.
+10. Freeze scale policies only from semantic, structural, distributional, transfer, and economic evidence.
+11. After the governed CSD vertical slice, extract the domain-neutral microkernel and make CSD the first domain pack.
+12. Implement the minimal domain compiler and Reasoning ABI.
+13. Prove one second domain and one cross-domain composition.
+14. Implement a minimal governed exploration vertical slice.
 
 ## 16. Explicit deferrals
 
@@ -531,9 +770,14 @@ Do not implement prematurely:
 - mutable assumption contents inside semantic state;
 - high-assurance gating from unverified evidence or models;
 - search exhaustion as infeasibility;
-- raw row expansion without executable semantic or exploratory coverage;
-- a universal ontology;
+- raw row expansion without executable semantic, structural, or behaviorally consequential distributional coverage;
+- a universal ontology or universal distributional taxonomy;
 - LLM judging presented as exact verification;
+- one scalar entropy score as sufficient assurance;
+- fixed universal human/synthetic ratios;
+- uncontrolled or non-replayable fault injection;
+- model architecture or loss changes before corpus, sampling, and evaluation causes are isolated;
+- unrestricted online weight adaptation from deployment interactions;
 - broad multi-domain expansion before the microkernel, pack, ABI, and assurance contracts are proven;
 - open-ended curriculum scaling before epistemic-promotion failures are mechanically detectable.
 
@@ -543,8 +787,8 @@ The program has three successive milestones:
 
 > **Milestone A — Complete governed CSD execution.**
 
-> **Milestone B — Scale verified cognition-episode manufacturing and prove learning value.**
+> **Milestone B — Scale semantically valid, structurally assured, distributionally governed cognition-episode manufacturing and prove learning value.**
 
-> **Milestone C — Extract the multi-domain, oracle-federated, governed-exploration platform.**
+> **Milestone C — Extract the multi-domain, oracle-federated, distributionally assured, governed-exploration platform.**
 
-This ordering protects deterministic replay, semantic/disposition separation, auditable uncertainty, append-only correction, and exact claim boundaries while preserving a credible path to broad reasoning coverage.
+This ordering protects deterministic replay, semantic/disposition separation, auditable uncertainty, append-only correction, distributional claim boundaries, and exact provenance while preserving a credible path to broad reasoning coverage.
