@@ -1,0 +1,2 @@
+{"expected_exact":"PASS","id":"e0h-smoke-001","prompt":"State the token PASS."}
+{"expected_exact":"STALE","id":"e0h-smoke-002","prompt":"State the token STALE."}
