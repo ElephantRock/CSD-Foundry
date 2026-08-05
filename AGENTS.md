@@ -29,9 +29,10 @@ Classify work by capability rather than participant identity:
 - `lane:gpu` — work that materially requires GPU hardware or a target accelerated environment.
 
 Lane labels classify work. They do not authenticate or prove which actor performed it.
-Governed repository artifacts must not attribute work to participants, assistants, vendors, or
-machine owners. Trust derives from exact commits, reproducible artifacts, CI, receipts, and
-review.
+Governed repository artifacts must not name participants or attribute work to participant
+identity, assistant identity, or machine ownership. Technical specifications may name platforms,
+dependencies, models, vendors, and hardware when required for reproducibility. Trust derives
+from exact commits, reproducible artifacts, CI, receipts, and review.
 
 See `docs/PROJECT_OPERATING_MODEL.md` for the complete handoff and evidence protocol.
 
