@@ -15,9 +15,7 @@ COMPILED = PACKAGE / "compiled_release"
 
 
 def _inputs():
-    return load_e0h_run_release_inputs(
-        (PACKAGE / "run_inputs.json").read_text(encoding="utf-8")
-    )
+    return load_e0h_run_release_inputs((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
 
 
 def test_concrete_e0h_inputs_compile_to_self_describing_release() -> None:
@@ -27,25 +25,18 @@ def test_concrete_e0h_inputs_compile_to_self_describing_release() -> None:
     assert bundle.release == "e0h-harness-v1"
     assert bundle.source_commit == "6bfd2f653c12055de99ae4b39556c78937d96239"
     assert len(bundle.files) == 10
-    assert bundle.file("run_inputs_lock.json").content == (
-        COMPILED / "run_inputs_lock.json"
-    ).read_bytes()
-    assert bundle.file("run_inputs_lock.json").content != (
-        PACKAGE / "run_inputs.json"
-    ).read_bytes()
-    assert b'"gpu_execution_authorized":false' in bundle.file(
-        "e0h_run_contract.json"
-    ).content
+    assert (
+        bundle.file("run_inputs_lock.json").content
+        == (COMPILED / "run_inputs_lock.json").read_bytes()
+    )
+    assert bundle.file("run_inputs_lock.json").content != (PACKAGE / "run_inputs.json").read_bytes()
+    assert b'"gpu_execution_authorized":false' in bundle.file("e0h_run_contract.json").content
 
 
 def test_materialized_release_is_exact_reconstruction() -> None:
     bundle = compile_e0h_run_release(_inputs())
     expected = {item.path: item.content for item in bundle.files}
-    observed = {
-        path.name: path.read_bytes()
-        for path in COMPILED.iterdir()
-        if path.is_file()
-    }
+    observed = {path.name: path.read_bytes() for path in COMPILED.iterdir() if path.is_file()}
     assert observed == expected
 
 
@@ -60,9 +51,7 @@ def test_smoke_fixture_matches_frozen_digest() -> None:
 def test_preflight_and_container_are_immutably_bound() -> None:
     inputs = json.loads((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
     dockerfile = (PACKAGE / "container" / "Dockerfile").read_text(encoding="utf-8")
-    requirements = (PACKAGE / "container" / "requirements.lock").read_text(
-        encoding="utf-8"
-    )
+    requirements = (PACKAGE / "container" / "requirements.lock").read_text(encoding="utf-8")
     preflight = (PACKAGE / "preflight.py").read_text(encoding="utf-8")
 
     assert inputs["environment"]["container_image"] in dockerfile
