@@ -102,11 +102,8 @@ def _sequence_execution_coordinates(spec: ScenarioSpec) -> list[dict[str, object
     return coordinates
 
 
-def _validate_sequence_execution(spec: ScenarioSpec) -> None:
-    """Reject sequence material that the canonical scenario runner rejects."""
-
-    if spec.mode is not ScenarioMode.SEQUENCE:
-        return
+def _validate_scenario_execution(spec: ScenarioSpec) -> None:
+    """Reject any material that the canonical scenario runner rejects."""
 
     result = run_scenario(spec)
     if result.accepted:
@@ -115,14 +112,15 @@ def _validate_sequence_execution(spec: ScenarioSpec) -> None:
     failures = [
         f"{case.case_id}: {'; '.join(case.details)}" for case in result.cases if not case.accepted
     ]
-    raise FamilySplitError("sequence scenario is not executable: " + " | ".join(failures))
+    subject = "sequence scenario" if spec.mode is ScenarioMode.SEQUENCE else "scenario"
+    raise FamilySplitError(f"{subject} is not executable: " + " | ".join(failures))
 
 
 def derive_scenario_family_identity(spec: ScenarioSpec) -> ScenarioFamilyIdentity:
     """Derive a family identity aligned with actual scenario execution semantics."""
 
     sequence_coordinates = _sequence_execution_coordinates(spec)
-    _validate_sequence_execution(spec)
+    _validate_scenario_execution(spec)
     base_identity = _base.derive_scenario_family_identity(spec)
     family_digest = canonical_sha256(
         {
