@@ -78,9 +78,7 @@ def finalize_execution(
             raise E0HRunReleaseError("HARNESS_PASSED cannot include a failure reason")
         evidence = _evidence(paths)
         reload_receipt = read_json_object(paths.work / "reload" / "reload_receipt.json")
-        smoke_receipt = read_json_object(
-            paths.work / "smoke" / "smoke_evaluation_receipt.json"
-        )
+        smoke_receipt = read_json_object(paths.work / "smoke" / "smoke_evaluation_receipt.json")
         if reload_receipt.get("finite_logits") is not True:
             raise E0HRunReleaseError("reload evidence does not establish finite logits")
         if smoke_receipt.get("repeated_greedy_outputs_identical") is not True:
@@ -115,9 +113,7 @@ def finalize_execution(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m csd_foundry.empirical.e0h.harness.finalize"
-    )
+    parser = argparse.ArgumentParser(prog="python -m csd_foundry.empirical.e0h.harness.finalize")
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument(
         "--classification",
