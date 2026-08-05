@@ -15,6 +15,9 @@ from csd_foundry.empirical.e0h.harness.common import (
     verify_static_inputs,
 )
 from csd_foundry.empirical.e0h.harness.package_lock import verify_installed_python_lock
+from csd_foundry.empirical.e0h.harness.package_manifest import (
+    verify_execution_package_manifest,
+)
 from csd_foundry.empirical.e0h.run_release import E0HRunReleaseError
 
 _EXPECTED_TRAIN_RECORDS = 168
@@ -24,6 +27,7 @@ def run_preflight(paths: RunPaths, *, mode: str, require_snapshot: bool) -> dict
     """Validate immutable inputs, release reconstruction, runtime, and device boundary."""
 
     inputs = verify_static_inputs(paths, require_snapshot=require_snapshot)
+    package_manifest = verify_execution_package_manifest(paths, inputs)
     assert_python_version(inputs.environment.python_version)
     runtime_versions = verify_installed_python_lock(paths, inputs)
 
@@ -70,6 +74,7 @@ def run_preflight(paths: RunPaths, *, mode: str, require_snapshot: bool) -> dict
         "release": inputs.release,
         "source_commit": inputs.source_commit,
         "run_contract_digest": bundle.run_contract_digest,
+        "execution_package_file_count": package_manifest["file_count"],
         "training_record_count": len(training_records),
         "protected_metrics_access": inputs.evaluation.protected_metrics_access,
         "runtime_versions": runtime_versions,
