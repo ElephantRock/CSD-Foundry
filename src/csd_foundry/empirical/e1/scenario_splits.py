@@ -48,6 +48,12 @@ _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _GIT_COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _COORDINATE_TOKEN = re.compile(r"^(?:(\d+)[-_])?(.*)$")
 _MAX_CANONICAL_LABELINGS = 250_000
+_FAMILY_OVERLAP = False
+_CLAIM_BOUNDARY = (
+    "This manifest proves family-level train/development isolation for the listed "
+    "executable scenarios. It does not establish distributional completeness, "
+    "statistical power, learning value, or final-holdout integrity."
+)
 
 
 def _require_text(value: str, field_name: str) -> None:
@@ -563,8 +569,7 @@ def _case_coordinates(spec: ScenarioSpec) -> tuple[dict[str, object], ...]:
     label_maps: list[dict[str, str]] = []
     coordinates: list[dict[str, object]] = []
     for position, case in enumerate(spec.cases):
-        parts = case.case_id.split("/")
-        structural_parts = parts[1:] if len(parts) > 1 else ()
+        structural_parts = tuple(case.case_id.split("/"))
         rendered_parts: list[dict[str, object]] = []
         for depth, raw_part in enumerate(structural_parts):
             while len(label_maps) <= depth:
@@ -733,30 +738,24 @@ class FamilySplitManifest:
         if {item.split for item in self.assignments} != set(E1Split):
             raise FamilySplitError("manifest requires nonempty train and development splits")
 
-    @property
-    def manifest_digest(self) -> str:
-        return canonical_sha256(
-            {
-                "schema_version": self.schema_version,
-                "release": self.release,
-                "source_commit": self.source_commit,
-                "assignments": [item.to_dict() for item in self.assignments],
-            }
-        )
-
-    def to_dict(self) -> dict[str, object]:
+    def _digest_payload(self) -> dict[str, object]:
         return {
             "schema_version": self.schema_version,
             "release": self.release,
             "source_commit": self.source_commit,
             "assignments": [item.to_dict() for item in self.assignments],
+            "family_overlap": _FAMILY_OVERLAP,
+            "claim_boundary": _CLAIM_BOUNDARY,
+        }
+
+    @property
+    def manifest_digest(self) -> str:
+        return canonical_sha256(self._digest_payload())
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **self._digest_payload(),
             "manifest_digest": self.manifest_digest,
-            "family_overlap": False,
-            "claim_boundary": (
-                "This manifest proves family-level train/development isolation for the "
-                "listed executable scenarios. It does not establish distributional "
-                "completeness, statistical power, learning value, or final-holdout integrity."
-            ),
         }
 
 
