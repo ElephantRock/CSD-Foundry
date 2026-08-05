@@ -111,7 +111,9 @@ def test_execution_package_member_tamper_fails_closed(tmp_path: Path) -> None:
     verify_execution_package_manifest(paths, inputs)
 
     target = temporary_root / "src" / "csd_foundry" / "empirical" / "e0h" / "harness" / "common.py"
-    target.write_bytes(target.read_bytes() + b"\n")
+    content = bytearray(target.read_bytes())
+    content[0] ^= 1
+    target.write_bytes(content)
     with pytest.raises(E0HRunReleaseError, match="digest mismatch"):
         verify_execution_package_manifest(paths, inputs)
 
