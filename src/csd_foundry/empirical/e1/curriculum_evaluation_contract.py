@@ -31,6 +31,7 @@ _CLAIM_BOUNDARY = (
     "reasoning transfer."
 )
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_GIT_COMMIT_HEX = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 
 
 class E1CurriculumArm(StrEnum):
@@ -55,6 +56,11 @@ def _require_nonempty_text(value: object, *, field: str) -> None:
 def _require_digest(value: object, *, field: str) -> None:
     if not isinstance(value, str) or _SHA256_HEX.fullmatch(value) is None:
         raise FamilySplitError(f"{field} must be a lowercase SHA-256 hex digest")
+
+
+def _require_git_commit(value: object, *, field: str) -> None:
+    if not isinstance(value, str) or _GIT_COMMIT_HEX.fullmatch(value) is None:
+        raise FamilySplitError(f"{field} must be a lowercase Git commit digest")
 
 
 def _require_positive_int(value: object, *, field: str) -> None:
@@ -233,7 +239,7 @@ class E1CurriculumEvaluationContract:
 
     def __post_init__(self) -> None:
         _require_nonempty_text(self.release, field="E1 curriculum/evaluation release")
-        _require_nonempty_text(
+        _require_git_commit(
             self.source_commit,
             field="E1 curriculum/evaluation source_commit",
         )
@@ -283,6 +289,18 @@ class E1CurriculumEvaluationContract:
             raise FamilySplitError("control and Foundry curriculum artifacts must differ")
         if self.control.manifest_digest == self.foundry.manifest_digest:
             raise FamilySplitError("control and Foundry curriculum manifests must differ")
+        training_artifact_digests = {
+            self.control.artifact_digest,
+            self.foundry.artifact_digest,
+        }
+        if self.evaluation.artifact_digest in training_artifact_digests:
+            raise FamilySplitError("evaluation artifact must differ from training curricula")
+        training_manifest_digests = {
+            self.control.manifest_digest,
+            self.foundry.manifest_digest,
+        }
+        if self.evaluation.manifest_digest in training_manifest_digests:
+            raise FamilySplitError("evaluation manifest must differ from training curricula")
 
     def _digest_payload(self) -> dict[str, object]:
         return {
