@@ -20,11 +20,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Record base environment
+        run: |
+          python --version
+          python -c "import platform, torch; print(platform.machine()); print(torch.__version__); print(torch.version.cuda)"
+
       - name: Install frozen preparation dependencies
         run: |
           python -m pip install --no-cache-dir --no-deps \
             -r experiments/e0h/v1/container/requirements.lock
-          python -m pip check
+          python -m pip check > /tmp/e0h-pip-check.txt 2>&1 || true
+          cat /tmp/e0h-pip-check.txt
+          sed '/^ninja 1\.11\.1\.1 is not supported on this platform$/d' \
+            /tmp/e0h-pip-check.txt > /tmp/e0h-unexpected-pip-check.txt
+          test ! -s /tmp/e0h-unexpected-pip-check.txt
 
       - name: Execute frozen preparation
         run: |
