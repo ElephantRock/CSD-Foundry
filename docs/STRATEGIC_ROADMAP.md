@@ -123,12 +123,12 @@ The empirical track is a bounded feedback instrument for Foundry engineering, no
 4. Do not inspect primary evaluation metrics during training. Live monitoring is limited to infrastructure and optimization health such as utilization, memory, throughput, crashes, non-finite loss, training loss, checkpoint creation, and artifact publication.
 5. Early stage results are directional engineering evidence. They may be classified as promising, harmful, no observed signal, or technically invalid; they do not establish a confirmatory scientific claim.
 6. One aggregate empirical GPU budget must be frozen in the E0-H issue before any GPU execution. One formal continuation review occurs when approximately half of that budget has been spent. An ambiguous result does not automatically authorize additional compute.
-7. Development evaluation may be used during iteration. One final blind holdout remains outside the working repository until Phase 10 and is introduced by project authority for scale confirmation.
+7. Development evaluation may be used during iteration only after canonical symbolic-family split isolation prevents scenario-family and paraphrase-derived overlap between training and evaluation. One final blind holdout remains outside the working repository until Phase 10 and is introduced by project authority for scale confirmation.
 8. Phase 10 must test whether the selected small-model effect transfers, attenuates, amplifies, vanishes, or reverses at the target confirmation scale.
 
 E0-H is limited to harness qualification. It may test loading, tokenization, optimization health, checkpoint production, deterministic evaluation execution on smoke fixtures, artifact publication, and receipt completeness. It may not inspect protected task metrics or support a claim that Foundry data improves reasoning.
 
-E1 is the first substantive learning-value test. It uses the completed executable kernel to compare a bounded executable-semantics curriculum against a bounded control under a fixed small-model recipe, with one primary capability metric and one safety metric. Its purpose is to decide whether the current semantic representation merits continued empirical investment, not to authorize scale.
+E1 is the first substantive learning-value test. It uses the completed executable kernel to compare a bounded executable-semantics curriculum against a bounded control under a fixed small-model recipe, with one primary capability metric and one safety metric. Its metric-bearing evaluation may run only after canonical symbolic-family split isolation prevents scenario-family and paraphrase-derived overlap between training and evaluation. Its purpose is to decide whether the current semantic representation merits continued empirical investment, not to authorize scale.
 
 **Empirical governance freeze:** no new empirical policy, tier, schema, approval layer, statistical mechanism, evaluation-access class, or governance artifact may be introduced unless it addresses an observed failure, a documented near-miss, or a concrete decision that this minimal protocol cannot resolve. Clarification is permitted; expansion of the control surface is not.
 
@@ -186,7 +186,7 @@ Proceed to final scale confirmation only after:
 - right-answer/wrong-basis defects are represented and killed;
 - structural holdout identities are frozen and reproducible.
 
-These requirements do not prohibit bounded development probes against development evaluation before Gate C2.
+These full release-readiness requirements do not prohibit bounded development probes before Gate C2, but every metric-bearing probe must first enforce canonical symbolic-family split isolation with no scenario-family or paraphrase-derived overlap between training and evaluation.
 
 ### Gate C3 — Distributional readiness
 
