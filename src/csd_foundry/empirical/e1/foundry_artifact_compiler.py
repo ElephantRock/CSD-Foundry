@@ -565,9 +565,7 @@ def compile_e1_foundry_artifacts(
         verification_evidence.extend(verification)
 
     training_records = tuple(sorted(training, key=lambda item: str(item["record_id"])))
-    development_records = tuple(
-        sorted(development, key=lambda item: str(item["record_id"]))
-    )
+    development_records = tuple(sorted(development, key=lambda item: str(item["record_id"])))
     oracle_cases = tuple(
         sorted(oracle_evidence, key=lambda item: (str(item["scenario_id"]), str(item["case_id"])))
     )
@@ -698,9 +696,7 @@ def compile_e1_foundry_artifacts(
                 "family_count": development_family_count,
                 "record_count": len(development_records),
                 "artifact": development_file.receipt(),
-                "metric_execution_status": (
-                    "not_executed_protected_until_checkpoints_complete"
-                ),
+                "metric_execution_status": ("not_executed_protected_until_checkpoints_complete"),
             }
         ),
     )
