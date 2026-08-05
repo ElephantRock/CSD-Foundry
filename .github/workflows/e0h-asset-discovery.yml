@@ -18,45 +18,60 @@ jobs:
         with:
           python-version: "3.11.13"
       - run: python -m pip install --upgrade pip
-      - name: Resolve exact CUDA 12.8 dependency graph
+      - name: Resolve and hash exact CUDA 12.8 wheel graph
         run: |
-          python -m pip install \
-            --dry-run \
-            --ignore-installed \
-            --report /tmp/e0h-python-lock.raw.json \
+          python -m pip download \
+            --dest /tmp/e0h-wheels \
+            --only-binary=:all: \
             --extra-index-url https://download.pytorch.org/whl/cu128 \
             torch==2.8.0 \
             transformers==4.55.0 \
             accelerate==1.10.0 \
             jsonschema==4.26.0
           python - <<'PY'
+          import email.parser
           import hashlib
           import json
           import pathlib
+          import re
+          import zipfile
 
-          raw_path = pathlib.Path("/tmp/e0h-python-lock.raw.json")
-          raw = json.loads(raw_path.read_text(encoding="utf-8"))
+          def normalized(value: str) -> str:
+              return re.sub(r"[-_.]+", "-", value).lower()
+
           packages = []
-          for item in raw["install"]:
-              metadata = item["metadata"]
-              archive = item["download_info"]["archive_info"]
-              digest = archive.get("hashes", {}).get("sha256")
-              if digest is None:
-                  legacy = archive.get("hash", "")
-                  if not legacy.startswith("sha256="):
-                      raise RuntimeError(
-                          f"missing SHA-256 for {metadata['name']}=={metadata['version']}"
-                      )
-                  digest = legacy.removeprefix("sha256=")
+          wheel_directory = pathlib.Path("/tmp/e0h-wheels")
+          wheels = sorted(wheel_directory.glob("*.whl"))
+          if not wheels:
+              raise RuntimeError("resolver produced no wheels")
+          for wheel in wheels:
+              with zipfile.ZipFile(wheel) as archive:
+                  metadata_names = [
+                      name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+                  ]
+                  if len(metadata_names) != 1:
+                      raise RuntimeError(f"wheel metadata is ambiguous: {wheel.name}")
+                  message = email.parser.BytesParser().parsebytes(
+                      archive.read(metadata_names[0])
+                  )
+              name = message.get("Name")
+              version = message.get("Version")
+              if not name or not version:
+                  raise RuntimeError(f"wheel metadata lacks name/version: {wheel.name}")
+              content = wheel.read_bytes()
               packages.append(
                   {
-                      "name": metadata["name"].lower().replace("_", "-"),
-                      "version": metadata["version"],
-                      "url": item["download_info"]["url"],
-                      "sha256": digest,
+                      "name": normalized(name),
+                      "version": version,
+                      "filename": wheel.name,
+                      "sha256": hashlib.sha256(content).hexdigest(),
+                      "size_bytes": len(content),
                   }
               )
           packages.sort(key=lambda item: item["name"])
+          names = [item["name"] for item in packages]
+          if len(names) != len(set(names)):
+              raise RuntimeError("resolved wheel names are not unique")
           payload = {
               "schema_version": "e0h-python-lock/1",
               "python_version": "3.11.13",
