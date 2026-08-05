@@ -301,7 +301,9 @@ class E1CurriculumEvaluationContract:
         if self.foundry.scenario_ids != training_scenario_ids:
             raise FamilySplitError("Foundry curriculum does not match selection training scenarios")
         if self.evaluation.scenario_ids != development_scenario_ids:
-            raise FamilySplitError("evaluation artifact does not match selection development scenarios")
+            raise FamilySplitError(
+                "evaluation artifact does not match selection development scenarios"
+            )
         if self.evaluation.family_count != development_family_count:
             raise FamilySplitError("evaluation family count does not match selection families")
         if self.control.token_count != self.foundry.token_count:
@@ -323,9 +325,7 @@ class E1CurriculumEvaluationContract:
             oracle_digest,
             verification_digest,
         )
-        if len(set(artifact_manifest_evidence_digests)) != len(
-            artifact_manifest_evidence_digests
-        ):
+        if len(set(artifact_manifest_evidence_digests)) != len(artifact_manifest_evidence_digests):
             raise FamilySplitError(
                 "curriculum, evaluation, oracle, and verification role digests must be globally distinct"
             )
