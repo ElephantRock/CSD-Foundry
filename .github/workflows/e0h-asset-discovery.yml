@@ -39,12 +39,20 @@ jobs:
           for item in raw["install"]:
               metadata = item["metadata"]
               archive = item["download_info"]["archive_info"]
+              digest = archive.get("hashes", {}).get("sha256")
+              if digest is None:
+                  legacy = archive.get("hash", "")
+                  if not legacy.startswith("sha256="):
+                      raise RuntimeError(
+                          f"missing SHA-256 for {metadata['name']}=={metadata['version']}"
+                      )
+                  digest = legacy.removeprefix("sha256=")
               packages.append(
                   {
                       "name": metadata["name"].lower().replace("_", "-"),
                       "version": metadata["version"],
                       "url": item["download_info"]["url"],
-                      "sha256": archive["hashes"]["sha256"],
+                      "sha256": digest,
                   }
               )
           packages.sort(key=lambda item: item["name"])
@@ -60,9 +68,20 @@ jobs:
           path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           print(path.read_text(encoding="utf-8"))
           PY
+      - name: Compile exact E0-H run release
+        run: |
+          python -m pip install -e .
+          python -m csd_foundry.empirical.e0h.run_release_cli compile \
+            --inputs experiments/e0h/v1/run_inputs.json \
+            --output-dir /tmp/e0h-compiled-release
+          python -m csd_foundry.empirical.e0h.run_release_cli validate \
+            --inputs experiments/e0h/v1/run_inputs.json \
+            --output-dir /tmp/e0h-compiled-release
       - uses: actions/upload-artifact@v4
         with:
-          name: e0h-python-lock
-          path: /tmp/e0h-python-lock.json
+          name: e0h-freeze-artifacts
+          path: |
+            /tmp/e0h-python-lock.json
+            /tmp/e0h-compiled-release
           if-no-files-found: error
           retention-days: 1
