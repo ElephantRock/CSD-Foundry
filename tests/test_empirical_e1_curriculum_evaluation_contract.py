@@ -136,16 +136,15 @@ def test_contract_binds_two_arms_development_evaluation_and_no_peeking() -> None
     assert contract.foundry.arm is E1CurriculumArm.FOUNDRY
     assert contract.tokenizer_revision_digest == _TOKENIZER_REVISION_DIGEST
     assert contract.control.token_count == contract.foundry.token_count
-    assert contract.control.artifact_digest != contract.foundry.artifact_digest
-    assert contract.control.manifest_digest != contract.foundry.manifest_digest
-    assert contract.evaluation.artifact_digest not in {
+    artifact_manifest_digests = {
         contract.control.artifact_digest,
-        contract.foundry.artifact_digest,
-    }
-    assert contract.evaluation.manifest_digest not in {
         contract.control.manifest_digest,
+        contract.foundry.artifact_digest,
         contract.foundry.manifest_digest,
+        contract.evaluation.artifact_digest,
+        contract.evaluation.manifest_digest,
     }
+    assert len(artifact_manifest_digests) == 6
     assert contract.foundry.executable_oracle_evidence_digest is not None
     assert contract.foundry.independent_verification_evidence_digest is not None
     assert contract.evaluation.split is E1Split.DEVELOPMENT
@@ -185,7 +184,7 @@ def test_artifact_and_manifest_evidence_boundaries_are_distinct() -> None:
         replace(evaluation, manifest_digest=evaluation.artifact_digest)
 
 
-def test_contract_rejects_training_or_evaluation_artifact_reuse() -> None:
+def test_contract_rejects_same_role_and_cross_role_digest_reuse() -> None:
     _, control, foundry, evaluation = _artifacts()
 
     with pytest.raises(FamilySplitError, match="artifacts must differ"):
@@ -194,11 +193,20 @@ def test_contract_rejects_training_or_evaluation_artifact_reuse() -> None:
     with pytest.raises(FamilySplitError, match="manifests must differ"):
         _compile(foundry=replace(foundry, manifest_digest=control.manifest_digest))
 
-    with pytest.raises(FamilySplitError, match="evaluation artifact must differ"):
+    with pytest.raises(FamilySplitError, match="globally distinct"):
         _compile(evaluation=replace(evaluation, artifact_digest=control.artifact_digest))
 
-    with pytest.raises(FamilySplitError, match="evaluation manifest must differ"):
+    with pytest.raises(FamilySplitError, match="globally distinct"):
         _compile(evaluation=replace(evaluation, manifest_digest=foundry.manifest_digest))
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(evaluation=replace(evaluation, manifest_digest=control.artifact_digest))
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(evaluation=replace(evaluation, artifact_digest=foundry.manifest_digest))
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(foundry=replace(foundry, manifest_digest=control.artifact_digest))
 
 
 def test_contract_rejects_curriculum_or_evaluation_scenario_drift() -> None:
