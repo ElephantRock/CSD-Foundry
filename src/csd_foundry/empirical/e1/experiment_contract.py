@@ -43,7 +43,7 @@ class E1ExperimentContract:
     source_commit: str
     split_manifest: FamilySplitManifest
     eligible_scenario_count: int
-    excluded_source_test_scenario_count: int
+    excluded_source_test_scenario_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
         if not self.release.strip():
@@ -54,8 +54,18 @@ class E1ExperimentContract:
             raise FamilySplitError("experiment and split-manifest releases must match")
         if self.eligible_scenario_count <= 0:
             raise FamilySplitError("E1 experiment requires eligible scenarios")
-        if self.excluded_source_test_scenario_count <= 0:
+        if not self.excluded_source_test_scenario_ids:
             raise FamilySplitError("E1 experiment requires an excluded source test partition")
+        if any(not scenario_id.strip() for scenario_id in self.excluded_source_test_scenario_ids):
+            raise FamilySplitError("excluded source-test scenario identifiers must be nonempty")
+        if len(self.excluded_source_test_scenario_ids) != len(
+            set(self.excluded_source_test_scenario_ids)
+        ):
+            raise FamilySplitError("excluded source-test scenario identifiers must be unique")
+        if self.excluded_source_test_scenario_ids != tuple(
+            sorted(self.excluded_source_test_scenario_ids)
+        ):
+            raise FamilySplitError("excluded source-test scenario identifiers must be sorted")
 
         assigned_count = sum(len(item.scenario_ids) for item in self.split_manifest.assignments)
         if assigned_count != self.eligible_scenario_count:
@@ -70,6 +80,10 @@ class E1ExperimentContract:
                     f"to {assignment.split.value}"
                 )
 
+    @property
+    def excluded_source_test_scenario_count(self) -> int:
+        return len(self.excluded_source_test_scenario_ids)
+
     def _digest_payload(self) -> dict[str, object]:
         return {
             "schema_version": _EXPERIMENT_SCHEMA_VERSION,
@@ -77,6 +91,7 @@ class E1ExperimentContract:
             "source_commit": self.source_commit,
             "source_split_policy": dict(_SOURCE_SPLIT_POLICY),
             "eligible_scenario_count": self.eligible_scenario_count,
+            "excluded_source_test_scenario_ids": list(self.excluded_source_test_scenario_ids),
             "excluded_source_test_scenario_count": self.excluded_source_test_scenario_count,
             "split_manifest": self.split_manifest.to_dict(),
             "claim_boundary": _CLAIM_BOUNDARY,
@@ -157,5 +172,7 @@ def compile_e1_experiment_contract(
         source_commit=source_commit,
         split_manifest=split_manifest,
         eligible_scenario_count=len(eligible),
-        excluded_source_test_scenario_count=len(excluded_source_test),
+        excluded_source_test_scenario_ids=tuple(
+            item.scenario_id for item in excluded_source_test
+        ),
     )
