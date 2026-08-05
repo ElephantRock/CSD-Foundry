@@ -76,6 +76,7 @@ class RejectedTransitionCase:
 
 
 ExecutableCase = TransitionCase | ObservationCase | RejectedTransitionCase
+ScenarioCase = ExecutableCase
 
 
 @dataclass(frozen=True, slots=True)
