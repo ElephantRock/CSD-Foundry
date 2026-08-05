@@ -31,10 +31,10 @@ def _digest(label: str) -> str:
 _TOKENIZER_REVISION_DIGEST = _digest("tokenizer-revision")
 
 
-def _selection() -> E1ExperimentContract:
+def _selection(*, release: str = "e1-selection/1") -> E1ExperimentContract:
     return compile_e1_experiment_contract(
         SCENARIOS.values(),
-        release="e1-selection/1",
+        release=release,
         source_commit=_SOURCE_COMMIT,
     )
 
@@ -109,15 +109,16 @@ def _artifacts() -> tuple[
 
 def _compile(
     *,
+    selection: E1ExperimentContract | None = None,
     control: E1CurriculumArtifact | None = None,
     foundry: E1CurriculumArtifact | None = None,
     evaluation: E1EvaluationArtifact | None = None,
     source_commit: str = _SOURCE_COMMIT,
     tokenizer_revision_digest: str = _TOKENIZER_REVISION_DIGEST,
 ) -> E1CurriculumEvaluationContract:
-    selection, default_control, default_foundry, default_evaluation = _artifacts()
+    default_selection, default_control, default_foundry, default_evaluation = _artifacts()
     return compile_e1_curriculum_evaluation_contract(
-        selection,
+        default_selection if selection is None else selection,
         release=_RELEASE,
         source_commit=source_commit,
         tokenizer_revision_digest=tokenizer_revision_digest,
@@ -127,29 +128,20 @@ def _compile(
     )
 
 
-def test_contract_binds_two_arms_development_evaluation_and_no_peeking() -> None:
+def test_contract_embeds_selection_and_binds_no_peeking_policy() -> None:
     contract = _compile()
     payload = contract.to_dict()
     digest = payload.pop("contract_digest")
+    nested_selection = payload["selection_contract"]
 
-    assert contract.control.arm is E1CurriculumArm.CONTROL
-    assert contract.foundry.arm is E1CurriculumArm.FOUNDRY
-    assert contract.tokenizer_revision_digest == _TOKENIZER_REVISION_DIGEST
-    assert contract.control.token_count == contract.foundry.token_count
-    artifact_manifest_digests = {
-        contract.control.artifact_digest,
-        contract.control.manifest_digest,
-        contract.foundry.artifact_digest,
-        contract.foundry.manifest_digest,
-        contract.evaluation.artifact_digest,
-        contract.evaluation.manifest_digest,
-    }
-    assert len(artifact_manifest_digests) == 6
-    assert contract.foundry.executable_oracle_evidence_digest is not None
-    assert contract.foundry.independent_verification_evidence_digest is not None
-    assert contract.evaluation.split is E1Split.DEVELOPMENT
+    assert isinstance(nested_selection, dict)
+    assert nested_selection["contract_digest"] == contract.selection_contract_digest
+    assert payload["selection_contract_digest"] == contract.selection_contract_digest
+    assert contract.training_scenario_ids == _scenario_ids(contract.selection_contract, E1Split.TRAIN)
+    assert contract.development_scenario_ids == _scenario_ids(
+        contract.selection_contract, E1Split.DEVELOPMENT
+    )
     assert contract.development_family_count == contract.evaluation.family_count == 4
-    assert set(contract.training_scenario_ids).isdisjoint(contract.development_scenario_ids)
     assert {"H-01", "L-01", "M-15"}.isdisjoint(contract.training_scenario_ids)
     assert {"H-01", "L-01", "M-15"}.isdisjoint(contract.development_scenario_ids)
     assert payload["primary_metric_id"] == (
@@ -164,8 +156,13 @@ def test_contract_binds_two_arms_development_evaluation_and_no_peeking() -> None
     assert canonical_sha256(payload) == digest
 
 
-def test_contract_rejects_token_or_task_format_mismatch() -> None:
-    _, control, foundry, _ = _artifacts()
+def test_contract_binds_tokenizer_and_paired_arm_comparability() -> None:
+    contract = _compile()
+    _, _, foundry, _ = _artifacts()
+
+    assert contract.tokenizer_revision_digest == _TOKENIZER_REVISION_DIGEST
+    assert contract.control.token_count == contract.foundry.token_count
+    assert contract.control.task_format_digest == contract.foundry.task_format_digest
 
     with pytest.raises(FamilySplitError, match="token matched"):
         _compile(foundry=replace(foundry, token_count=foundry.token_count + 1))
@@ -174,48 +171,34 @@ def test_contract_rejects_token_or_task_format_mismatch() -> None:
         _compile(foundry=replace(foundry, task_format_digest=_digest("other-format")))
 
 
-def test_artifact_and_manifest_evidence_boundaries_are_distinct() -> None:
-    _, control, _, evaluation = _artifacts()
+def test_reconstructed_contract_is_bound_to_embedded_selection_families() -> None:
+    contract = _compile()
+    altered_scenarios = tuple(
+        replace(item, split="validation") if item.scenario_id == "M-01" else item
+        for item in SCENARIOS.values()
+    )
+    altered_selection = compile_e1_experiment_contract(
+        altered_scenarios,
+        release="e1-selection/altered",
+        source_commit=_SOURCE_COMMIT,
+    )
 
-    with pytest.raises(FamilySplitError, match="curriculum artifact and manifest"):
-        replace(control, manifest_digest=control.artifact_digest)
+    with pytest.raises(FamilySplitError, match="control curriculum does not match selection"):
+        replace(contract, selection_contract=altered_selection)
 
-    with pytest.raises(FamilySplitError, match="evaluation artifact and manifest"):
-        replace(evaluation, manifest_digest=evaluation.artifact_digest)
+    same_membership_new_identity = _selection(release="e1-selection/2")
+    rebound = replace(contract, selection_contract=same_membership_new_identity)
+    assert rebound.training_scenario_ids == contract.training_scenario_ids
+    assert rebound.contract_digest != contract.contract_digest
 
 
-def test_contract_rejects_same_role_and_cross_role_digest_reuse() -> None:
+def test_contract_rejects_curriculum_or_evaluation_membership_drift() -> None:
     _, control, foundry, evaluation = _artifacts()
 
-    with pytest.raises(FamilySplitError, match="artifacts must differ"):
-        _compile(foundry=replace(foundry, artifact_digest=control.artifact_digest))
-
-    with pytest.raises(FamilySplitError, match="manifests must differ"):
-        _compile(foundry=replace(foundry, manifest_digest=control.manifest_digest))
-
-    with pytest.raises(FamilySplitError, match="globally distinct"):
-        _compile(evaluation=replace(evaluation, artifact_digest=control.artifact_digest))
-
-    with pytest.raises(FamilySplitError, match="globally distinct"):
-        _compile(evaluation=replace(evaluation, manifest_digest=foundry.manifest_digest))
-
-    with pytest.raises(FamilySplitError, match="globally distinct"):
-        _compile(evaluation=replace(evaluation, manifest_digest=control.artifact_digest))
-
-    with pytest.raises(FamilySplitError, match="globally distinct"):
-        _compile(evaluation=replace(evaluation, artifact_digest=foundry.manifest_digest))
-
-    with pytest.raises(FamilySplitError, match="globally distinct"):
-        _compile(foundry=replace(foundry, manifest_digest=control.artifact_digest))
-
-
-def test_contract_rejects_curriculum_or_evaluation_scenario_drift() -> None:
-    _, control, foundry, evaluation = _artifacts()
-
-    with pytest.raises(FamilySplitError, match="control curriculum does not match"):
+    with pytest.raises(FamilySplitError, match="control curriculum does not match selection"):
         _compile(control=replace(control, scenario_ids=control.scenario_ids[1:]))
 
-    with pytest.raises(FamilySplitError, match="Foundry curriculum does not match"):
+    with pytest.raises(FamilySplitError, match="Foundry curriculum does not match selection"):
         _compile(foundry=replace(foundry, scenario_ids=foundry.scenario_ids[1:]))
 
     drifted_evaluation = replace(
@@ -223,27 +206,14 @@ def test_contract_rejects_curriculum_or_evaluation_scenario_drift() -> None:
         scenario_ids=evaluation.scenario_ids[1:],
         family_count=evaluation.family_count - 1,
     )
-    with pytest.raises(FamilySplitError, match="evaluation artifact does not match"):
+    with pytest.raises(FamilySplitError, match="evaluation artifact does not match selection"):
         _compile(evaluation=drifted_evaluation)
 
-
-def test_contract_rejects_family_count_drift_and_wrong_runtime_artifacts() -> None:
-    contract = _compile()
-
     with pytest.raises(FamilySplitError, match="family count does not match"):
-        replace(contract, development_family_count=contract.development_family_count - 1)
-
-    with pytest.raises(FamilySplitError, match="control must be"):
-        replace(contract, control=cast(E1CurriculumArtifact, object()))
-
-    with pytest.raises(FamilySplitError, match="foundry must be"):
-        replace(contract, foundry=cast(E1CurriculumArtifact, object()))
-
-    with pytest.raises(FamilySplitError, match="evaluation must be"):
-        replace(contract, evaluation=cast(E1EvaluationArtifact, object()))
+        _compile(evaluation=replace(evaluation, family_count=evaluation.family_count - 1))
 
 
-def test_label_authority_and_verification_evidence_are_arm_specific() -> None:
+def test_label_authority_and_evidence_roles_are_separate() -> None:
     _, control, foundry, _ = _artifacts()
 
     with pytest.raises(FamilySplitError, match="control labels"):
@@ -267,14 +237,76 @@ def test_label_authority_and_verification_evidence_are_arm_specific() -> None:
     with pytest.raises(FamilySplitError, match="requires independent-verification"):
         replace(foundry, independent_verification_evidence_digest=None)
 
-    with pytest.raises(FamilySplitError, match="evidence must differ"):
+    with pytest.raises(FamilySplitError, match="oracle, and verification digests must differ"):
+        replace(foundry, executable_oracle_evidence_digest=foundry.artifact_digest)
+
+    with pytest.raises(FamilySplitError, match="oracle, and verification digests must differ"):
+        replace(foundry, independent_verification_evidence_digest=foundry.manifest_digest)
+
+    with pytest.raises(FamilySplitError, match="oracle, and verification digests must differ"):
         replace(
             foundry,
             independent_verification_evidence_digest=(foundry.executable_oracle_evidence_digest),
         )
 
 
-def test_raw_runtime_types_and_source_commit_fail_closed() -> None:
+def test_all_artifact_manifest_and_foundry_evidence_roles_are_globally_distinct() -> None:
+    contract = _compile()
+    _, control, foundry, evaluation = _artifacts()
+    oracle_digest = contract.foundry.executable_oracle_evidence_digest
+    verification_digest = contract.foundry.independent_verification_evidence_digest
+    assert oracle_digest is not None
+    assert verification_digest is not None
+
+    role_digests = {
+        contract.control.artifact_digest,
+        contract.control.manifest_digest,
+        contract.foundry.artifact_digest,
+        contract.foundry.manifest_digest,
+        contract.evaluation.artifact_digest,
+        contract.evaluation.manifest_digest,
+        oracle_digest,
+        verification_digest,
+    }
+    assert len(role_digests) == 8
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(evaluation=replace(evaluation, manifest_digest=control.artifact_digest))
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(evaluation=replace(evaluation, artifact_digest=foundry.manifest_digest))
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(foundry=replace(foundry, manifest_digest=control.artifact_digest))
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(
+            foundry=replace(
+                foundry,
+                executable_oracle_evidence_digest=control.artifact_digest,
+            )
+        )
+
+    with pytest.raises(FamilySplitError, match="globally distinct"):
+        _compile(
+            foundry=replace(
+                foundry,
+                independent_verification_evidence_digest=evaluation.manifest_digest,
+            )
+        )
+
+
+def test_each_artifact_is_distinct_from_its_manifest() -> None:
+    _, control, _, evaluation = _artifacts()
+
+    with pytest.raises(FamilySplitError, match="curriculum artifact and manifest"):
+        replace(control, manifest_digest=control.artifact_digest)
+
+    with pytest.raises(FamilySplitError, match="evaluation artifact and manifest"):
+        replace(evaluation, manifest_digest=evaluation.artifact_digest)
+
+
+def test_raw_runtime_types_and_exact_source_commit_fail_closed() -> None:
     selection, control, _, evaluation = _artifacts()
     contract = _compile()
 
@@ -303,15 +335,10 @@ def test_raw_runtime_types_and_source_commit_fail_closed() -> None:
         replace(contract, tokenizer_revision_digest=cast(str, object()))
 
     with pytest.raises(FamilySplitError, match="selection_contract must be"):
-        compile_e1_curriculum_evaluation_contract(
-            cast(E1ExperimentContract, object()),
-            release=_RELEASE,
-            source_commit=_SOURCE_COMMIT,
-            tokenizer_revision_digest=_TOKENIZER_REVISION_DIGEST,
-            control=contract.control,
-            foundry=contract.foundry,
-            evaluation=contract.evaluation,
-        )
+        replace(contract, selection_contract=cast(E1ExperimentContract, object()))
+
+    with pytest.raises(FamilySplitError, match="source commits must match"):
+        _compile(source_commit="0" * 40)
 
     assert selection.source_commit == _SOURCE_COMMIT
 
@@ -323,12 +350,7 @@ def test_metric_bearing_evaluation_is_development_only() -> None:
         replace(evaluation, split=E1Split.TRAIN)
 
 
-def test_source_commit_must_match_selection_contract() -> None:
-    with pytest.raises(FamilySplitError, match="source commits must match"):
-        _compile(source_commit="0" * 40)
-
-
-def test_contract_digest_changes_with_artifact_metric_or_tokenizer() -> None:
+def test_contract_digest_binds_artifacts_metrics_tokenizer_and_selection() -> None:
     baseline = _compile()
     _, control, _, evaluation = _artifacts()
 
@@ -342,10 +364,12 @@ def test_contract_digest_changes_with_artifact_metric_or_tokenizer() -> None:
         )
     )
     changed_tokenizer = _compile(tokenizer_revision_digest=_digest("changed-tokenizer-revision"))
+    changed_selection = _compile(selection=_selection(release="e1-selection/changed"))
 
     assert changed_control.contract_digest != baseline.contract_digest
     assert changed_metric.contract_digest != baseline.contract_digest
     assert changed_tokenizer.contract_digest != baseline.contract_digest
+    assert changed_selection.contract_digest != baseline.contract_digest
 
 
 def test_digest_fields_and_identifier_sequences_are_canonical() -> None:
