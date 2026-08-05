@@ -73,7 +73,9 @@ class E1ExperimentContract:
             for scenario_id in assignment.scenario_ids
         )
         if len(assigned_scenario_ids) != len(set(assigned_scenario_ids)):
-            raise FamilySplitError("eligible scenario identifiers must be unique across assignments")
+            raise FamilySplitError(
+                "eligible scenario identifiers must be unique across assignments"
+            )
         if len(assigned_scenario_ids) != self.eligible_scenario_count:
             raise FamilySplitError("eligible scenario count does not match split assignments")
 
