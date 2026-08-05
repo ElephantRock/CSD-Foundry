@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import permutations, product
+from math import factorial
 
 from csd_foundry.kernel.events import (
     AdvanceClock,
@@ -26,7 +27,7 @@ from csd_foundry.scenarios.spec import (
     StateExpectation,
     TransitionCase,
 )
-from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
+from csd_foundry.synthesis.v0_4.serialization import canonical_json_bytes, canonical_sha256
 
 
 class FamilySplitError(ValueError):
@@ -44,6 +45,7 @@ _FAMILY_SCHEMA_VERSION = "e1-symbolic-family/1"
 _MANIFEST_SCHEMA_VERSION = "e1-family-split-manifest/1"
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _GIT_COMMIT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_MAX_CANONICAL_LABELINGS = 250_000
 
 
 def _require_text(value: str, field_name: str) -> None:
@@ -51,83 +53,271 @@ def _require_text(value: str, field_name: str) -> None:
         raise FamilySplitError(f"{field_name} must be nonempty")
 
 
-def _evidence_shape(item: Evidence, logical_time: int) -> dict[str, object]:
+@dataclass(frozen=True, slots=True)
+class _NamespaceIds:
+    evidence: tuple[str, ...]
+    bases: tuple[str, ...]
+    dependencies: tuple[str, ...]
+    requests: tuple[str, ...]
+    profiles: tuple[str, ...]
+
+    @property
+    def labeling_count(self) -> int:
+        result = 1
+        for identifiers in (
+            self.evidence,
+            self.bases,
+            self.dependencies,
+            self.requests,
+            self.profiles,
+        ):
+            result *= factorial(len(identifiers))
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class _IdMap:
+    evidence: Mapping[str, str]
+    bases: Mapping[str, str]
+    dependencies: Mapping[str, str]
+    requests: Mapping[str, str]
+    profiles: Mapping[str, str]
+
+
+def _add_state_ids(
+    state: ControlState,
+    *,
+    evidence: set[str],
+    bases: set[str],
+    dependencies: set[str],
+    requests: set[str],
+    profiles: set[str],
+) -> None:
+    for item in state.evidence:
+        evidence.add(item.evidence_id)
+        dependencies.update(item.dependencies)
+        if item.profile_id is not None:
+            profiles.add(item.profile_id)
+    for item in state.bases:
+        bases.add(item.basis_id)
+        evidence.update(item.member_evidence_ids)
+    bases.update(state.current_source_basis_ids)
+    bases.update(state.current_verdict_basis_ids)
+    if state.required_profile_id is not None:
+        profiles.add(state.required_profile_id)
+    for request in state.reassessment_requests:
+        requests.add(request.request_id)
+
+
+def _add_event_ids(
+    event: CsdEvent,
+    *,
+    evidence: set[str],
+    bases: set[str],
+    dependencies: set[str],
+    requests: set[str],
+    profiles: set[str],
+) -> None:
+    if isinstance(event, DependencyChange):
+        dependencies.add(event.dependency_id)
+    elif isinstance(event, Reassess):
+        for item in event.new_evidence:
+            evidence.add(item.evidence_id)
+            dependencies.update(item.dependencies)
+            if item.profile_id is not None:
+                profiles.add(item.profile_id)
+        for item in event.new_bases:
+            bases.add(item.basis_id)
+            evidence.update(item.member_evidence_ids)
+        requests.update(event.close_request_ids)
+    elif isinstance(event, RetireControl):
+        item = event.retirement_evidence
+        evidence.add(item.evidence_id)
+        dependencies.update(item.dependencies)
+        if item.profile_id is not None:
+            profiles.add(item.profile_id)
+    elif isinstance(event, ProfileChange):
+        profiles.add(event.profile_id)
+        if event.request_id is not None:
+            requests.add(event.request_id)
+    elif isinstance(event, RequestReassessment):
+        requests.add(event.request_id)
+    elif isinstance(event, (AdvanceClock, RecordHeartbeat)):
+        return
+    else:
+        raise FamilySplitError(f"unsupported CSD event type: {type(event).__qualname__}")
+
+
+def _add_expectation_ids(
+    expected: StateExpectation,
+    *,
+    evidence: set[str],
+    bases: set[str],
+) -> None:
+    evidence.update(evidence_id for evidence_id, _ in expected.evidence_statuses)
+    evidence.update(evidence_id for evidence_id, _ in expected.evidence_outcomes)
+    bases.update(basis_id for basis_id, _ in expected.basis_claims)
+    if expected.current_source_basis_ids is not None:
+        bases.update(expected.current_source_basis_ids)
+    if expected.current_verdict_basis_ids is not None:
+        bases.update(expected.current_verdict_basis_ids)
+
+
+def _collect_case_ids(
+    case: TransitionCase | ObservationCase | RejectedTransitionCase,
+) -> _NamespaceIds:
+    evidence: set[str] = set()
+    bases: set[str] = set()
+    dependencies: set[str] = set()
+    requests: set[str] = set()
+    profiles: set[str] = set()
+
+    if isinstance(case, TransitionCase):
+        _add_state_ids(
+            case.before,
+            evidence=evidence,
+            bases=bases,
+            dependencies=dependencies,
+            requests=requests,
+            profiles=profiles,
+        )
+        _add_event_ids(
+            case.event,
+            evidence=evidence,
+            bases=bases,
+            dependencies=dependencies,
+            requests=requests,
+            profiles=profiles,
+        )
+        _add_expectation_ids(case.expected, evidence=evidence, bases=bases)
+        if case.expected_invalidated_evidence is not None:
+            evidence.update(case.expected_invalidated_evidence)
+        if case.expected_surviving_bases is not None:
+            bases.update(case.expected_surviving_bases)
+    elif isinstance(case, ObservationCase):
+        _add_state_ids(
+            case.state,
+            evidence=evidence,
+            bases=bases,
+            dependencies=dependencies,
+            requests=requests,
+            profiles=profiles,
+        )
+        _add_expectation_ids(case.expected, evidence=evidence, bases=bases)
+    elif isinstance(case, RejectedTransitionCase):
+        _add_state_ids(
+            case.before,
+            evidence=evidence,
+            bases=bases,
+            dependencies=dependencies,
+            requests=requests,
+            profiles=profiles,
+        )
+        _add_state_ids(
+            case.proposed_after,
+            evidence=evidence,
+            bases=bases,
+            dependencies=dependencies,
+            requests=requests,
+            profiles=profiles,
+        )
+        if case.event is not None:
+            _add_event_ids(
+                case.event,
+                evidence=evidence,
+                bases=bases,
+                dependencies=dependencies,
+                requests=requests,
+                profiles=profiles,
+            )
+    else:
+        raise FamilySplitError(f"unsupported scenario case type: {type(case).__qualname__}")
+
+    return _NamespaceIds(
+        evidence=tuple(sorted(evidence)),
+        bases=tuple(sorted(bases)),
+        dependencies=tuple(sorted(dependencies)),
+        requests=tuple(sorted(requests)),
+        profiles=tuple(sorted(profiles)),
+    )
+
+
+def _label_map(order: tuple[str, ...], prefix: str) -> dict[str, str]:
+    return {identifier: f"{prefix}{index}" for index, identifier in enumerate(order)}
+
+
+def _candidate_maps(namespaces: _NamespaceIds) -> Iterable[_IdMap]:
+    if namespaces.labeling_count > _MAX_CANONICAL_LABELINGS:
+        raise FamilySplitError(
+            "symbolic family canonicalization exceeds the bounded labeling budget: "
+            f"{namespaces.labeling_count} > {_MAX_CANONICAL_LABELINGS}"
+        )
+
+    for evidence_order, basis_order, dependency_order, request_order, profile_order in product(
+        permutations(namespaces.evidence),
+        permutations(namespaces.bases),
+        permutations(namespaces.dependencies),
+        permutations(namespaces.requests),
+        permutations(namespaces.profiles),
+    ):
+        yield _IdMap(
+            evidence=_label_map(evidence_order, "E"),
+            bases=_label_map(basis_order, "B"),
+            dependencies=_label_map(dependency_order, "D"),
+            requests=_label_map(request_order, "R"),
+            profiles=_label_map(profile_order, "P"),
+        )
+
+
+def _mapped(mapping: Mapping[str, str], identifier: str, field_name: str) -> str:
+    try:
+        return mapping[identifier]
+    except KeyError as exc:
+        raise FamilySplitError(f"{field_name} references unknown identity {identifier}") from exc
+
+
+def _render_evidence(item: Evidence, logical_time: int, ids: _IdMap) -> dict[str, object]:
     return {
+        "evidence_id": _mapped(ids.evidence, item.evidence_id, "evidence"),
         "dimension": item.dimension,
         "status": item.status.value,
-        "dependency_count": len(item.dependencies),
+        "dependencies": sorted(
+            _mapped(ids.dependencies, dependency_id, "evidence dependency")
+            for dependency_id in item.dependencies
+        ),
         "outcome": item.outcome,
         "issued_offset": item.issued_at - logical_time,
         "expiry_offset": None if item.expires_at is None else item.expires_at - logical_time,
-        "profile_scoped": item.profile_id is not None,
+        "profile_id": (
+            None
+            if item.profile_id is None
+            else _mapped(ids.profiles, item.profile_id, "evidence profile")
+        ),
         "profile_version": item.profile_version,
     }
 
 
-def _evidence_shape_map(state: ControlState) -> dict[str, dict[str, object]]:
-    return {item.evidence_id: _evidence_shape(item, state.logical_time) for item in state.evidence}
-
-
-def _basis_shape(
-    item: Basis,
-    evidence_shapes: dict[str, dict[str, object]],
-) -> dict[str, object]:
-    member_shapes: list[dict[str, object]] = []
-    for evidence_id in item.member_evidence_ids:
-        try:
-            member_shapes.append(evidence_shapes[evidence_id])
-        except KeyError as exc:
-            raise FamilySplitError(
-                f"basis {item.basis_id} references unknown evidence {evidence_id}"
-            ) from exc
-    member_shapes.sort(key=canonical_sha256)
+def _render_basis(item: Basis, ids: _IdMap) -> dict[str, object]:
     return {
+        "basis_id": _mapped(ids.bases, item.basis_id, "basis"),
         "kind": item.kind.value,
         "claim": item.claim,
+        "member_evidence_ids": sorted(
+            _mapped(ids.evidence, evidence_id, "basis member evidence")
+            for evidence_id in item.member_evidence_ids
+        ),
         "approved": item.approved,
-        "member_evidence": member_shapes,
     }
 
 
-def _basis_shape_map(
-    state: ControlState,
-    evidence_shapes: dict[str, dict[str, object]],
-) -> dict[str, dict[str, object]]:
-    return {item.basis_id: _basis_shape(item, evidence_shapes) for item in state.bases}
-
-
-def _referenced_shapes(
-    identifiers: Iterable[str],
-    shapes: dict[str, dict[str, object]],
-    field_name: str,
-) -> list[dict[str, object]]:
-    result: list[dict[str, object]] = []
-    for identifier in identifiers:
-        try:
-            result.append(shapes[identifier])
-        except KeyError as exc:
-            raise FamilySplitError(
-                f"{field_name} references unknown identity {identifier}"
-            ) from exc
-    result.sort(key=canonical_sha256)
-    return result
-
-
-def _state_shape(state: ControlState) -> dict[str, object]:
-    evidence_shapes = _evidence_shape_map(state)
-    basis_shapes = _basis_shape_map(state, evidence_shapes)
-
-    dependency_incidence: Counter[str] = Counter()
-    for item in state.evidence:
-        dependency_incidence.update(item.dependencies)
-
-    evidence_values = list(evidence_shapes.values())
-    evidence_values.sort(key=canonical_sha256)
-    basis_values = list(basis_shapes.values())
-    basis_values.sort(key=canonical_sha256)
-
-    request_shapes = [
+def _render_state(state: ControlState, ids: _IdMap) -> dict[str, object]:
+    evidence = [_render_evidence(item, state.logical_time, ids) for item in state.evidence]
+    evidence.sort(key=lambda item: str(item["evidence_id"]))
+    bases = [_render_basis(item, ids) for item in state.bases]
+    bases.sort(key=lambda item: str(item["basis_id"]))
+    requests = [
         {
+            "request_id": _mapped(ids.requests, request.request_id, "reassessment request"),
             "status": request.status.value,
             "requested_offset": request.requested_at - state.logical_time,
             "due_offset": request.due_at - state.logical_time,
@@ -138,19 +328,11 @@ def _state_shape(state: ControlState) -> dict[str, object]:
         }
         for request in state.reassessment_requests
     ]
-    request_shapes.sort(key=canonical_sha256)
+    requests.sort(key=lambda item: str(item["request_id"]))
 
-    history_shapes = [
-        {
-            "event_type": item.event_type,
-            "detail_keys": sorted(name for name, _ in item.details),
-        }
-        for item in state.history
-    ]
-
-    heartbeat_shape: dict[str, object] | None = None
+    heartbeat: dict[str, object] | None = None
     if state.heartbeat is not None:
-        heartbeat_shape = {
+        heartbeat = {
             "interval": state.heartbeat.interval,
             "last_recorded_offset": state.heartbeat.last_recorded_at - state.logical_time,
             "due_offset": state.heartbeat.due_at - state.logical_time,
@@ -160,156 +342,133 @@ def _state_shape(state: ControlState) -> dict[str, object]:
         "obligation": state.obligation.value,
         "source_state": state.source_state.value,
         "assurance": state.assurance.value,
-        "evidence": evidence_values,
-        "dependency_incidence": sorted(dependency_incidence.values()),
-        "bases": basis_values,
-        "current_source_bases": _referenced_shapes(
-            state.current_source_basis_ids,
-            basis_shapes,
-            "current_source_basis_ids",
+        "evidence": evidence,
+        "bases": bases,
+        "current_source_basis_ids": sorted(
+            _mapped(ids.bases, basis_id, "current source basis")
+            for basis_id in state.current_source_basis_ids
         ),
-        "current_verdict_bases": _referenced_shapes(
-            state.current_verdict_basis_ids,
-            basis_shapes,
-            "current_verdict_basis_ids",
+        "current_verdict_basis_ids": sorted(
+            _mapped(ids.bases, basis_id, "current verdict basis")
+            for basis_id in state.current_verdict_basis_ids
         ),
-        "history": history_shapes,
-        "required_profile_present": state.required_profile_id is not None,
+        "history": [
+            {
+                "event_type": item.event_type,
+                "detail_keys": sorted(name for name, _ in item.details),
+            }
+            for item in state.history
+        ],
+        "required_profile_id": (
+            None
+            if state.required_profile_id is None
+            else _mapped(ids.profiles, state.required_profile_id, "required profile")
+        ),
         "required_profile_version": state.required_profile_version,
-        "reassessment_requests": request_shapes,
-        "heartbeat": heartbeat_shape,
+        "reassessment_requests": requests,
+        "heartbeat": heartbeat,
     }
 
 
-def _event_shape(event: CsdEvent, before: ControlState | None) -> dict[str, object]:
-    if isinstance(event, DependencyChange):
-        affected_evidence = 0
-        if before is not None:
-            affected_evidence = sum(
-                event.dependency_id in item.dependencies for item in before.evidence
-            )
-        return {
-            "event_type": type(event).__name__,
-            "apparent_direction": event.apparent_direction,
-            "affected_evidence_count": affected_evidence,
-        }
+def _render_event(event: CsdEvent, before: ControlState | None, ids: _IdMap) -> dict[str, object]:
+    logical_time = 0 if before is None else before.logical_time
 
-    if isinstance(event, Reassess):
-        logical_time = 0 if before is None else before.logical_time
-        existing_evidence = {} if before is None else _evidence_shape_map(before)
-        new_evidence_shapes = {
-            item.evidence_id: _evidence_shape(item, logical_time) for item in event.new_evidence
-        }
-        all_evidence = {**existing_evidence, **new_evidence_shapes}
-        basis_shapes = [_basis_shape(item, all_evidence) for item in event.new_bases]
-        new_evidence = list(new_evidence_shapes.values())
-        new_evidence.sort(key=canonical_sha256)
-        basis_shapes.sort(key=canonical_sha256)
+    if isinstance(event, DependencyChange):
         return {
             "event_type": type(event).__name__,
-            "new_evidence": new_evidence,
-            "new_bases": basis_shapes,
+            "dependency_id": _mapped(ids.dependencies, event.dependency_id, "dependency event"),
+            "apparent_direction": event.apparent_direction,
+        }
+    if isinstance(event, Reassess):
+        evidence = [_render_evidence(item, logical_time, ids) for item in event.new_evidence]
+        evidence.sort(key=lambda item: str(item["evidence_id"]))
+        bases = [_render_basis(item, ids) for item in event.new_bases]
+        bases.sort(key=lambda item: str(item["basis_id"]))
+        return {
+            "event_type": type(event).__name__,
+            "new_evidence": evidence,
+            "new_bases": bases,
             "source_state": None if event.source_state is None else event.source_state.value,
             "assurance": None if event.assurance is None else event.assurance.value,
             "authority": event.authority,
-            "close_request_count": len(event.close_request_ids),
+            "close_request_ids": sorted(
+                _mapped(ids.requests, request_id, "closed reassessment request")
+                for request_id in event.close_request_ids
+            ),
         }
-
     if isinstance(event, RetireControl):
-        logical_time = 0 if before is None else before.logical_time
         return {
             "event_type": type(event).__name__,
-            "retirement_evidence": _evidence_shape(event.retirement_evidence, logical_time),
+            "retirement_evidence": _render_evidence(
+                event.retirement_evidence,
+                logical_time,
+                ids,
+            ),
             "authority": event.authority,
         }
-
     if isinstance(event, AdvanceClock):
-        logical_time = 0 if before is None else before.logical_time
         return {
             "event_type": type(event).__name__,
             "target_offset": event.target_time - logical_time,
         }
-
     if isinstance(event, ProfileChange):
-        logical_time = 0 if before is None else before.logical_time
         return {
             "event_type": type(event).__name__,
+            "profile_id": _mapped(ids.profiles, event.profile_id, "profile change"),
             "profile_version": event.profile_version,
             "authority": event.authority,
-            "request_present": event.request_id is not None,
+            "request_id": (
+                None
+                if event.request_id is None
+                else _mapped(ids.requests, event.request_id, "profile change request")
+            ),
             "request_due_offset": (
                 None if event.request_due_at is None else event.request_due_at - logical_time
             ),
         }
-
     if isinstance(event, RequestReassessment):
-        logical_time = 0 if before is None else before.logical_time
         return {
             "event_type": type(event).__name__,
+            "request_id": _mapped(ids.requests, event.request_id, "requested reassessment"),
             "reason_present": bool(event.reason.strip()),
             "due_offset": event.due_at - logical_time,
             "authority": event.authority,
         }
-
     if isinstance(event, RecordHeartbeat):
-        logical_time = 0 if before is None else before.logical_time
         return {
             "event_type": type(event).__name__,
             "at_offset": event.at_time - logical_time,
             "interval": event.interval,
             "authority": event.authority,
         }
-
     raise FamilySplitError(f"unsupported CSD event type: {type(event).__qualname__}")
 
 
-def _expectation_shape(
-    expected: StateExpectation,
-    evidence_shapes: dict[str, dict[str, object]],
-    basis_shapes: dict[str, dict[str, object]],
-) -> dict[str, object]:
+def _render_expectation(expected: StateExpectation, ids: _IdMap) -> dict[str, object]:
     evidence_statuses = [
         {
-            "evidence": _referenced_shapes((evidence_id,), evidence_shapes, "evidence_statuses")[0],
+            "evidence_id": _mapped(ids.evidence, evidence_id, "expected evidence status"),
             "status": status.value,
         }
         for evidence_id, status in expected.evidence_statuses
     ]
-    evidence_statuses.sort(key=canonical_sha256)
-
+    evidence_statuses.sort(key=lambda item: str(item["evidence_id"]))
     evidence_outcomes = [
         {
-            "evidence": _referenced_shapes((evidence_id,), evidence_shapes, "evidence_outcomes")[0],
+            "evidence_id": _mapped(ids.evidence, evidence_id, "expected evidence outcome"),
             "outcome": outcome,
         }
         for evidence_id, outcome in expected.evidence_outcomes
     ]
-    evidence_outcomes.sort(key=canonical_sha256)
-
+    evidence_outcomes.sort(key=lambda item: str(item["evidence_id"]))
     basis_claims = [
         {
-            "basis": _referenced_shapes((basis_id,), basis_shapes, "basis_claims")[0],
+            "basis_id": _mapped(ids.bases, basis_id, "expected basis claim"),
             "claim": claim,
         }
         for basis_id, claim in expected.basis_claims
     ]
-    basis_claims.sort(key=canonical_sha256)
-
-    source_bases: list[dict[str, object]] | None = None
-    if expected.current_source_basis_ids is not None:
-        source_bases = _referenced_shapes(
-            expected.current_source_basis_ids,
-            basis_shapes,
-            "expected current_source_basis_ids",
-        )
-
-    verdict_bases: list[dict[str, object]] | None = None
-    if expected.current_verdict_basis_ids is not None:
-        verdict_bases = _referenced_shapes(
-            expected.current_verdict_basis_ids,
-            basis_shapes,
-            "expected current_verdict_basis_ids",
-        )
+    basis_claims.sort(key=lambda item: str(item["basis_id"]))
 
     return {
         "obligation": None if expected.obligation is None else expected.obligation.value,
@@ -318,103 +477,91 @@ def _expectation_shape(
         "evidence_statuses": evidence_statuses,
         "evidence_outcomes": evidence_outcomes,
         "basis_claims": basis_claims,
-        "current_source_bases": source_bases,
-        "current_verdict_bases": verdict_bases,
+        "current_source_basis_ids": (
+            None
+            if expected.current_source_basis_ids is None
+            else sorted(
+                _mapped(ids.bases, basis_id, "expected current source basis")
+                for basis_id in expected.current_source_basis_ids
+            )
+        ),
+        "current_verdict_basis_ids": (
+            None
+            if expected.current_verdict_basis_ids is None
+            else sorted(
+                _mapped(ids.bases, basis_id, "expected current verdict basis")
+                for basis_id in expected.current_verdict_basis_ids
+            )
+        ),
         "history_length": expected.history_length,
         "history_event_types": expected.history_event_types,
     }
 
 
-def _transition_reference_shapes(
-    case: TransitionCase,
-) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
-    evidence_shapes = _evidence_shape_map(case.before)
-    basis_shapes = _basis_shape_map(case.before, evidence_shapes)
-
-    if isinstance(case.event, Reassess):
-        logical_time = case.before.logical_time
-        for evidence_item in case.event.new_evidence:
-            evidence_shapes[evidence_item.evidence_id] = _evidence_shape(
-                evidence_item,
-                logical_time,
-            )
-        for basis_item in case.event.new_bases:
-            basis_shapes[basis_item.basis_id] = _basis_shape(
-                basis_item,
-                evidence_shapes,
-            )
-    elif isinstance(case.event, RetireControl):
-        retirement_evidence = case.event.retirement_evidence
-        evidence_shapes[retirement_evidence.evidence_id] = _evidence_shape(
-            retirement_evidence,
-            case.before.logical_time,
-        )
-
-    return evidence_shapes, basis_shapes
-
-
-def _transition_shape(case: TransitionCase) -> dict[str, object]:
-    before_evidence = _evidence_shape_map(case.before)
-    reference_evidence, reference_bases = _transition_reference_shapes(case)
-    invalidated: list[dict[str, object]] | None = None
-    if case.expected_invalidated_evidence is not None:
-        invalidated = _referenced_shapes(
-            case.expected_invalidated_evidence,
-            before_evidence,
-            "expected_invalidated_evidence",
-        )
-    surviving: list[dict[str, object]] | None = None
-    if case.expected_surviving_bases is not None:
-        surviving = _referenced_shapes(
-            case.expected_surviving_bases,
-            reference_bases,
-            "expected_surviving_bases",
-        )
-    return {
-        "case_kind": "transition",
-        "before": _state_shape(case.before),
-        "event": _event_shape(case.event, case.before),
-        "expected": _expectation_shape(
-            case.expected,
-            reference_evidence,
-            reference_bases,
-        ),
-        "expected_invalidated_evidence": invalidated,
-        "expected_surviving_bases": surviving,
-        "required_trace_rules": sorted(case.required_trace_rules),
-    }
-
-
-def _case_shape(
+def _render_case(
     case: TransitionCase | ObservationCase | RejectedTransitionCase,
+    ids: _IdMap,
 ) -> dict[str, object]:
     if isinstance(case, TransitionCase):
-        return _transition_shape(case)
+        return {
+            "case_kind": "transition",
+            "before": _render_state(case.before, ids),
+            "event": _render_event(case.event, case.before, ids),
+            "expected": _render_expectation(case.expected, ids),
+            "expected_invalidated_evidence": (
+                None
+                if case.expected_invalidated_evidence is None
+                else sorted(
+                    _mapped(ids.evidence, evidence_id, "expected invalidated evidence")
+                    for evidence_id in case.expected_invalidated_evidence
+                )
+            ),
+            "expected_surviving_bases": (
+                None
+                if case.expected_surviving_bases is None
+                else sorted(
+                    _mapped(ids.bases, basis_id, "expected surviving basis")
+                    for basis_id in case.expected_surviving_bases
+                )
+            ),
+            "required_trace_rules": sorted(case.required_trace_rules),
+        }
     if isinstance(case, ObservationCase):
-        evidence_shapes = _evidence_shape_map(case.state)
-        basis_shapes = _basis_shape_map(case.state, evidence_shapes)
         return {
             "case_kind": "observation",
-            "state": _state_shape(case.state),
-            "expected": _expectation_shape(
-                case.expected,
-                evidence_shapes,
-                basis_shapes,
-            ),
+            "state": _render_state(case.state, ids),
+            "expected": _render_expectation(case.expected, ids),
         }
     if isinstance(case, RejectedTransitionCase):
         return {
             "case_kind": "rejected_transition",
-            "before": _state_shape(case.before),
-            "proposed_after": _state_shape(case.proposed_after),
-            "event": None if case.event is None else _event_shape(case.event, case.before),
+            "before": _render_state(case.before, ids),
+            "proposed_after": _render_state(case.proposed_after, ids),
+            "event": None if case.event is None else _render_event(case.event, case.before, ids),
             "expected_invariants": sorted(case.expected_invariants),
         }
     raise FamilySplitError(f"unsupported scenario case type: {type(case).__qualname__}")
 
 
+def _canonical_case_shape(
+    case: TransitionCase | ObservationCase | RejectedTransitionCase,
+) -> dict[str, object]:
+    namespaces = _collect_case_ids(case)
+    best_shape: dict[str, object] | None = None
+    best_bytes: bytes | None = None
+    for ids in _candidate_maps(namespaces):
+        candidate = _render_case(case, ids)
+        candidate_bytes = canonical_json_bytes(candidate)
+        if best_bytes is None or candidate_bytes < best_bytes:
+            best_shape = candidate
+            best_bytes = candidate_bytes
+    if best_shape is None:
+        raise FamilySplitError("symbolic family canonicalization produced no candidates")
+    return best_shape
+
+
 def _family_material(spec: ScenarioSpec) -> dict[str, object]:
-    case_shapes = [_case_shape(case) for case in spec.cases]
+    case_shapes = [_canonical_case_shape(case) for case in spec.cases]
     case_shapes.sort(key=canonical_sha256)
     return {
         "schema_version": _FAMILY_SCHEMA_VERSION,
