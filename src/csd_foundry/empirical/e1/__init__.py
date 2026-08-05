@@ -15,7 +15,6 @@ from csd_foundry.empirical.e1.control_paired_compiler import (
     compile_e1_conventional_control,
     finalize_e1_paired_artifacts,
     load_conventional_responses,
-    load_token_inventory,
     write_artifact_files,
 )
 from csd_foundry.empirical.e1.curriculum_evaluation_contract import (
@@ -51,6 +50,7 @@ from csd_foundry.empirical.e1.foundry_artifact_compiler import (
     validate_e1_foundry_artifacts,
     write_e1_foundry_artifacts,
 )
+from csd_foundry.empirical.e1.token_inventory_io import load_token_inventory
 
 __all__ = [
     "ArtifactFile",
