@@ -1,8 +1,10 @@
 """E1 executable-semantics experiment contracts and artifact compilation."""
 
 from csd_foundry.empirical.e1.artifact_set_io import (
+    E1ArtifactSetError,
     E1ArtifactSetValidationReport,
     validate_artifact_files,
+    write_artifact_files,
 )
 from csd_foundry.empirical.e1.control_paired_compiler import (
     ConventionalControlResponse,
@@ -15,7 +17,6 @@ from csd_foundry.empirical.e1.control_paired_compiler import (
     compile_e1_conventional_control,
     finalize_e1_paired_artifacts,
     load_conventional_responses,
-    write_artifact_files,
 )
 from csd_foundry.empirical.e1.curriculum_evaluation_contract import (
     E1CurriculumArm,
@@ -56,6 +57,7 @@ __all__ = [
     "ArtifactFile",
     "ConventionalControlResponse",
     "E1ArtifactError",
+    "E1ArtifactSetError",
     "E1ArtifactSetValidationReport",
     "E1ArtifactValidationReport",
     "E1ControlArtifactBundle",
