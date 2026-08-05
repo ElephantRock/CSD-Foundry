@@ -25,9 +25,7 @@ def evaluate_smoke_outputs(paths: RunPaths) -> dict[str, object]:
     fixture_records = read_jsonl(paths.smoke_fixture)
     output_path = paths.work / "inference" / "inference_outputs.jsonl"
     output_records = read_jsonl(output_path)
-    inference_receipt = read_json_object(
-        paths.work / "inference" / "inference_receipt.json"
-    )
+    inference_receipt = read_json_object(paths.work / "inference" / "inference_receipt.json")
     if inference_receipt.get("output_digest") != sha256_file(output_path):
         raise E0HRunReleaseError("inference output digest mismatch")
     if inference_receipt.get("fixture_digest") != inputs.evaluation.smoke_fixture_digest:
@@ -48,15 +46,11 @@ def evaluate_smoke_outputs(paths: RunPaths) -> dict[str, object]:
         if not isinstance(first_ids, list) or not first_ids:
             raise E0HRunReleaseError("smoke output must contain first-run token IDs")
         if first_ids != second_ids:
-            raise E0HRunReleaseError(
-                f"repeated greedy token IDs diverged for {record.get('id')}"
-            )
+            raise E0HRunReleaseError(f"repeated greedy token IDs diverged for {record.get('id')}")
         if not isinstance(first_text, str) or not isinstance(second_text, str):
             raise E0HRunReleaseError("smoke output text fields must be strings")
         if first_text != second_text:
-            raise E0HRunReleaseError(
-                f"repeated greedy text diverged for {record.get('id')}"
-            )
+            raise E0HRunReleaseError(f"repeated greedy text diverged for {record.get('id')}")
 
     output_dir = paths.work / "smoke"
     assert_empty_output_directory(output_dir)
@@ -76,9 +70,7 @@ def evaluate_smoke_outputs(paths: RunPaths) -> dict[str, object]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m csd_foundry.empirical.e0h.harness.smoke_eval"
-    )
+    parser = argparse.ArgumentParser(prog="python -m csd_foundry.empirical.e0h.harness.smoke_eval")
     parser.add_argument("--run-root", type=Path, required=True)
     return parser
 
