@@ -1,0 +1,3 @@
+{"id":"e0h-smoke-001","max_new_tokens":8,"messages":[{"content":"Follow the user's instruction exactly and respond concisely.","role":"system"},{"content":"Reply with exactly one word: READY","role":"user"}]}
+{"id":"e0h-smoke-002","max_new_tokens":8,"messages":[{"content":"Continue simple deterministic text patterns without explanation.","role":"system"},{"content":"Continue this sequence with the next item only: 2, 4, 6,","role":"user"}]}
+{"id":"e0h-smoke-003","max_new_tokens":16,"messages":[{"content":"Produce compact deterministic output.","role":"system"},{"content":"Write a three-item comma-separated list of lowercase letters beginning with a.","role":"user"}]}
