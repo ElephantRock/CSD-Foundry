@@ -109,9 +109,7 @@ def test_task_records_bind_executable_and_independent_receipts() -> None:
 def test_evidence_receipts_cover_every_compiled_case() -> None:
     bundle = _bundle()
     total_records = bundle.training_record_count + bundle.development_record_count
-    oracle = load_json_text(
-        bundle.file("executable_oracle_evidence.json").content.decode("utf-8")
-    )
+    oracle = load_json_text(bundle.file("executable_oracle_evidence.json").content.decode("utf-8"))
     verification = load_json_text(
         bundle.file("independent_verification_evidence.json").content.decode("utf-8")
     )
