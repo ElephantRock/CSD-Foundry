@@ -117,9 +117,7 @@ def verify_assets(inputs: dict[str, Any], cache_dir: Path) -> dict[str, object]:
     model_assets = [_asset_receipt(snapshot / name, name) for name in MODEL_FILES]
     tokenizer_assets = [_asset_receipt(snapshot / name, name) for name in TOKENIZER_FILES]
     model_weight_digest = next(
-        str(item["sha256"])
-        for item in model_assets
-        if item["path"] == "model.safetensors"
+        str(item["sha256"]) for item in model_assets if item["path"] == "model.safetensors"
     )
     tokenizer_digest = _canonical_digest(tokenizer_assets)
     expected_model = str(inputs["model"]["content_digest"])
