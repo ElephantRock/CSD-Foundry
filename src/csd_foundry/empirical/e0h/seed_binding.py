@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from csd_foundry.empirical.e0h.run_release import E0HRunReleaseError
 from csd_foundry.empirical.e0h.run_release import (
-    E0HRunReleaseError,
     SeedDatasetBinding as _BaseSeedDatasetBinding,
 )
 
