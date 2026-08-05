@@ -186,7 +186,7 @@ def test_family_identity_preserves_cross_case_shared_event_topology() -> None:
     )
 
 
-def test_family_identity_preserves_sequence_group_coordinates() -> None:
+def test_family_identity_preserves_valid_sequence_group_renaming() -> None:
     scenario = SCENARIOS["M-11"]
     coordinate_renames = (
         "ALT/branch-x/1-alpha",
@@ -219,14 +219,10 @@ def test_family_identity_preserves_sequence_group_coordinates() -> None:
         derive_scenario_family_identity(scenario).family_digest
         == derive_scenario_family_identity(renamed).family_digest
     )
-    assert (
-        derive_scenario_family_identity(scenario).family_digest
-        != derive_scenario_family_identity(regrouped).family_digest
-    )
-    assert (
-        derive_scenario_family_identity(scenario).family_digest
-        != derive_scenario_family_identity(split_prefix).family_digest
-    )
+    with pytest.raises(FamilySplitError, match="sequence scenario is not executable"):
+        derive_scenario_family_identity(regrouped)
+    with pytest.raises(FamilySplitError, match="sequence scenario is not executable"):
+        derive_scenario_family_identity(split_prefix)
 
 
 def test_family_identity_changes_when_executable_rules_change() -> None:
