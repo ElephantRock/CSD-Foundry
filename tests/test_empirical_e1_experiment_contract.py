@@ -37,14 +37,15 @@ def test_current_catalog_compiles_expected_candidate_partition() -> None:
     }
 
     assert contract.eligible_scenario_count == 18
-    assert contract.excluded_blind_scenario_count == 3
+    assert contract.excluded_source_test_scenario_count == 3
     assert scenario_counts == {E1Split.TRAIN: 14, E1Split.DEVELOPMENT: 4}
     assert all("test" not in item.source_splits for item in assignments)
     assert contract.to_dict()["source_split_policy"] == {
         "train": "train",
         "validation": "development",
-        "test": "excluded_blind",
+        "test": "excluded_source_test",
     }
+    assert "outside the working repository" in str(contract.to_dict()["claim_boundary"])
 
 
 def test_contract_is_independent_of_input_order() -> None:
@@ -53,15 +54,15 @@ def test_contract_is_independent_of_input_order() -> None:
     assert _compile(scenarios) == _compile(reversed(scenarios))
 
 
-def test_blind_semantic_content_is_not_derived_into_e1_contract() -> None:
+def test_excluded_source_test_semantics_are_not_derived_into_e1_contract() -> None:
     scenarios = list(SCENARIOS.values())
-    blind_index = next(index for index, item in enumerate(scenarios) if item.split == "test")
-    blind = scenarios[blind_index]
-    scenarios[blind_index] = replace(
-        blind,
+    excluded_index = next(index for index, item in enumerate(scenarios) if item.split == "test")
+    excluded = scenarios[excluded_index]
+    scenarios[excluded_index] = replace(
+        excluded,
         rule_ids=frozenset(),
-        family="changed-blind-family",
-        source_section="changed blind content",
+        family="changed-source-test-family",
+        source_section="changed source test content",
     )
 
     assert _compile(scenarios).contract_digest == _compile().contract_digest
@@ -79,7 +80,7 @@ def test_symbolic_family_may_not_cross_source_train_validation_boundary() -> Non
         _compile((*SCENARIOS.values(), crossing))
 
 
-def test_contract_rejects_unknown_split_and_missing_blind_partition() -> None:
+def test_contract_rejects_unknown_split_and_missing_source_test_partition() -> None:
     scenarios = tuple(SCENARIOS.values())
     first = scenarios[0]
     unknown = (replace(first, split="unknown"), *scenarios[1:])
@@ -87,9 +88,9 @@ def test_contract_rejects_unknown_split_and_missing_blind_partition() -> None:
     with pytest.raises(FamilySplitError, match="unsupported E1 source splits"):
         _compile(unknown)
 
-    without_blind = tuple(item for item in scenarios if item.split != "test")
-    with pytest.raises(FamilySplitError, match="excluded blind source split"):
-        _compile(without_blind)
+    without_source_test = tuple(item for item in scenarios if item.split != "test")
+    with pytest.raises(FamilySplitError, match="excluded source test partition"):
+        _compile(without_source_test)
 
 
 def test_contract_constructor_rejects_forged_source_split_mapping() -> None:
@@ -118,7 +119,7 @@ def test_contract_digest_binds_policy_manifest_counts_and_claim_boundary() -> No
     assert canonical_sha256(payload) == digest
 
     changed = dict(payload)
-    changed["excluded_blind_scenario_count"] = 0
+    changed["excluded_source_test_scenario_count"] = 0
     assert canonical_sha256(changed) != digest
 
     changed = dict(payload)
