@@ -205,7 +205,9 @@ def command_infer(args: argparse.Namespace) -> None:
                     max_new_tokens=8,
                     pad_token_id=tokenizer.eos_token_id,
                 )
-            generated = tokenizer.decode(output[0][tokens["input_ids"].shape[1] :], skip_special_tokens=True)
+            generated = tokenizer.decode(
+                output[0][tokens["input_ids"].shape[1] :], skip_special_tokens=True
+            )
             rows.append(
                 _canonical(
                     {
@@ -241,7 +243,9 @@ def command_smoke(args: argparse.Namespace) -> None:
             "missing_ids": missing,
             "extra_ids": extra,
             "execution_complete": not missing and not extra,
-            "exact_text_matches": sum(observed.get(key) == value for key, value in expected.items()),
+            "exact_text_matches": sum(
+                observed.get(key) == value for key, value in expected.items()
+            ),
             "claim_boundary": "Infrastructure smoke execution only; no protected capability conclusion.",
         },
     )
