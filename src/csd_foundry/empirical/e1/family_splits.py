@@ -93,14 +93,14 @@ def _add_state_ids(
     requests: set[str],
     profiles: set[str],
 ) -> None:
-    for item in state.evidence:
-        evidence.add(item.evidence_id)
-        dependencies.update(item.dependencies)
-        if item.profile_id is not None:
-            profiles.add(item.profile_id)
-    for item in state.bases:
-        bases.add(item.basis_id)
-        evidence.update(item.member_evidence_ids)
+    for evidence_item in state.evidence:
+        evidence.add(evidence_item.evidence_id)
+        dependencies.update(evidence_item.dependencies)
+        if evidence_item.profile_id is not None:
+            profiles.add(evidence_item.profile_id)
+    for basis_item in state.bases:
+        bases.add(basis_item.basis_id)
+        evidence.update(basis_item.member_evidence_ids)
     bases.update(state.current_source_basis_ids)
     bases.update(state.current_verdict_basis_ids)
     if state.required_profile_id is not None:
@@ -121,14 +121,14 @@ def _add_event_ids(
     if isinstance(event, DependencyChange):
         dependencies.add(event.dependency_id)
     elif isinstance(event, Reassess):
-        for item in event.new_evidence:
-            evidence.add(item.evidence_id)
-            dependencies.update(item.dependencies)
-            if item.profile_id is not None:
-                profiles.add(item.profile_id)
-        for item in event.new_bases:
-            bases.add(item.basis_id)
-            evidence.update(item.member_evidence_ids)
+        for evidence_item in event.new_evidence:
+            evidence.add(evidence_item.evidence_id)
+            dependencies.update(evidence_item.dependencies)
+            if evidence_item.profile_id is not None:
+                profiles.add(evidence_item.profile_id)
+        for basis_item in event.new_bases:
+            bases.add(basis_item.basis_id)
+            evidence.update(basis_item.member_evidence_ids)
         requests.update(event.close_request_ids)
     elif isinstance(event, RetireControl):
         item = event.retirement_evidence
