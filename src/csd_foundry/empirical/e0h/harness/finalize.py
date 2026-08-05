@@ -16,6 +16,10 @@ from csd_foundry.empirical.e0h.harness.common import (
     verify_static_inputs,
     write_json_no_clobber,
 )
+from csd_foundry.empirical.e0h.harness.package_lock import verify_python_lock
+from csd_foundry.empirical.e0h.harness.package_manifest import (
+    verify_execution_package_manifest,
+)
 from csd_foundry.empirical.e0h.run_release import E0HRunReleaseError
 
 _DECIMAL = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
@@ -68,6 +72,8 @@ def finalize_execution(
     """Seal bounded execution evidence without introducing a model-quality conclusion."""
 
     inputs = verify_static_inputs(paths, require_snapshot=False)
+    verify_python_lock(paths, inputs)
+    verify_execution_package_manifest(paths, inputs)
     minutes = _gpu_minutes(actual_gpu_minutes, maximum=inputs.budget.e0h_gpu_minutes)
     if classification not in {"HARNESS_PASSED", "HARNESS_FAILED"}:
         raise E0HRunReleaseError("classification must be HARNESS_PASSED or HARNESS_FAILED")
