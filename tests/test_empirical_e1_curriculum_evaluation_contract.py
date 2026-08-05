@@ -306,9 +306,7 @@ def test_contract_digest_changes_with_artifact_metric_or_tokenizer() -> None:
             primary_metric_implementation_digest=_digest("changed-primary-metric"),
         )
     )
-    changed_tokenizer = _compile(
-        tokenizer_revision_digest=_digest("changed-tokenizer-revision")
-    )
+    changed_tokenizer = _compile(tokenizer_revision_digest=_digest("changed-tokenizer-revision"))
 
     assert changed_control.contract_digest != baseline.contract_digest
     assert changed_metric.contract_digest != baseline.contract_digest
