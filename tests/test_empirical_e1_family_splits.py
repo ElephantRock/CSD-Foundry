@@ -3,7 +3,6 @@
 from dataclasses import replace
 
 import pytest
-
 from csd_foundry.empirical.e1 import (
     E1Split,
     FamilySplitError,
