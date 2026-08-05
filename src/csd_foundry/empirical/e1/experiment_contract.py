@@ -20,7 +20,7 @@ _EXPERIMENT_SCHEMA_VERSION = "e1-experiment-contract/1"
 _SOURCE_SPLIT_POLICY = {
     "train": E1Split.TRAIN.value,
     "validation": E1Split.DEVELOPMENT.value,
-    "test": "excluded_blind",
+    "test": "excluded_source_test",
 }
 _EXPECTED_SOURCE_SPLIT = {
     E1Split.TRAIN: "train",
@@ -28,21 +28,22 @@ _EXPECTED_SOURCE_SPLIT = {
 }
 _CLAIM_BOUNDARY = (
     "This contract fixes E1 candidate admission and symbolic-family train/development "
-    "isolation while excluding the source test split from identity derivation. It does "
-    "not fix a model, tokenizer, training recipe, token budget, GPU allocation, metric "
-    "result, or Phase 10 blind-holdout evaluation."
+    "isolation while excluding the public source test split from E1 identity derivation. "
+    "The final Phase 10 blind holdout remains outside the working repository and is not "
+    "represented by this contract. This contract does not fix a model, tokenizer, training "
+    "recipe, token budget, GPU allocation, or metric result."
 )
 
 
 @dataclass(frozen=True, slots=True)
 class E1ExperimentContract:
-    """Digest-bound E1 candidate partition with an explicit blind exclusion."""
+    """Digest-bound E1 candidate partition with an excluded source-test partition."""
 
     release: str
     source_commit: str
     split_manifest: FamilySplitManifest
     eligible_scenario_count: int
-    excluded_blind_scenario_count: int
+    excluded_source_test_scenario_count: int
 
     def __post_init__(self) -> None:
         if not self.release.strip():
@@ -53,8 +54,8 @@ class E1ExperimentContract:
             raise FamilySplitError("experiment and split-manifest releases must match")
         if self.eligible_scenario_count <= 0:
             raise FamilySplitError("E1 experiment requires eligible scenarios")
-        if self.excluded_blind_scenario_count <= 0:
-            raise FamilySplitError("E1 experiment requires an excluded blind source split")
+        if self.excluded_source_test_scenario_count <= 0:
+            raise FamilySplitError("E1 experiment requires an excluded source test partition")
 
         assigned_count = sum(len(item.scenario_ids) for item in self.split_manifest.assignments)
         if assigned_count != self.eligible_scenario_count:
@@ -76,7 +77,7 @@ class E1ExperimentContract:
             "source_commit": self.source_commit,
             "source_split_policy": dict(_SOURCE_SPLIT_POLICY),
             "eligible_scenario_count": self.eligible_scenario_count,
-            "excluded_blind_scenario_count": self.excluded_blind_scenario_count,
+            "excluded_source_test_scenario_count": self.excluded_source_test_scenario_count,
             "split_manifest": self.split_manifest.to_dict(),
             "claim_boundary": _CLAIM_BOUNDARY,
         }
@@ -105,10 +106,10 @@ def _partition_source_splits(
         raise FamilySplitError(f"unsupported E1 source splits: {unknown}")
 
     eligible = tuple(item for item in ordered if item.split in {"train", "validation"})
-    excluded_blind = tuple(item for item in ordered if item.split == "test")
-    if not excluded_blind:
-        raise FamilySplitError("E1 experiment requires an excluded blind source split")
-    return eligible, excluded_blind
+    excluded_source_test = tuple(item for item in ordered if item.split == "test")
+    if not excluded_source_test:
+        raise FamilySplitError("E1 experiment requires an excluded source test partition")
+    return eligible, excluded_source_test
 
 
 def _derive_eligible_identities(
@@ -138,9 +139,9 @@ def compile_e1_experiment_contract(
     release: str,
     source_commit: str,
 ) -> E1ExperimentContract:
-    """Compile the fixed repository-side E1 candidate and blind-exclusion contract."""
+    """Compile the fixed repository-side E1 candidate and source-test exclusion contract."""
 
-    eligible, excluded_blind = _partition_source_splits(scenarios)
+    eligible, excluded_source_test = _partition_source_splits(scenarios)
     identities = _derive_eligible_identities(eligible)
     development_family_digests = frozenset(
         item.family_digest for item in identities if item.source_split == "validation"
@@ -156,5 +157,5 @@ def compile_e1_experiment_contract(
         source_commit=source_commit,
         split_manifest=split_manifest,
         eligible_scenario_count=len(eligible),
-        excluded_blind_scenario_count=len(excluded_blind),
+        excluded_source_test_scenario_count=len(excluded_source_test),
     )
