@@ -7,6 +7,8 @@ from typing import cast
 from csd_foundry.empirical.e0h.run_release import (
     E0HRunReleaseBundle,
     E0HRunReleaseInputs,
+)
+from csd_foundry.empirical.e0h.run_release import (
     compile_e0h_run_release as _compile_base_release,
 )
 from csd_foundry.empirical.e1.foundry_artifact_compiler import ArtifactFile
