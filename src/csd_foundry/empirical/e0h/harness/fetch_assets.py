@@ -53,10 +53,7 @@ def fetch_snapshot(paths: RunPaths) -> dict[str, object]:
             revision = manifest["revision"]
             if not isinstance(repository, str) or not isinstance(revision, str):
                 raise E0HRunReleaseError("invalid snapshot repository or revision")
-            url = (
-                f"https://huggingface.co/{repository}/resolve/{revision}/{name}"
-                "?download=true"
-            )
+            url = f"https://huggingface.co/{repository}/resolve/{revision}/{name}?download=true"
             target = temporary / name
             with urllib.request.urlopen(url, timeout=300) as response, target.open("wb") as handle:
                 shutil.copyfileobj(response, handle, length=1024 * 1024)
