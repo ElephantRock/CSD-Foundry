@@ -6,9 +6,10 @@ import hashlib
 import json
 import os
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, cast
+from typing import cast
 
 from csd_foundry.empirical.e0h import E0HRunReleaseInputs, load_e0h_run_release_inputs
 from csd_foundry.empirical.e0h.run_release import E0HRunReleaseError
