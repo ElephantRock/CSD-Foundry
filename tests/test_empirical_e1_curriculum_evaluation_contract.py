@@ -10,6 +10,7 @@ from csd_foundry.empirical.e1 import (
     E1CurriculumArtifact,
     E1CurriculumEvaluationContract,
     E1EvaluationArtifact,
+    E1ExperimentContract,
     E1LabelAuthority,
     E1Split,
     FamilySplitError,
@@ -27,7 +28,7 @@ def _digest(label: str) -> str:
     return canonical_sha256({"label": label})
 
 
-def _selection():  # type: ignore[no-untyped-def]
+def _selection() -> E1ExperimentContract:
     return compile_e1_experiment_contract(
         SCENARIOS.values(),
         release="e1-selection/1",
@@ -35,7 +36,7 @@ def _selection():  # type: ignore[no-untyped-def]
     )
 
 
-def _scenario_ids(selection, split: E1Split) -> tuple[str, ...]:  # type: ignore[no-untyped-def]
+def _scenario_ids(selection: E1ExperimentContract, split: E1Split) -> tuple[str, ...]:
     return tuple(
         sorted(
             scenario_id
@@ -46,7 +47,12 @@ def _scenario_ids(selection, split: E1Split) -> tuple[str, ...]:  # type: ignore
     )
 
 
-def _artifacts():  # type: ignore[no-untyped-def]
+def _artifacts() -> tuple[
+    E1ExperimentContract,
+    E1CurriculumArtifact,
+    E1CurriculumArtifact,
+    E1EvaluationArtifact,
+]:
     selection = _selection()
     training_ids = _scenario_ids(selection, E1Split.TRAIN)
     development_ids = _scenario_ids(selection, E1Split.DEVELOPMENT)
@@ -75,6 +81,7 @@ def _artifacts():  # type: ignore[no-untyped-def]
         record_count=120,
         token_count=4096,
         executable_oracle_evidence_digest=_digest("oracle-evidence"),
+        independent_verification_evidence_digest=_digest("independent-verification"),
     )
     evaluation = E1EvaluationArtifact(
         split=E1Split.DEVELOPMENT,
@@ -123,6 +130,10 @@ def test_contract_binds_two_arms_development_evaluation_and_no_peeking() -> None
     assert contract.control.arm is E1CurriculumArm.CONTROL
     assert contract.foundry.arm is E1CurriculumArm.FOUNDRY
     assert contract.control.token_count == contract.foundry.token_count
+    assert contract.control.artifact_digest != contract.foundry.artifact_digest
+    assert contract.control.manifest_digest != contract.foundry.manifest_digest
+    assert contract.foundry.executable_oracle_evidence_digest is not None
+    assert contract.foundry.independent_verification_evidence_digest is not None
     assert contract.evaluation.split is E1Split.DEVELOPMENT
     assert contract.development_family_count == contract.evaluation.family_count == 4
     assert set(contract.training_scenario_ids).isdisjoint(contract.development_scenario_ids)
@@ -148,6 +159,16 @@ def test_contract_rejects_token_or_task_format_mismatch() -> None:
 
     with pytest.raises(FamilySplitError, match="task-format matched"):
         _compile(foundry=replace(foundry, task_format_digest=_digest("other-format")))
+
+
+def test_contract_rejects_identical_control_and_foundry_artifacts() -> None:
+    _, control, foundry, _ = _artifacts()
+
+    with pytest.raises(FamilySplitError, match="artifacts must differ"):
+        _compile(foundry=replace(foundry, artifact_digest=control.artifact_digest))
+
+    with pytest.raises(FamilySplitError, match="manifests must differ"):
+        _compile(foundry=replace(foundry, manifest_digest=control.manifest_digest))
 
 
 def test_contract_rejects_curriculum_or_evaluation_scenario_drift() -> None:
@@ -184,7 +205,7 @@ def test_contract_rejects_family_count_drift_and_wrong_runtime_artifacts() -> No
         replace(contract, evaluation=cast(E1EvaluationArtifact, object()))
 
 
-def test_label_authority_and_oracle_evidence_are_arm_specific() -> None:
+def test_label_authority_and_verification_evidence_are_arm_specific() -> None:
     _, control, foundry, _ = _artifacts()
 
     with pytest.raises(FamilySplitError, match="control labels"):
@@ -193,21 +214,63 @@ def test_label_authority_and_oracle_evidence_are_arm_specific() -> None:
     with pytest.raises(FamilySplitError, match="may not cite executable-oracle"):
         replace(control, executable_oracle_evidence_digest=_digest("forbidden"))
 
+    with pytest.raises(FamilySplitError, match="may not cite Foundry independent"):
+        replace(
+            control,
+            independent_verification_evidence_digest=_digest("forbidden-verification"),
+        )
+
     with pytest.raises(FamilySplitError, match="Foundry labels"):
         replace(foundry, label_authority=E1LabelAuthority.CONVENTIONAL_SYNTHETIC)
 
     with pytest.raises(FamilySplitError, match="requires executable-oracle"):
         replace(foundry, executable_oracle_evidence_digest=None)
 
+    with pytest.raises(FamilySplitError, match="requires independent-verification"):
+        replace(foundry, independent_verification_evidence_digest=None)
 
-def test_raw_string_enums_fail_closed() -> None:
-    _, control, _, evaluation = _artifacts()
+    with pytest.raises(FamilySplitError, match="evidence must differ"):
+        replace(
+            foundry,
+            independent_verification_evidence_digest=(
+                foundry.executable_oracle_evidence_digest
+            ),
+        )
+
+
+def test_raw_runtime_types_fail_closed() -> None:
+    selection, control, _, evaluation = _artifacts()
+    contract = _compile()
 
     with pytest.raises(FamilySplitError, match="arm must be an E1CurriculumArm"):
         replace(control, arm=cast(E1CurriculumArm, "control"))
 
     with pytest.raises(FamilySplitError, match="evaluation split must be an E1Split"):
         replace(evaluation, split=cast(E1Split, "development"))
+
+    with pytest.raises(FamilySplitError, match="lowercase SHA-256"):
+        replace(control, artifact_digest=cast(str, object()))
+
+    with pytest.raises(FamilySplitError, match="nonempty tuple"):
+        replace(control, scenario_ids=cast(tuple[str, ...], ["M-01"]))
+
+    with pytest.raises(FamilySplitError, match="positive integer"):
+        replace(control, record_count=cast(int, True))
+
+    with pytest.raises(FamilySplitError, match="nonempty string"):
+        replace(contract, release=cast(str, object()))
+
+    with pytest.raises(FamilySplitError, match="selection_contract must be"):
+        compile_e1_curriculum_evaluation_contract(
+            cast(E1ExperimentContract, object()),
+            release=_RELEASE,
+            source_commit=_SOURCE_COMMIT,
+            control=contract.control,
+            foundry=contract.foundry,
+            evaluation=contract.evaluation,
+        )
+
+    assert selection.source_commit == _SOURCE_COMMIT
 
 
 def test_metric_bearing_evaluation_is_development_only() -> None:
