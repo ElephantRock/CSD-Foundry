@@ -61,9 +61,7 @@ def _canonical_control_topology(spec: ScenarioSpec) -> list[dict[str, object]]:
                 }
             )
         else:
-            raise FamilySplitError(
-                f"unsupported scenario case type: {type(case).__qualname__}"
-            )
+            raise FamilySplitError(f"unsupported scenario case type: {type(case).__qualname__}")
     return cases
 
 
@@ -82,16 +80,13 @@ def _sequence_execution_coordinates(spec: ScenarioSpec) -> list[dict[str, object
         parts = case.case_id.split("/")
         if len(parts) < 3:
             raise FamilySplitError(
-                f"sequence case {case.case_id!r} must use "
-                "'<scenario>/<branch>/<step>-<name>'"
+                f"sequence case {case.case_id!r} must use '<scenario>/<branch>/<step>-<name>'"
             )
         step_text = parts[-1].split("-", maxsplit=1)[0]
         try:
             step = int(step_text)
         except ValueError as exc:
-            raise FamilySplitError(
-                f"sequence case {case.case_id!r} has no numeric step"
-            ) from exc
+            raise FamilySplitError(f"sequence case {case.case_id!r} has no numeric step") from exc
 
         group_id = "/".join(parts[:-1])
         if group_id not in group_labels:
@@ -164,18 +159,14 @@ def compile_family_split_manifest(
     assignments: list[FamilySplitAssignment] = []
     for family_digest, members in grouped.items():
         split = (
-            E1Split.DEVELOPMENT
-            if family_digest in development_family_digests
-            else E1Split.TRAIN
+            E1Split.DEVELOPMENT if family_digest in development_family_digests else E1Split.TRAIN
         )
         assignments.append(
             FamilySplitAssignment(
                 family_digest=family_digest,
                 split=split,
                 scenario_ids=tuple(sorted(item.scenario_id for item in members)),
-                declared_families=tuple(
-                    sorted({item.declared_family for item in members})
-                ),
+                declared_families=tuple(sorted({item.declared_family for item in members})),
                 source_splits=tuple(sorted({item.source_split for item in members})),
             )
         )
