@@ -1,12 +1,16 @@
-"""Fail-closed filesystem validation for deterministic E1 artifact sets."""
+"""Fail-closed filesystem I/O for deterministic E1 artifact sets."""
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from csd_foundry.empirical.e1.foundry_artifact_compiler import ArtifactFile
+
+
+class E1ArtifactSetError(ValueError):
+    """Raised when an E1 artifact set cannot be written safely."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,17 +24,58 @@ class E1ArtifactSetValidationReport:
         return {"status": "valid" if self.success else "invalid", "errors": list(self.errors)}
 
 
+def _validate_expected_files(expected_files: tuple[ArtifactFile, ...]) -> tuple[str, ...]:
+    paths = tuple(item.path for item in expected_files)
+    if len(paths) != len(set(paths)):
+        raise E1ArtifactSetError("expected artifact paths are not unique")
+    for path in paths:
+        pure_path = PurePath(path)
+        if not path or pure_path.is_absolute() or pure_path.name != path or path in {".", ".."}:
+            raise E1ArtifactSetError(f"artifact path must be one flat relative name: {path!r}")
+    return paths
+
+
+def write_artifact_files(files: tuple[ArtifactFile, ...], directory: Path) -> None:
+    """Write exact artifact bytes with flat paths and no-clobber file creation."""
+
+    _validate_expected_files(files)
+    if directory.exists() or directory.is_symlink():
+        if directory.is_symlink() or not directory.is_dir():
+            raise E1ArtifactSetError(f"output path is not a regular directory: {directory}")
+        if any(directory.iterdir()):
+            raise E1ArtifactSetError(f"output directory is not empty: {directory}")
+    else:
+        directory.mkdir(parents=True)
+    if directory.is_symlink() or not directory.is_dir():
+        raise E1ArtifactSetError(f"output path is not a regular directory: {directory}")
+
+    for item in files:
+        path = directory / item.path
+        try:
+            with path.open("xb") as handle:
+                handle.write(item.content)
+        except FileExistsError as exc:
+            raise E1ArtifactSetError(f"artifact path already exists: {item.path}") from exc
+        observed_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if observed_digest != item.sha256:
+            raise E1ArtifactSetError(f"post-write digest mismatch: {item.path}")
+
+
 def validate_artifact_files(
     directory: Path,
     expected_files: tuple[ArtifactFile, ...],
 ) -> E1ArtifactSetValidationReport:
     """Require the exact file set, regular non-symlink paths, and byte identity."""
 
-    expected_paths = tuple(item.path for item in expected_files)
-    if len(expected_paths) != len(set(expected_paths)):
-        return E1ArtifactSetValidationReport(False, ("expected artifact paths are not unique",))
-    if not directory.is_dir():
-        return E1ArtifactSetValidationReport(False, (f"missing directory: {directory}",))
+    try:
+        expected_paths = _validate_expected_files(expected_files)
+    except E1ArtifactSetError as exc:
+        return E1ArtifactSetValidationReport(False, (str(exc),))
+    if directory.is_symlink() or not directory.is_dir():
+        return E1ArtifactSetValidationReport(
+            False,
+            (f"missing or non-regular directory: {directory}",),
+        )
 
     errors: list[str] = []
     expected_path_set = set(expected_paths)
