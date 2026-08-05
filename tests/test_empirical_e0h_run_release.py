@@ -33,7 +33,7 @@ def _inputs() -> E0HRunReleaseInputs:
         dataset=SeedDatasetBinding(
             source_commit=source_commit,
             manifest_path="data/seed/v0.1/csd_reasoning_manifest_v0.1.json",
-            manifest_digest="1" * 64,
+            manifest_digest="7afcd7a7c50496467b56530a3b6d326c0b5daae7ae16764ebd4b678e1befe5b8",
             sft_path="data/seed/v0.1/csd_reasoning_sft_v0.1.jsonl",
             sft_digest="02903221be8aff0f5e667dbde556040f049bf386c84722a032101ae02879aaa9",
             sft_records=252,
@@ -211,6 +211,8 @@ def test_e0h_rejects_budget_expansion_and_protected_metric_commands() -> None:
 def test_e0h_requires_exact_seed_boundary_and_metric_denial() -> None:
     with pytest.raises(E0HRunReleaseError, match="record counts"):
         replace(_inputs().dataset, sft_records=251)
+    with pytest.raises(E0HRunReleaseError, match="immutable v0.1 seed digests"):
+        replace(_inputs().dataset, manifest_digest="8" * 64)
     with pytest.raises(E0HRunReleaseError, match="inaccessible"):
         replace(_inputs().evaluation, protected_metrics_access=True)
 
