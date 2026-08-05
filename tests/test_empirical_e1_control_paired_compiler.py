@@ -1,5 +1,7 @@
 """Tests for conventional-control compilation and paired E1 finalization."""
 
+from dataclasses import replace
+
 import pytest
 
 from csd_foundry.empirical.e1.control_paired_compiler import (
@@ -89,9 +91,11 @@ def _token_inventory(foundry, control, *, context_length: int = 128):
     return E1TokenCountInventory(
         tokenizer_revision_digest=_TOKENIZER_DIGEST,
         counting_command_digest=_TOKEN_COUNT_COMMAND_DIGEST,
+        control_artifact_digest=control.file("control_train.jsonl").sha256,
+        foundry_artifact_digest=foundry.file("foundry_train.jsonl").sha256,
         context_length=context_length,
         control=tuple(
-            TokenizedRecordCount(str(record["record_id"]), 32) for record in control_records
+            TokenizedRecordCount(str(record["record_id"]), 40) for record in control_records
         ),
         foundry=tuple(
             TokenizedRecordCount(str(record["record_id"]), 40) for record in foundry_records
@@ -159,7 +163,7 @@ def test_control_response_requires_canonical_json_target() -> None:
         ConventionalControlResponse("e1-control/train/M-01/case", '{"x":1}')
 
 
-def test_paired_finalizer_instantiates_real_contract_with_equal_processed_budget() -> None:
+def test_paired_finalizer_instantiates_real_contract_with_equal_exact_budget() -> None:
     selection = _selection()
     foundry = _foundry()
     control = _control(foundry)
@@ -177,15 +181,16 @@ def test_paired_finalizer_instantiates_real_contract_with_equal_processed_budget
     )
 
     assert paired.contract.control.token_count == paired.contract.foundry.token_count
-    assert paired.contract.control.token_count == control.record_count * inventory.context_length
+    assert paired.contract.control.token_count == control.record_count * 40
     assert paired.contract.control.record_count == paired.contract.foundry.record_count
     assert paired.contract.control.scenario_ids == paired.contract.foundry.scenario_ids
     assert paired.contract.tokenizer_revision_digest == _TOKENIZER_DIGEST
     assert paired.contract.control.executable_oracle_evidence_digest is None
     assert paired.contract.foundry.executable_oracle_evidence_digest is not None
-    assert paired.file("paired_e1_contract.json").sha256 != paired.file(
-        "paired_e1_manifest.json"
-    ).sha256
+    assert (
+        paired.file("paired_e1_contract.json").sha256
+        != paired.file("paired_e1_manifest.json").sha256
+    )
 
 
 def test_token_inventory_rejects_any_record_that_would_be_truncated() -> None:
@@ -198,13 +203,57 @@ def test_token_inventory_rejects_any_record_that_would_be_truncated() -> None:
         E1TokenCountInventory(
             tokenizer_revision_digest=_TOKENIZER_DIGEST,
             counting_command_digest=_TOKEN_COUNT_COMMAND_DIGEST,
+            control_artifact_digest=control.file("control_train.jsonl").sha256,
+            foundry_artifact_digest=foundry.file("foundry_train.jsonl").sha256,
             context_length=64,
             control=tuple(
-                TokenizedRecordCount(str(record["record_id"]), 65)
-                for record in control_records
+                TokenizedRecordCount(str(record["record_id"]), 65) for record in control_records
             ),
             foundry=tuple(
-                TokenizedRecordCount(str(record["record_id"]), 40)
-                for record in foundry_records
+                TokenizedRecordCount(str(record["record_id"]), 65) for record in foundry_records
             ),
+        )
+
+
+def test_token_inventory_rejects_unequal_exact_token_totals() -> None:
+    foundry = _foundry()
+    control = _control(foundry)
+    control_records = load_artifact_records(control.file("control_train.jsonl").content)
+    foundry_records = load_artifact_records(foundry.file("foundry_train.jsonl").content)
+
+    with pytest.raises(E1ControlArtifactError, match="equal exact token counts"):
+        E1TokenCountInventory(
+            tokenizer_revision_digest=_TOKENIZER_DIGEST,
+            counting_command_digest=_TOKEN_COUNT_COMMAND_DIGEST,
+            control_artifact_digest=control.file("control_train.jsonl").sha256,
+            foundry_artifact_digest=foundry.file("foundry_train.jsonl").sha256,
+            context_length=128,
+            control=tuple(
+                TokenizedRecordCount(str(record["record_id"]), 39) for record in control_records
+            ),
+            foundry=tuple(
+                TokenizedRecordCount(str(record["record_id"]), 40) for record in foundry_records
+            ),
+        )
+
+
+def test_paired_finalizer_rejects_token_inventory_for_other_artifact() -> None:
+    selection = _selection()
+    foundry = _foundry()
+    control = _control(foundry)
+    inventory = replace(
+        _token_inventory(foundry, control),
+        control_artifact_digest=canonical_sha256({"other": "control-artifact"}),
+    )
+
+    with pytest.raises(E1ControlArtifactError, match="artifact digest mismatch"):
+        finalize_e1_paired_artifacts(
+            selection,
+            foundry,
+            control,
+            inventory,
+            release=_PAIRED_RELEASE,
+            source_commit=_SOURCE_COMMIT,
+            primary_metric_implementation_digest=_PRIMARY_METRIC_DIGEST,
+            safety_metric_implementation_digest=_SAFETY_METRIC_DIGEST,
         )
