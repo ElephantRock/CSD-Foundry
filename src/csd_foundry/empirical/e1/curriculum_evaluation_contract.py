@@ -195,6 +195,7 @@ class E1CurriculumEvaluationContract:
     selection_contract_digest: str
     training_scenario_ids: tuple[str, ...]
     development_scenario_ids: tuple[str, ...]
+    development_family_count: int
     control: E1CurriculumArtifact
     foundry: E1CurriculumArtifact
     evaluation: E1EvaluationArtifact
@@ -210,11 +211,23 @@ class E1CurriculumEvaluationContract:
             self.development_scenario_ids,
             field="development_scenario_ids",
         )
+        if self.development_family_count <= 0:
+            raise FamilySplitError("development_family_count must be positive")
+        if self.development_family_count > len(self.development_scenario_ids):
+            raise FamilySplitError(
+                "development_family_count may not exceed development scenario count"
+            )
         overlap = sorted(set(self.training_scenario_ids) & set(self.development_scenario_ids))
         if overlap:
             raise FamilySplitError(
                 f"training and development scenario identifiers overlap: {overlap}"
             )
+        if not isinstance(self.control, E1CurriculumArtifact):
+            raise FamilySplitError("control must be an E1CurriculumArtifact")
+        if not isinstance(self.foundry, E1CurriculumArtifact):
+            raise FamilySplitError("foundry must be an E1CurriculumArtifact")
+        if not isinstance(self.evaluation, E1EvaluationArtifact):
+            raise FamilySplitError("evaluation must be an E1EvaluationArtifact")
         if self.control.arm is not E1CurriculumArm.CONTROL:
             raise FamilySplitError("control field must contain the control curriculum")
         if self.foundry.arm is not E1CurriculumArm.FOUNDRY:
@@ -225,6 +238,8 @@ class E1CurriculumEvaluationContract:
             raise FamilySplitError("Foundry curriculum does not match training scenarios")
         if self.evaluation.scenario_ids != self.development_scenario_ids:
             raise FamilySplitError("evaluation artifact does not match development scenarios")
+        if self.evaluation.family_count != self.development_family_count:
+            raise FamilySplitError("evaluation family count does not match selection families")
         if self.control.token_count != self.foundry.token_count:
             raise FamilySplitError("control and Foundry curricula must be token matched")
         if self.control.task_format_digest != self.foundry.task_format_digest:
@@ -238,6 +253,7 @@ class E1CurriculumEvaluationContract:
             "selection_contract_digest": self.selection_contract_digest,
             "training_scenario_ids": list(self.training_scenario_ids),
             "development_scenario_ids": list(self.development_scenario_ids),
+            "development_family_count": self.development_family_count,
             "control": self.control.to_dict(),
             "foundry": self.foundry.to_dict(),
             "evaluation": self.evaluation.to_dict(),
@@ -271,6 +287,17 @@ def _scenario_ids_for_split(
     )
 
 
+def _family_count_for_split(
+    selection_contract: E1ExperimentContract,
+    split: E1Split,
+) -> int:
+    return sum(
+        1
+        for assignment in selection_contract.split_manifest.assignments
+        if assignment.split is split
+    )
+
+
 def compile_e1_curriculum_evaluation_contract(
     selection_contract: E1ExperimentContract,
     *,
@@ -289,12 +316,17 @@ def compile_e1_curriculum_evaluation_contract(
         selection_contract,
         E1Split.DEVELOPMENT,
     )
+    development_family_count = _family_count_for_split(
+        selection_contract,
+        E1Split.DEVELOPMENT,
+    )
     return E1CurriculumEvaluationContract(
         release=release,
         source_commit=source_commit,
         selection_contract_digest=selection_contract.contract_digest,
         training_scenario_ids=training_scenario_ids,
         development_scenario_ids=development_scenario_ids,
+        development_family_count=development_family_count,
         control=control,
         foundry=foundry,
         evaluation=evaluation,
