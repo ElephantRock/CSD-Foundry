@@ -169,11 +169,13 @@ def test_e0h_run_release_is_deterministic_and_non_authorizing() -> None:
     second = compile_e0h_run_release(inputs)
 
     assert first == second
-    assert len(first.files) == 9
+    assert len(first.files) == 10
     assert (
         first.file("e0h_run_contract.json").content == second.file("e0h_run_contract.json").content
     )
     assert b'"gpu_execution_authorized":false' in first.file("e0h_run_contract.json").content
+    assert b'"run_inputs_lock_digest"' in first.file("e0h_run_contract.json").content
+    assert b'"model-registry://small-reference-model"' in first.file("run_inputs_lock.json").content
 
 
 def test_e0h_run_release_round_trips_and_reconstructs(tmp_path: Path) -> None:
