@@ -89,9 +89,7 @@ def reload_checkpoint(paths: RunPaths) -> dict[str, object]:
     model.eval()
     input_ids = _prompt_ids(tokenizer, fixtures[0].get("messages"))
     with torch.no_grad():
-        outputs = model(
-            input_ids=torch.tensor([input_ids], dtype=torch.long, device="cuda")
-        )
+        outputs = model(input_ids=torch.tensor([input_ids], dtype=torch.long, device="cuda"))
     finite = bool(torch.isfinite(outputs.logits).all().item())
     if not finite:
         raise E0HRunReleaseError("reloaded checkpoint produced non-finite logits")
@@ -113,9 +111,7 @@ def reload_checkpoint(paths: RunPaths) -> dict[str, object]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m csd_foundry.empirical.e0h.harness.reload"
-    )
+    parser = argparse.ArgumentParser(prog="python -m csd_foundry.empirical.e0h.harness.reload")
     parser.add_argument("--run-root", type=Path, required=True)
     return parser
 
