@@ -78,10 +78,7 @@ def test_preflight_and_container_are_immutably_bound() -> None:
     assert '"vocab.json"' in preflight
     assert "forward_pass_complete" in preflight
     assert "actions/checkout@11d5960a326750d5838078e36cf38b85af677262" in workflow
-    assert (
-        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
-        in workflow
-    )
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "actions/checkout@v4" not in workflow
     assert "actions/upload-artifact@v4" not in workflow
 
