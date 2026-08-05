@@ -37,6 +37,7 @@ def test_current_catalog_compiles_expected_candidate_partition() -> None:
     }
 
     assert contract.eligible_scenario_count == 18
+    assert contract.excluded_source_test_scenario_ids == ("H-01", "L-01", "M-15")
     assert contract.excluded_source_test_scenario_count == 3
     assert scenario_counts == {E1Split.TRAIN: 14, E1Split.DEVELOPMENT: 4}
     assert all("test" not in item.source_splits for item in assignments)
@@ -66,6 +67,17 @@ def test_excluded_source_test_semantics_are_not_derived_into_e1_contract() -> No
     )
 
     assert _compile(scenarios).contract_digest == _compile().contract_digest
+
+
+def test_excluded_source_test_identity_change_changes_contract_digest() -> None:
+    scenarios = list(SCENARIOS.values())
+    excluded_index = next(index for index, item in enumerate(scenarios) if item.split == "test")
+    scenarios[excluded_index] = replace(
+        scenarios[excluded_index],
+        scenario_id="RENAMED-SOURCE-TEST",
+    )
+
+    assert _compile(scenarios).contract_digest != _compile().contract_digest
 
 
 def test_symbolic_family_may_not_cross_source_train_validation_boundary() -> None:
@@ -112,7 +124,23 @@ def test_contract_constructor_rejects_forged_source_split_mapping() -> None:
         replace(contract, split_manifest=forged_manifest)
 
 
-def test_contract_digest_binds_policy_manifest_counts_and_claim_boundary() -> None:
+def test_contract_constructor_rejects_noncanonical_excluded_ids() -> None:
+    contract = _compile()
+
+    with pytest.raises(FamilySplitError, match="must be unique"):
+        replace(
+            contract,
+            excluded_source_test_scenario_ids=("H-01", "H-01"),
+        )
+
+    with pytest.raises(FamilySplitError, match="must be sorted"):
+        replace(
+            contract,
+            excluded_source_test_scenario_ids=("M-15", "H-01", "L-01"),
+        )
+
+
+def test_contract_digest_binds_policy_manifest_counts_ids_and_claim_boundary() -> None:
     payload = _compile().to_dict()
     digest = payload.pop("contract_digest")
 
@@ -120,6 +148,10 @@ def test_contract_digest_binds_policy_manifest_counts_and_claim_boundary() -> No
 
     changed = dict(payload)
     changed["excluded_source_test_scenario_count"] = 0
+    assert canonical_sha256(changed) != digest
+
+    changed = dict(payload)
+    changed["excluded_source_test_scenario_ids"] = ["OTHER"]
     assert canonical_sha256(changed) != digest
 
     changed = dict(payload)
