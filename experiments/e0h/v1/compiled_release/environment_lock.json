@@ -1,0 +1,1 @@
+{"accelerate_version":"0.34.2","container_image":"pytorch/pytorch@sha256:0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726","cuda_version":"12.4","gpu_count":1,"hardware_model":"NVIDIA-T4-16GB","python_version":"3.11.9","schema_version":"e0h-software-environment/1","torch_version":"2.4.1","transformers_version":"4.44.2"}

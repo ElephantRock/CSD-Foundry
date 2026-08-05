@@ -1,0 +1,1 @@
+{"attention_mask_shape":[1,355],"device":"cpu","first_record_id":"csd-r-0.1.0-m-01-infra-transition","forward_loss":10.825522422790527,"forward_pass_complete":true,"input_shape":[1,355],"model_revision":"d1856183d08a67c27a8e4ca1492d1d32b96c7c1a","parameter_count":102714,"schema_version":"e0h-minimal-device-preflight/1","selected_training_records":168,"vocabulary_size":50257}
