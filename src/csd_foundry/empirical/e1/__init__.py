@@ -1,6 +1,6 @@
 """E1 executable-semantics experiment contracts."""
 
-from csd_foundry.empirical.e1.scenario_splits import (
+from csd_foundry.empirical.e1.execution_splits import (
     E1Split,
     FamilySplitAssignment,
     FamilySplitError,
