@@ -172,7 +172,5 @@ def compile_e1_experiment_contract(
         source_commit=source_commit,
         split_manifest=split_manifest,
         eligible_scenario_count=len(eligible),
-        excluded_source_test_scenario_ids=tuple(
-            item.scenario_id for item in excluded_source_test
-        ),
+        excluded_source_test_scenario_ids=tuple(item.scenario_id for item in excluded_source_test),
     )
