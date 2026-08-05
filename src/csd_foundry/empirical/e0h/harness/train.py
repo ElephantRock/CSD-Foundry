@@ -240,8 +240,7 @@ def run_training(paths: RunPaths) -> dict[str, object]:
     receipt = {
         "schema_version": "e0h-training-health/1",
         "optimizer_steps": inputs.recipe.max_steps,
-        "micro_steps": inputs.recipe.max_steps
-        * inputs.recipe.gradient_accumulation_steps,
+        "micro_steps": inputs.recipe.max_steps * inputs.recipe.gradient_accumulation_steps,
         "record_visits": record_index,
         "losses": losses,
         "non_finite_values": 0,
@@ -260,9 +259,7 @@ def run_training(paths: RunPaths) -> dict[str, object]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m csd_foundry.empirical.e0h.harness.train"
-    )
+    parser = argparse.ArgumentParser(prog="python -m csd_foundry.empirical.e0h.harness.train")
     parser.add_argument("--run-root", type=Path, required=True)
     return parser
 
