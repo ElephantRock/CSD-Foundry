@@ -141,12 +141,15 @@ class E1CurriculumArtifact:
                 self.independent_verification_evidence_digest,
                 field="independent_verification_evidence_digest",
             )
-            if (
-                self.executable_oracle_evidence_digest
-                == self.independent_verification_evidence_digest
-            ):
+            foundry_role_digests = (
+                self.artifact_digest,
+                self.manifest_digest,
+                self.executable_oracle_evidence_digest,
+                self.independent_verification_evidence_digest,
+            )
+            if len(set(foundry_role_digests)) != len(foundry_role_digests):
                 raise FamilySplitError(
-                    "Foundry executable-oracle and independent-verification evidence must differ"
+                    "Foundry artifact, manifest, oracle, and verification digests must differ"
                 )
 
     def to_dict(self) -> dict[str, object]:
@@ -226,115 +229,6 @@ class E1EvaluationArtifact:
         }
 
 
-@dataclass(frozen=True, slots=True)
-class E1CurriculumEvaluationContract:
-    """Digest-bound paired-curriculum and development-evaluation contract."""
-
-    release: str
-    source_commit: str
-    selection_contract_digest: str
-    tokenizer_revision_digest: str
-    training_scenario_ids: tuple[str, ...]
-    development_scenario_ids: tuple[str, ...]
-    development_family_count: int
-    control: E1CurriculumArtifact
-    foundry: E1CurriculumArtifact
-    evaluation: E1EvaluationArtifact
-
-    def __post_init__(self) -> None:
-        _require_nonempty_text(self.release, field="E1 curriculum/evaluation release")
-        _require_git_commit(
-            self.source_commit,
-            field="E1 curriculum/evaluation source_commit",
-        )
-        _require_digest(self.selection_contract_digest, field="selection_contract_digest")
-        _require_digest(self.tokenizer_revision_digest, field="tokenizer_revision_digest")
-        _require_canonical_ids(self.training_scenario_ids, field="training_scenario_ids")
-        _require_canonical_ids(
-            self.development_scenario_ids,
-            field="development_scenario_ids",
-        )
-        _require_positive_int(
-            self.development_family_count,
-            field="development_family_count",
-        )
-        if self.development_family_count > len(self.development_scenario_ids):
-            raise FamilySplitError(
-                "development_family_count may not exceed development scenario count"
-            )
-        overlap = sorted(set(self.training_scenario_ids) & set(self.development_scenario_ids))
-        if overlap:
-            raise FamilySplitError(
-                f"training and development scenario identifiers overlap: {overlap}"
-            )
-        if not isinstance(self.control, E1CurriculumArtifact):
-            raise FamilySplitError("control must be an E1CurriculumArtifact")
-        if not isinstance(self.foundry, E1CurriculumArtifact):
-            raise FamilySplitError("foundry must be an E1CurriculumArtifact")
-        if not isinstance(self.evaluation, E1EvaluationArtifact):
-            raise FamilySplitError("evaluation must be an E1EvaluationArtifact")
-        if self.control.arm is not E1CurriculumArm.CONTROL:
-            raise FamilySplitError("control field must contain the control curriculum")
-        if self.foundry.arm is not E1CurriculumArm.FOUNDRY:
-            raise FamilySplitError("foundry field must contain the Foundry curriculum")
-        if self.control.scenario_ids != self.training_scenario_ids:
-            raise FamilySplitError("control curriculum does not match training scenarios")
-        if self.foundry.scenario_ids != self.training_scenario_ids:
-            raise FamilySplitError("Foundry curriculum does not match training scenarios")
-        if self.evaluation.scenario_ids != self.development_scenario_ids:
-            raise FamilySplitError("evaluation artifact does not match development scenarios")
-        if self.evaluation.family_count != self.development_family_count:
-            raise FamilySplitError("evaluation family count does not match selection families")
-        if self.control.token_count != self.foundry.token_count:
-            raise FamilySplitError("control and Foundry curricula must be token matched")
-        if self.control.task_format_digest != self.foundry.task_format_digest:
-            raise FamilySplitError("control and Foundry curricula must be task-format matched")
-        if self.control.artifact_digest == self.foundry.artifact_digest:
-            raise FamilySplitError("control and Foundry curriculum artifacts must differ")
-        if self.control.manifest_digest == self.foundry.manifest_digest:
-            raise FamilySplitError("control and Foundry curriculum manifests must differ")
-        artifact_manifest_digests = (
-            self.control.artifact_digest,
-            self.control.manifest_digest,
-            self.foundry.artifact_digest,
-            self.foundry.manifest_digest,
-            self.evaluation.artifact_digest,
-            self.evaluation.manifest_digest,
-        )
-        if len(set(artifact_manifest_digests)) != len(artifact_manifest_digests):
-            raise FamilySplitError(
-                "curriculum and evaluation artifact/manifest digests must be globally distinct"
-            )
-
-    def _digest_payload(self) -> dict[str, object]:
-        return {
-            "schema_version": _CONTRACT_SCHEMA_VERSION,
-            "release": self.release,
-            "source_commit": self.source_commit,
-            "selection_contract_digest": self.selection_contract_digest,
-            "tokenizer_revision_digest": self.tokenizer_revision_digest,
-            "training_scenario_ids": list(self.training_scenario_ids),
-            "development_scenario_ids": list(self.development_scenario_ids),
-            "development_family_count": self.development_family_count,
-            "control": self.control.to_dict(),
-            "foundry": self.foundry.to_dict(),
-            "evaluation": self.evaluation.to_dict(),
-            "primary_metric_id": _PRIMARY_METRIC_ID,
-            "safety_metric_id": _SAFETY_METRIC_ID,
-            "primary_aggregation_unit": "symbolic_scenario_family",
-            "permitted_live_telemetry": list(_PERMITTED_LIVE_TELEMETRY),
-            "protected_metric_visibility": _PROTECTED_METRIC_VISIBILITY,
-            "claim_boundary": _CLAIM_BOUNDARY,
-        }
-
-    @property
-    def contract_digest(self) -> str:
-        return canonical_sha256(self._digest_payload())
-
-    def to_dict(self) -> dict[str, object]:
-        return {**self._digest_payload(), "contract_digest": self.contract_digest}
-
-
 def _scenario_ids_for_split(
     selection_contract: E1ExperimentContract,
     split: E1Split,
@@ -360,6 +254,128 @@ def _family_count_for_split(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class E1CurriculumEvaluationContract:
+    """Digest-bound paired-curriculum and development-evaluation contract."""
+
+    release: str
+    source_commit: str
+    tokenizer_revision_digest: str
+    selection_contract: E1ExperimentContract
+    control: E1CurriculumArtifact
+    foundry: E1CurriculumArtifact
+    evaluation: E1EvaluationArtifact
+
+    def __post_init__(self) -> None:
+        _require_nonempty_text(self.release, field="E1 curriculum/evaluation release")
+        _require_git_commit(
+            self.source_commit,
+            field="E1 curriculum/evaluation source_commit",
+        )
+        _require_digest(self.tokenizer_revision_digest, field="tokenizer_revision_digest")
+        if not isinstance(self.selection_contract, E1ExperimentContract):
+            raise FamilySplitError("selection_contract must be an E1ExperimentContract")
+        if self.source_commit != self.selection_contract.source_commit:
+            raise FamilySplitError("curriculum/evaluation and selection source commits must match")
+        if not isinstance(self.control, E1CurriculumArtifact):
+            raise FamilySplitError("control must be an E1CurriculumArtifact")
+        if not isinstance(self.foundry, E1CurriculumArtifact):
+            raise FamilySplitError("foundry must be an E1CurriculumArtifact")
+        if not isinstance(self.evaluation, E1EvaluationArtifact):
+            raise FamilySplitError("evaluation must be an E1EvaluationArtifact")
+
+        training_scenario_ids = self.training_scenario_ids
+        development_scenario_ids = self.development_scenario_ids
+        development_family_count = self.development_family_count
+        overlap = sorted(set(training_scenario_ids) & set(development_scenario_ids))
+        if overlap:
+            raise FamilySplitError(
+                f"training and development scenario identifiers overlap: {overlap}"
+            )
+        if self.control.arm is not E1CurriculumArm.CONTROL:
+            raise FamilySplitError("control field must contain the control curriculum")
+        if self.foundry.arm is not E1CurriculumArm.FOUNDRY:
+            raise FamilySplitError("foundry field must contain the Foundry curriculum")
+        if self.control.scenario_ids != training_scenario_ids:
+            raise FamilySplitError("control curriculum does not match selection training scenarios")
+        if self.foundry.scenario_ids != training_scenario_ids:
+            raise FamilySplitError("Foundry curriculum does not match selection training scenarios")
+        if self.evaluation.scenario_ids != development_scenario_ids:
+            raise FamilySplitError("evaluation artifact does not match selection development scenarios")
+        if self.evaluation.family_count != development_family_count:
+            raise FamilySplitError("evaluation family count does not match selection families")
+        if self.control.token_count != self.foundry.token_count:
+            raise FamilySplitError("control and Foundry curricula must be token matched")
+        if self.control.task_format_digest != self.foundry.task_format_digest:
+            raise FamilySplitError("control and Foundry curricula must be task-format matched")
+
+        oracle_digest = self.foundry.executable_oracle_evidence_digest
+        verification_digest = self.foundry.independent_verification_evidence_digest
+        if oracle_digest is None or verification_digest is None:
+            raise FamilySplitError("Foundry evidence digests must be present")
+        artifact_manifest_evidence_digests = (
+            self.control.artifact_digest,
+            self.control.manifest_digest,
+            self.foundry.artifact_digest,
+            self.foundry.manifest_digest,
+            self.evaluation.artifact_digest,
+            self.evaluation.manifest_digest,
+            oracle_digest,
+            verification_digest,
+        )
+        if len(set(artifact_manifest_evidence_digests)) != len(
+            artifact_manifest_evidence_digests
+        ):
+            raise FamilySplitError(
+                "curriculum, evaluation, oracle, and verification role digests must be globally distinct"
+            )
+
+    @property
+    def selection_contract_digest(self) -> str:
+        return self.selection_contract.contract_digest
+
+    @property
+    def training_scenario_ids(self) -> tuple[str, ...]:
+        return _scenario_ids_for_split(self.selection_contract, E1Split.TRAIN)
+
+    @property
+    def development_scenario_ids(self) -> tuple[str, ...]:
+        return _scenario_ids_for_split(self.selection_contract, E1Split.DEVELOPMENT)
+
+    @property
+    def development_family_count(self) -> int:
+        return _family_count_for_split(self.selection_contract, E1Split.DEVELOPMENT)
+
+    def _digest_payload(self) -> dict[str, object]:
+        return {
+            "schema_version": _CONTRACT_SCHEMA_VERSION,
+            "release": self.release,
+            "source_commit": self.source_commit,
+            "tokenizer_revision_digest": self.tokenizer_revision_digest,
+            "selection_contract": self.selection_contract.to_dict(),
+            "selection_contract_digest": self.selection_contract_digest,
+            "training_scenario_ids": list(self.training_scenario_ids),
+            "development_scenario_ids": list(self.development_scenario_ids),
+            "development_family_count": self.development_family_count,
+            "control": self.control.to_dict(),
+            "foundry": self.foundry.to_dict(),
+            "evaluation": self.evaluation.to_dict(),
+            "primary_metric_id": _PRIMARY_METRIC_ID,
+            "safety_metric_id": _SAFETY_METRIC_ID,
+            "primary_aggregation_unit": "symbolic_scenario_family",
+            "permitted_live_telemetry": list(_PERMITTED_LIVE_TELEMETRY),
+            "protected_metric_visibility": _PROTECTED_METRIC_VISIBILITY,
+            "claim_boundary": _CLAIM_BOUNDARY,
+        }
+
+    @property
+    def contract_digest(self) -> str:
+        return canonical_sha256(self._digest_payload())
+
+    def to_dict(self) -> dict[str, object]:
+        return {**self._digest_payload(), "contract_digest": self.contract_digest}
+
+
 def compile_e1_curriculum_evaluation_contract(
     selection_contract: E1ExperimentContract,
     *,
@@ -372,27 +388,11 @@ def compile_e1_curriculum_evaluation_contract(
 ) -> E1CurriculumEvaluationContract:
     """Bind paired curricula and shared development evaluation to one E1 selection."""
 
-    if not isinstance(selection_contract, E1ExperimentContract):
-        raise FamilySplitError("selection_contract must be an E1ExperimentContract")
-    if source_commit != selection_contract.source_commit:
-        raise FamilySplitError("curriculum/evaluation and selection source commits must match")
-    training_scenario_ids = _scenario_ids_for_split(selection_contract, E1Split.TRAIN)
-    development_scenario_ids = _scenario_ids_for_split(
-        selection_contract,
-        E1Split.DEVELOPMENT,
-    )
-    development_family_count = _family_count_for_split(
-        selection_contract,
-        E1Split.DEVELOPMENT,
-    )
     return E1CurriculumEvaluationContract(
         release=release,
         source_commit=source_commit,
-        selection_contract_digest=selection_contract.contract_digest,
         tokenizer_revision_digest=tokenizer_revision_digest,
-        training_scenario_ids=training_scenario_ids,
-        development_scenario_ids=development_scenario_ids,
-        development_family_count=development_family_count,
+        selection_contract=selection_contract,
         control=control,
         foundry=foundry,
         evaluation=evaluation,
