@@ -48,7 +48,5 @@ def validate_artifact_files(
         observed_bytes = path.read_bytes()
         if observed_bytes != item.content:
             observed_digest = hashlib.sha256(observed_bytes).hexdigest()
-            errors.append(
-                f"{item.path}: expected {item.sha256}, observed {observed_digest}"
-            )
+            errors.append(f"{item.path}: expected {item.sha256}, observed {observed_digest}")
     return E1ArtifactSetValidationReport(not errors, tuple(errors))
