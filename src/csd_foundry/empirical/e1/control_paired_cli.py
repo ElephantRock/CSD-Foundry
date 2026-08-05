@@ -56,9 +56,7 @@ def _add_paired_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m csd_foundry.empirical.e1.control_paired_cli"
-    )
+    parser = argparse.ArgumentParser(prog="python -m csd_foundry.empirical.e1.control_paired_cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     prompts = subparsers.add_parser("prompts")
@@ -80,7 +78,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _source_bundles(args: argparse.Namespace) -> tuple[
+def _source_bundles(
+    args: argparse.Namespace,
+) -> tuple[
     E1ExperimentContract,
     E1FoundryArtifactBundle,
 ]:
@@ -133,12 +133,8 @@ def _paired_bundle(
         inventory,
         release=cast(str, args.paired_release),
         source_commit=cast(str, args.source_commit),
-        primary_metric_implementation_digest=cast(
-            str, args.primary_metric_implementation_digest
-        ),
-        safety_metric_implementation_digest=cast(
-            str, args.safety_metric_implementation_digest
-        ),
+        primary_metric_implementation_digest=cast(str, args.primary_metric_implementation_digest),
+        safety_metric_implementation_digest=cast(str, args.safety_metric_implementation_digest),
     )
 
 
