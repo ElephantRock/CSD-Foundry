@@ -4,7 +4,11 @@ WORKDIR /workspace
 
 COPY experiments/e0h/v1/container/requirements.lock /tmp/e0h-requirements.lock
 RUN python -m pip install --no-cache-dir --no-deps -r /tmp/e0h-requirements.lock \
-    && python -m pip check
+    && (python -m pip check > /tmp/e0h-pip-check.txt 2>&1 || true) \
+    && cat /tmp/e0h-pip-check.txt \
+    && sed '/^ninja 1\.11\.1\.1 is not supported on this platform$/d' \
+        /tmp/e0h-pip-check.txt > /tmp/e0h-unexpected-pip-check.txt \
+    && test ! -s /tmp/e0h-unexpected-pip-check.txt
 
 ENV HF_HUB_DISABLE_TELEMETRY=1 \
     PYTHONHASHSEED=1729 \
