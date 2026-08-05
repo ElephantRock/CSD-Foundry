@@ -171,8 +171,7 @@ def test_e0h_run_release_is_deterministic_and_non_authorizing() -> None:
     assert first == second
     assert len(first.files) == 9
     assert (
-        first.file("e0h_run_contract.json").content
-        == second.file("e0h_run_contract.json").content
+        first.file("e0h_run_contract.json").content == second.file("e0h_run_contract.json").content
     )
     assert b'"gpu_execution_authorized":false' in first.file("e0h_run_contract.json").content
 
