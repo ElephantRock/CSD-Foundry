@@ -76,7 +76,11 @@ def _paired_args(inventory: Path) -> list[str]:
 
 def _invoke(monkeypatch: pytest.MonkeyPatch, *arguments: str) -> None:
     monkeypatch.setattr(sys, "argv", ["control_paired_cli", *arguments])
-    main()
+    try:
+        main()
+    except SystemExit as exc:
+        if exc.code != 0:
+            raise
 
 
 def _foundry():
