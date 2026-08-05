@@ -132,6 +132,7 @@ def _write_inventory(control_file: Path, inventory_file: Path) -> None:
                 "control_artifact_digest": hashlib.sha256(control_file.read_bytes()).hexdigest(),
                 "foundry_artifact_digest": foundry.file("foundry_train.jsonl").sha256,
                 "context_length": 128,
+                "token_count_per_arm": len(control_records) * 40,
                 "control": [
                     {"record_id": record["record_id"], "raw_token_count": 40}
                     for record in control_records
