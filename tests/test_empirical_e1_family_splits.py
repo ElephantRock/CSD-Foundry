@@ -101,6 +101,65 @@ def test_family_identity_ignores_consistent_concrete_identity_renaming() -> None
     )
 
 
+def test_family_identity_preserves_shared_reference_topology() -> None:
+    scenario = SCENARIOS["M-03"]
+    case = scenario.cases[0]
+    assert isinstance(case, ObservationCase)
+    assert len(case.state.evidence) == 1
+    assert len(case.state.bases) == 1
+
+    first_evidence = replace(case.state.evidence[0], evidence_id="EVIDENCE-1")
+    second_evidence = replace(first_evidence, evidence_id="EVIDENCE-2")
+    first_basis = replace(
+        case.state.bases[0],
+        basis_id="BASIS-1",
+        member_evidence_ids=frozenset({first_evidence.evidence_id}),
+    )
+    separate_basis = replace(
+        first_basis,
+        basis_id="BASIS-2",
+        member_evidence_ids=frozenset({second_evidence.evidence_id}),
+    )
+    shared_basis = replace(
+        first_basis,
+        basis_id="BASIS-2",
+        member_evidence_ids=frozenset({first_evidence.evidence_id}),
+    )
+    current_bases = frozenset({first_basis.basis_id, separate_basis.basis_id})
+
+    separate_state = replace(
+        case.state,
+        evidence=(first_evidence, second_evidence),
+        bases=(first_basis, separate_basis),
+        current_source_basis_ids=current_bases,
+        current_verdict_basis_ids=current_bases,
+    )
+    shared_state = replace(
+        separate_state,
+        bases=(first_basis, shared_basis),
+    )
+    expected = replace(
+        case.expected,
+        current_source_basis_ids=current_bases,
+        current_verdict_basis_ids=current_bases,
+    )
+    separate_scenario = replace(
+        scenario,
+        scenario_id="SEPARATE-TOPOLOGY",
+        cases=(replace(case, state=separate_state, expected=expected),),
+    )
+    shared_scenario = replace(
+        scenario,
+        scenario_id="SHARED-TOPOLOGY",
+        cases=(replace(case, state=shared_state, expected=expected),),
+    )
+
+    assert (
+        derive_scenario_family_identity(separate_scenario).family_digest
+        != derive_scenario_family_identity(shared_scenario).family_digest
+    )
+
+
 def test_family_identity_changes_when_executable_rules_change() -> None:
     scenario = SCENARIOS["M-01"]
     changed_rules = frozenset(sorted(scenario.rule_ids)[1:])
