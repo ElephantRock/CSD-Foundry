@@ -28,6 +28,9 @@ def _digest(label: str) -> str:
     return canonical_sha256({"label": label})
 
 
+_TOKENIZER_REVISION_DIGEST = _digest("tokenizer-revision")
+
+
 def _selection() -> E1ExperimentContract:
     return compile_e1_experiment_contract(
         SCENARIOS.values(),
@@ -110,12 +113,14 @@ def _compile(
     foundry: E1CurriculumArtifact | None = None,
     evaluation: E1EvaluationArtifact | None = None,
     source_commit: str = _SOURCE_COMMIT,
+    tokenizer_revision_digest: str = _TOKENIZER_REVISION_DIGEST,
 ) -> E1CurriculumEvaluationContract:
     selection, default_control, default_foundry, default_evaluation = _artifacts()
     return compile_e1_curriculum_evaluation_contract(
         selection,
         release=_RELEASE,
         source_commit=source_commit,
+        tokenizer_revision_digest=tokenizer_revision_digest,
         control=default_control if control is None else control,
         foundry=default_foundry if foundry is None else foundry,
         evaluation=default_evaluation if evaluation is None else evaluation,
@@ -129,6 +134,7 @@ def test_contract_binds_two_arms_development_evaluation_and_no_peeking() -> None
 
     assert contract.control.arm is E1CurriculumArm.CONTROL
     assert contract.foundry.arm is E1CurriculumArm.FOUNDRY
+    assert contract.tokenizer_revision_digest == _TOKENIZER_REVISION_DIGEST
     assert contract.control.token_count == contract.foundry.token_count
     assert contract.control.artifact_digest != contract.foundry.artifact_digest
     assert contract.control.manifest_digest != contract.foundry.manifest_digest
@@ -258,11 +264,15 @@ def test_raw_runtime_types_fail_closed() -> None:
     with pytest.raises(FamilySplitError, match="nonempty string"):
         replace(contract, release=cast(str, object()))
 
+    with pytest.raises(FamilySplitError, match="tokenizer_revision_digest"):
+        replace(contract, tokenizer_revision_digest=cast(str, object()))
+
     with pytest.raises(FamilySplitError, match="selection_contract must be"):
         compile_e1_curriculum_evaluation_contract(
             cast(E1ExperimentContract, object()),
             release=_RELEASE,
             source_commit=_SOURCE_COMMIT,
+            tokenizer_revision_digest=_TOKENIZER_REVISION_DIGEST,
             control=contract.control,
             foundry=contract.foundry,
             evaluation=contract.evaluation,
@@ -283,7 +293,7 @@ def test_source_commit_must_match_selection_contract() -> None:
         _compile(source_commit="0" * 40)
 
 
-def test_contract_digest_changes_with_artifact_or_metric_implementation() -> None:
+def test_contract_digest_changes_with_artifact_metric_or_tokenizer() -> None:
     baseline = _compile()
     _, control, _, evaluation = _artifacts()
 
@@ -296,9 +306,13 @@ def test_contract_digest_changes_with_artifact_or_metric_implementation() -> Non
             primary_metric_implementation_digest=_digest("changed-primary-metric"),
         )
     )
+    changed_tokenizer = _compile(
+        tokenizer_revision_digest=_digest("changed-tokenizer-revision")
+    )
 
     assert changed_control.contract_digest != baseline.contract_digest
     assert changed_metric.contract_digest != baseline.contract_digest
+    assert changed_tokenizer.contract_digest != baseline.contract_digest
 
 
 def test_digest_fields_and_identifier_sequences_are_canonical() -> None:
