@@ -492,9 +492,7 @@ def _validate_paired_records(
         "task_format_digest",
         "prompt_messages",
     )
-    for foundry_record, control_record in zip(
-        foundry_records, control_records, strict=True
-    ):
+    for foundry_record, control_record in zip(foundry_records, control_records, strict=True):
         control_id = str(control_record["record_id"])
         if control_record.get("paired_foundry_record_id") != foundry_record["record_id"]:
             raise E1ControlArtifactError(f"{control_id}: paired Foundry record ID mismatch")
@@ -585,9 +583,7 @@ def finalize_e1_paired_artifacts(
         scenario_ids=foundry.training_scenario_ids,
         record_count=foundry.training_record_count,
         token_count=token_count,
-        executable_oracle_evidence_digest=foundry.file(
-            "executable_oracle_evidence.json"
-        ).sha256,
+        executable_oracle_evidence_digest=foundry.file("executable_oracle_evidence.json").sha256,
         independent_verification_evidence_digest=foundry.file(
             "independent_verification_evidence.json"
         ).sha256,
@@ -629,16 +625,10 @@ def finalize_e1_paired_artifacts(
                 "selection_contract_digest": selection.contract_digest,
                 "contract": contract_file.receipt(),
                 "control_artifact": control_train.receipt(),
-                "control_manifest": control.file(
-                    "control_curriculum_manifest.json"
-                ).receipt(),
+                "control_manifest": control.file("control_curriculum_manifest.json").receipt(),
                 "foundry_artifact": foundry_train.receipt(),
-                "foundry_manifest": foundry.file(
-                    "foundry_curriculum_manifest.json"
-                ).receipt(),
-                "development_evaluation": foundry.file(
-                    "development_evaluation.jsonl"
-                ).receipt(),
+                "foundry_manifest": foundry.file("foundry_curriculum_manifest.json").receipt(),
+                "development_evaluation": foundry.file("development_evaluation.jsonl").receipt(),
                 "development_manifest": foundry.file(
                     "development_evaluation_manifest.json"
                 ).receipt(),
@@ -651,9 +641,7 @@ def finalize_e1_paired_artifacts(
                 "token_inventory": token_inventory.to_dict(),
                 "token_inventory_digest": token_inventory.inventory_digest,
                 "token_count_per_arm": token_count,
-                "protected_metric_visibility": (
-                    "after_all_predetermined_checkpoints_complete"
-                ),
+                "protected_metric_visibility": ("after_all_predetermined_checkpoints_complete"),
                 "claim_boundary": _CLAIM_BOUNDARY,
             }
         ),
@@ -729,9 +717,7 @@ def load_token_inventory(content: str) -> E1TokenCountInventory:
         result: list[TokenizedRecordCount] = []
         for index, item in enumerate(value):
             if not isinstance(item, dict) or set(item) != {"record_id", "raw_token_count"}:
-                raise E1ControlArtifactError(
-                    f"token inventory {field}[{index}] has invalid fields"
-                )
+                raise E1ControlArtifactError(f"token inventory {field}[{index}] has invalid fields")
             result.append(
                 TokenizedRecordCount(
                     record_id=cast(str, item["record_id"]),
