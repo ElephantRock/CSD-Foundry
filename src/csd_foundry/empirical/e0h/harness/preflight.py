@@ -81,9 +81,7 @@ def run_preflight(paths: RunPaths, *, mode: str, require_snapshot: bool) -> dict
             )
         names = [str(torch.cuda.get_device_name(index)) for index in range(count)]
         if any("L4" not in name for name in names):
-            raise E0HRunReleaseError(
-                f"GPU model mismatch; expected NVIDIA L4, observed={names}"
-            )
+            raise E0HRunReleaseError(f"GPU model mismatch; expected NVIDIA L4, observed={names}")
         if not bool(torch.cuda.is_bf16_supported()):
             raise E0HRunReleaseError("configured GPU does not support bf16")
         device["names"] = names
@@ -105,9 +103,7 @@ def run_preflight(paths: RunPaths, *, mode: str, require_snapshot: bool) -> dict
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m csd_foundry.empirical.e0h.harness.preflight"
-    )
+    parser = argparse.ArgumentParser(prog="python -m csd_foundry.empirical.e0h.harness.preflight")
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--mode", choices=("cpu", "gpu"), required=True)
     parser.add_argument("--require-snapshot", action="store_true")
