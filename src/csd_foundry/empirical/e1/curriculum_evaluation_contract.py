@@ -46,16 +46,26 @@ class E1LabelAuthority(StrEnum):
     EXECUTABLE_SEMANTICS = "executable_semantics"
 
 
-def _require_digest(value: str, *, field: str) -> None:
-    if _SHA256_HEX.fullmatch(value) is None:
+def _require_nonempty_text(value: object, *, field: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise FamilySplitError(f"{field} must be a nonempty string")
+
+
+def _require_digest(value: object, *, field: str) -> None:
+    if not isinstance(value, str) or _SHA256_HEX.fullmatch(value) is None:
         raise FamilySplitError(f"{field} must be a lowercase SHA-256 hex digest")
 
 
-def _require_canonical_ids(values: tuple[str, ...], *, field: str) -> None:
-    if not values:
-        raise FamilySplitError(f"{field} must be nonempty")
-    if any(not value.strip() for value in values):
-        raise FamilySplitError(f"{field} must contain only nonempty identifiers")
+def _require_positive_int(value: object, *, field: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise FamilySplitError(f"{field} must be a positive integer")
+
+
+def _require_canonical_ids(values: object, *, field: str) -> None:
+    if not isinstance(values, tuple) or not values:
+        raise FamilySplitError(f"{field} must be a nonempty tuple")
+    if any(not isinstance(value, str) or not value.strip() for value in values):
+        raise FamilySplitError(f"{field} must contain only nonempty string identifiers")
     if len(values) != len(set(values)):
         raise FamilySplitError(f"{field} must contain unique identifiers")
     if values != tuple(sorted(values)):
@@ -77,6 +87,7 @@ class E1CurriculumArtifact:
     record_count: int
     token_count: int
     executable_oracle_evidence_digest: str | None = None
+    independent_verification_evidence_digest: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.arm, E1CurriculumArm):
@@ -92,25 +103,42 @@ class E1CurriculumArtifact:
         ):
             _require_digest(value, field=field)
         _require_canonical_ids(self.scenario_ids, field="curriculum scenario_ids")
-        if self.record_count <= 0:
-            raise FamilySplitError("curriculum record_count must be positive")
-        if self.token_count <= 0:
-            raise FamilySplitError("curriculum token_count must be positive")
+        _require_positive_int(self.record_count, field="curriculum record_count")
+        _require_positive_int(self.token_count, field="curriculum token_count")
 
         if self.arm is E1CurriculumArm.CONTROL:
             if self.label_authority is not E1LabelAuthority.CONVENTIONAL_SYNTHETIC:
                 raise FamilySplitError("control labels must be conventional synthetic labels")
             if self.executable_oracle_evidence_digest is not None:
                 raise FamilySplitError("control curriculum may not cite executable-oracle evidence")
+            if self.independent_verification_evidence_digest is not None:
+                raise FamilySplitError(
+                    "control curriculum may not cite Foundry independent-verification evidence"
+                )
         else:
             if self.label_authority is not E1LabelAuthority.EXECUTABLE_SEMANTICS:
                 raise FamilySplitError("Foundry labels must come from executable semantics")
             if self.executable_oracle_evidence_digest is None:
                 raise FamilySplitError("Foundry curriculum requires executable-oracle evidence")
+            if self.independent_verification_evidence_digest is None:
+                raise FamilySplitError(
+                    "Foundry curriculum requires independent-verification evidence"
+                )
             _require_digest(
                 self.executable_oracle_evidence_digest,
                 field="executable_oracle_evidence_digest",
             )
+            _require_digest(
+                self.independent_verification_evidence_digest,
+                field="independent_verification_evidence_digest",
+            )
+            if (
+                self.executable_oracle_evidence_digest
+                == self.independent_verification_evidence_digest
+            ):
+                raise FamilySplitError(
+                    "Foundry executable-oracle and independent-verification evidence must differ"
+                )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -125,6 +153,9 @@ class E1CurriculumArtifact:
             "record_count": self.record_count,
             "token_count": self.token_count,
             "executable_oracle_evidence_digest": self.executable_oracle_evidence_digest,
+            "independent_verification_evidence_digest": (
+                self.independent_verification_evidence_digest
+            ),
         }
 
 
@@ -164,10 +195,8 @@ class E1EvaluationArtifact:
         ):
             _require_digest(value, field=field)
         _require_canonical_ids(self.scenario_ids, field="evaluation scenario_ids")
-        if self.record_count <= 0:
-            raise FamilySplitError("evaluation record_count must be positive")
-        if self.family_count <= 0:
-            raise FamilySplitError("evaluation family_count must be positive")
+        _require_positive_int(self.record_count, field="evaluation record_count")
+        _require_positive_int(self.family_count, field="evaluation family_count")
         if self.family_count > len(self.scenario_ids):
             raise FamilySplitError("evaluation family_count may not exceed scenario count")
 
@@ -201,18 +230,21 @@ class E1CurriculumEvaluationContract:
     evaluation: E1EvaluationArtifact
 
     def __post_init__(self) -> None:
-        if not self.release.strip():
-            raise FamilySplitError("E1 curriculum/evaluation release must be nonempty")
-        if not self.source_commit.strip():
-            raise FamilySplitError("E1 curriculum/evaluation source_commit must be nonempty")
+        _require_nonempty_text(self.release, field="E1 curriculum/evaluation release")
+        _require_nonempty_text(
+            self.source_commit,
+            field="E1 curriculum/evaluation source_commit",
+        )
         _require_digest(self.selection_contract_digest, field="selection_contract_digest")
         _require_canonical_ids(self.training_scenario_ids, field="training_scenario_ids")
         _require_canonical_ids(
             self.development_scenario_ids,
             field="development_scenario_ids",
         )
-        if self.development_family_count <= 0:
-            raise FamilySplitError("development_family_count must be positive")
+        _require_positive_int(
+            self.development_family_count,
+            field="development_family_count",
+        )
         if self.development_family_count > len(self.development_scenario_ids):
             raise FamilySplitError(
                 "development_family_count may not exceed development scenario count"
@@ -244,6 +276,10 @@ class E1CurriculumEvaluationContract:
             raise FamilySplitError("control and Foundry curricula must be token matched")
         if self.control.task_format_digest != self.foundry.task_format_digest:
             raise FamilySplitError("control and Foundry curricula must be task-format matched")
+        if self.control.artifact_digest == self.foundry.artifact_digest:
+            raise FamilySplitError("control and Foundry curriculum artifacts must differ")
+        if self.control.manifest_digest == self.foundry.manifest_digest:
+            raise FamilySplitError("control and Foundry curriculum manifests must differ")
 
     def _digest_payload(self) -> dict[str, object]:
         return {
@@ -309,6 +345,8 @@ def compile_e1_curriculum_evaluation_contract(
 ) -> E1CurriculumEvaluationContract:
     """Bind paired curricula and shared development evaluation to one E1 selection."""
 
+    if not isinstance(selection_contract, E1ExperimentContract):
+        raise FamilySplitError("selection_contract must be an E1ExperimentContract")
     if source_commit != selection_contract.source_commit:
         raise FamilySplitError("curriculum/evaluation and selection source commits must match")
     training_scenario_ids = _scenario_ids_for_split(selection_contract, E1Split.TRAIN)
