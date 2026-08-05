@@ -5,7 +5,7 @@
 **Date:** 2026-08-05  
 **Approved:** 2026-08-05  
 **Approval issue:** #67  
-**Approval PR:** pending  
+**Approval PR:** #68  
 **Governing architecture:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`  
 **Distributional doctrine:** `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`
 
