@@ -7,19 +7,25 @@ from csd_foundry.empirical.e0h.run_release import (
     E0HRunReleaseBundle,
     E0HRunReleaseError,
     E0HRunReleaseInputs,
-    EvaluationAccessContract,
     ImmutableComponent,
-    SoftwareEnvironment,
-    StorageContract,
-    TrainingRecipe,
     load_e0h_run_release_inputs,
     validate_e0h_run_release,
     write_e0h_run_release,
 )
 from csd_foundry.empirical.e0h.seed_binding import SeedDatasetBinding
+from csd_foundry.empirical.e0h.strict_inputs import (
+    EvaluationAccessContract,
+    SoftwareEnvironment,
+    StorageContract,
+    TrainingRecipe,
+)
 
 # Preserve direct submodule imports while enforcing the hardened implementations.
 _run_release.SeedDatasetBinding = SeedDatasetBinding  # type: ignore[misc]
+_run_release.SoftwareEnvironment = SoftwareEnvironment  # type: ignore[misc]
+_run_release.TrainingRecipe = TrainingRecipe  # type: ignore[misc]
+_run_release.StorageContract = StorageContract  # type: ignore[misc]
+_run_release.EvaluationAccessContract = EvaluationAccessContract  # type: ignore[misc]
 _run_release.compile_e0h_run_release = compile_e0h_run_release
 
 __all__ = [
