@@ -22,6 +22,10 @@ _SOURCE_SPLIT_POLICY = {
     "validation": E1Split.DEVELOPMENT.value,
     "test": "excluded_blind",
 }
+_EXPECTED_SOURCE_SPLIT = {
+    E1Split.TRAIN: "train",
+    E1Split.DEVELOPMENT: "validation",
+}
 _CLAIM_BOUNDARY = (
     "This contract fixes E1 candidate admission and symbolic-family train/development "
     "isolation while excluding the source test split from identity derivation. It does "
@@ -51,9 +55,19 @@ class E1ExperimentContract:
             raise FamilySplitError("E1 experiment requires eligible scenarios")
         if self.excluded_blind_scenario_count <= 0:
             raise FamilySplitError("E1 experiment requires an excluded blind source split")
+
         assigned_count = sum(len(item.scenario_ids) for item in self.split_manifest.assignments)
         if assigned_count != self.eligible_scenario_count:
             raise FamilySplitError("eligible scenario count does not match split assignments")
+
+        for assignment in self.split_manifest.assignments:
+            expected_source_split = _EXPECTED_SOURCE_SPLIT[assignment.split]
+            if assignment.source_splits != (expected_source_split,):
+                raise FamilySplitError(
+                    "E1 assignment contradicts the source split policy: "
+                    f"{assignment.family_digest} maps {assignment.source_splits} "
+                    f"to {assignment.split.value}"
+                )
 
     def _digest_payload(self) -> dict[str, object]:
         return {
