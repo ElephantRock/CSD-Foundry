@@ -138,6 +138,14 @@ def test_contract_binds_two_arms_development_evaluation_and_no_peeking() -> None
     assert contract.control.token_count == contract.foundry.token_count
     assert contract.control.artifact_digest != contract.foundry.artifact_digest
     assert contract.control.manifest_digest != contract.foundry.manifest_digest
+    assert contract.evaluation.artifact_digest not in {
+        contract.control.artifact_digest,
+        contract.foundry.artifact_digest,
+    }
+    assert contract.evaluation.manifest_digest not in {
+        contract.control.manifest_digest,
+        contract.foundry.manifest_digest,
+    }
     assert contract.foundry.executable_oracle_evidence_digest is not None
     assert contract.foundry.independent_verification_evidence_digest is not None
     assert contract.evaluation.split is E1Split.DEVELOPMENT
@@ -167,14 +175,20 @@ def test_contract_rejects_token_or_task_format_mismatch() -> None:
         _compile(foundry=replace(foundry, task_format_digest=_digest("other-format")))
 
 
-def test_contract_rejects_identical_control_and_foundry_artifacts() -> None:
-    _, control, foundry, _ = _artifacts()
+def test_contract_rejects_training_or_evaluation_artifact_reuse() -> None:
+    _, control, foundry, evaluation = _artifacts()
 
     with pytest.raises(FamilySplitError, match="artifacts must differ"):
         _compile(foundry=replace(foundry, artifact_digest=control.artifact_digest))
 
     with pytest.raises(FamilySplitError, match="manifests must differ"):
         _compile(foundry=replace(foundry, manifest_digest=control.manifest_digest))
+
+    with pytest.raises(FamilySplitError, match="evaluation artifact must differ"):
+        _compile(evaluation=replace(evaluation, artifact_digest=control.artifact_digest))
+
+    with pytest.raises(FamilySplitError, match="evaluation manifest must differ"):
+        _compile(evaluation=replace(evaluation, manifest_digest=foundry.manifest_digest))
 
 
 def test_contract_rejects_curriculum_or_evaluation_scenario_drift() -> None:
@@ -242,7 +256,7 @@ def test_label_authority_and_verification_evidence_are_arm_specific() -> None:
         )
 
 
-def test_raw_runtime_types_fail_closed() -> None:
+def test_raw_runtime_types_and_source_commit_fail_closed() -> None:
     selection, control, _, evaluation = _artifacts()
     contract = _compile()
 
@@ -263,6 +277,9 @@ def test_raw_runtime_types_fail_closed() -> None:
 
     with pytest.raises(FamilySplitError, match="nonempty string"):
         replace(contract, release=cast(str, object()))
+
+    with pytest.raises(FamilySplitError, match="Git commit digest"):
+        replace(contract, source_commit="main")
 
     with pytest.raises(FamilySplitError, match="tokenizer_revision_digest"):
         replace(contract, tokenizer_revision_digest=cast(str, object()))
