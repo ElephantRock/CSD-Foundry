@@ -696,9 +696,7 @@ def compile_e1_foundry_artifacts(
                 "family_count": development_family_count,
                 "record_count": len(development_records),
                 "artifact": development_file.receipt(),
-                "metric_execution_status": (
-                    "not_executed_protected_until_checkpoints_complete"
-                ),
+                "metric_execution_status": ("not_executed_protected_until_checkpoints_complete"),
             }
         ),
     )
