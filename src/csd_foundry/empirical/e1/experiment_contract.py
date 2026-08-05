@@ -86,6 +86,8 @@ class E1ExperimentContract:
             )
 
         for assignment in self.split_manifest.assignments:
+            if not isinstance(assignment.split, E1Split):
+                raise FamilySplitError("E1 assignment split must be an E1Split")
             expected_source_split = _EXPECTED_SOURCE_SPLIT[assignment.split]
             if assignment.source_splits != (expected_source_split,):
                 raise FamilySplitError(
