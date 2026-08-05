@@ -1,5 +1,7 @@
 """Tests for whole-file canonical E1 control response parsing."""
 
+import json
+
 import pytest
 
 from csd_foundry.empirical.e1.control_paired_compiler import E1ControlArtifactError
@@ -51,12 +53,17 @@ def test_control_response_jsonl_rejects_crlf_and_unknown_fields() -> None:
 
 
 def test_control_response_jsonl_rejects_noncanonical_object_bytes() -> None:
-    target = canonical_json_text({"decision": "x"})
     content = (
-        '{"target":'
-        + repr(target).replace("'", '"')
-        + ',"record_id":"e1-control/train/M-01/case"}\n'
+        json.dumps(
+            {
+                "target": canonical_json_text({"decision": "x"}),
+                "record_id": "e1-control/train/M-01/case",
+            },
+            ensure_ascii=False,
+            separators=(", ", ": "),
+        )
+        + "\n"
     ).encode("utf-8")
 
-    with pytest.raises((E1ControlArtifactError, ValueError)):
+    with pytest.raises(E1ControlArtifactError, match="not canonical"):
         load_conventional_responses(content)
