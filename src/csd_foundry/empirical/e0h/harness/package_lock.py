@@ -111,7 +111,8 @@ def verify_python_lock(paths: RunPaths, inputs: E0HRunReleaseInputs) -> dict[str
         observed = cast(str, package["version"]).split("+", maxsplit=1)[0]
         if observed != expected:
             raise E0HRunReleaseError(
-                f"python lock {package_name} version mismatch; expected={expected}, observed={observed}"
+                f"python lock {package_name} version mismatch; "
+                f"expected={expected}, observed={observed}"
             )
 
     if requirements_path.is_symlink() or not requirements_path.is_file():
@@ -144,7 +145,8 @@ def verify_installed_python_lock(
             raise E0HRunReleaseError(f"locked package is not installed: {name}") from exc
         if version != expected:
             raise E0HRunReleaseError(
-                f"installed package version mismatch for {name}; expected={expected}, observed={version}"
+                f"installed package version mismatch for {name}; "
+                f"expected={expected}, observed={version}"
             )
         observed[name] = version
     return observed
