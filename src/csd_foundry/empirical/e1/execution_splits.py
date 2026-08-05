@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from csd_foundry.empirical.e1 import scenario_splits as _base
+from csd_foundry.scenarios.runner import run_scenario
 from csd_foundry.scenarios.spec import (
     ObservationCase,
     RejectedTransitionCase,
@@ -101,16 +102,36 @@ def _sequence_execution_coordinates(spec: ScenarioSpec) -> list[dict[str, object
     return coordinates
 
 
+def _validate_sequence_execution(spec: ScenarioSpec) -> None:
+    """Reject sequence material that the canonical scenario runner rejects."""
+
+    if spec.mode is not ScenarioMode.SEQUENCE:
+        return
+
+    result = run_scenario(spec)
+    if result.accepted:
+        return
+
+    failures = [
+        f"{case.case_id}: {'; '.join(case.details)}"
+        for case in result.cases
+        if not case.accepted
+    ]
+    raise FamilySplitError("sequence scenario is not executable: " + " | ".join(failures))
+
+
 def derive_scenario_family_identity(spec: ScenarioSpec) -> ScenarioFamilyIdentity:
     """Derive a family identity aligned with actual scenario execution semantics."""
 
+    sequence_coordinates = _sequence_execution_coordinates(spec)
+    _validate_sequence_execution(spec)
     base_identity = _base.derive_scenario_family_identity(spec)
     family_digest = canonical_sha256(
         {
             "schema_version": _EXECUTION_TOPOLOGY_SCHEMA,
             "base_family_digest": base_identity.family_digest,
             "control_topology": _canonical_control_topology(spec),
-            "sequence_execution_coordinates": _sequence_execution_coordinates(spec),
+            "sequence_execution_coordinates": sequence_coordinates,
         }
     )
     return ScenarioFamilyIdentity(
