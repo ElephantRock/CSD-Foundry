@@ -1,11 +1,11 @@
 # CSD Foundry Strategic Roadmap
 
 **Status:** Active program roadmap  
-**Version:** 1.2  
-**Date:** 2026-08-04  
-**Approved:** 2026-08-04  
-**Approval PR:** #62  
-**Approval commit:** `7cd16463eee6bcc4f815aaee81f9eef6b8d0d760`  
+**Version:** 1.3  
+**Date:** 2026-08-05  
+**Approved:** 2026-08-05  
+**Approval issue:** #67  
+**Approval PR:** pending  
 **Governing architecture:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`  
 **Distributional doctrine:** `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`
 
@@ -64,7 +64,7 @@ The repository has not yet completed:
 - structural canonicalization and holdouts;
 - executable Distributional Assurance schemas, validators, contracts, contrasts, or reports;
 - a canonical Verified Cognition Episode and data compilers;
-- an empirical model-training pilot;
+- the E0-H harness qualification, E1 executable-semantics probe, or final scale confirmation;
 - a domain-neutral microkernel/domain-pack split;
 - CognitionDL or the Domain Entry Compiler;
 - the Reasoning ABI and oracle federation;
@@ -80,6 +80,12 @@ Phase 2A  Implement v0.5 canonicalization and typed contracts
 Phase 2B  Implement validated-event admission
 Phase 2C  Implement atomic temporal claim and completion
 
+Parallel empirical feedback
+E0-H      Qualify the training and evaluation harness without an efficacy claim
+E1        Test whether executable Foundry semantics produce learning value
+Stage probes
+          Run only when a stage materially changes model-consumable semantics
+
 Current CSD milestone
 Phase 3   Implement evidence, assumption, and alternative-model registries
 Phase 4   Implement the separate disposition oracle and quarantine
@@ -88,7 +94,7 @@ Phase 6   Implement event-triggered release and promotion
 Phase 7   Build performance harness and constraint-valid synthesis
 Phase 8   Add structural and distributional assurance
 Phase 9   Build Verified Cognition Episode and data compilers
-Phase 10  Run the empirical model-training pilot
+Phase 10  Run final scale-confirmation experiment
 Phase 11  Freeze scale policies and compile the governed corpus
 Phase 12  Deploy runtime governance and failure/distribution-gap harvesting
 
@@ -101,9 +107,30 @@ Phase 17  Implement the governed exploration plane and Open Reasoning Episode
 Phase 18  Connect domain and distribution gaps to progressive formalization
 ```
 
+E0-H and E1 may begin before Phase 3 is complete. E1 data and evaluation compilation may proceed in parallel with E0-H; GPU execution of E1 begins only after E0-H establishes that the training, checkpoint, evaluation, and evidence handoff path works. Later learning probes attach only to stages that materially change model-consumable semantics. Infrastructure-only changes continue to rely on deterministic, adversarial, concurrency, restart, and publication tests rather than automatic retraining.
+
 Phases 13–18 must not interrupt completion of the governed CSD vertical slice. New v0.5 work should avoid unnecessary CSD-specific coupling where the domain-neutral boundary is already clear, but premature refactoring is prohibited.
 
 Distributional Assurance implementation belongs in Phases 7–12. Its documentation work may proceed earlier, but its executable work may not displace Phases 3–6.
+
+### 3.1 Minimal empirical loop
+
+The empirical track is a bounded feedback instrument for Foundry engineering, not a second governance system.
+
+1. Run a learning probe only when a stage introduces or materially changes a model-consumable semantic distinction.
+2. The default probe compares the previous-stage curriculum with the previous-stage curriculum plus the new-stage data.
+3. Broader controls are reserved for major architectural forks. They require an explicit costed proposal and human approval before additional GPU work begins.
+4. Do not inspect primary evaluation metrics during training. Live monitoring is limited to infrastructure and optimization health such as utilization, memory, throughput, crashes, non-finite loss, training loss, checkpoint creation, and artifact publication.
+5. Early stage results are directional engineering evidence. They may be classified as promising, harmful, no observed signal, or technically invalid; they do not establish a confirmatory scientific claim.
+6. One aggregate empirical GPU budget must be frozen in the E0-H issue before any GPU execution. One formal continuation review occurs when approximately half of that budget has been spent. An ambiguous result does not automatically authorize additional compute.
+7. Development evaluation may be used during iteration. One final blind holdout remains outside the working repository until Phase 10 and is introduced by project authority for scale confirmation.
+8. Phase 10 must test whether the selected small-model effect transfers, attenuates, amplifies, vanishes, or reverses at the target confirmation scale.
+
+E0-H is limited to harness qualification. It may test loading, tokenization, optimization health, checkpoint production, deterministic evaluation execution on smoke fixtures, artifact publication, and receipt completeness. It may not inspect protected task metrics or support a claim that Foundry data improves reasoning.
+
+E1 is the first substantive learning-value test. It uses the completed executable kernel to compare a bounded executable-semantics curriculum against a bounded control under a fixed small-model recipe, with one primary capability metric and one safety metric. Its purpose is to decide whether the current semantic representation merits continued empirical investment, not to authorize scale.
+
+**Empirical governance freeze:** no new empirical policy, tier, schema, approval layer, statistical mechanism, evaluation-access class, or governance artifact may be introduced unless it addresses an observed failure, a documented near-miss, or a concrete decision that this minimal protocol cannot resolve. Clarification is permitted; expansion of the control surface is not.
 
 ## 4. Program gates
 
@@ -151,7 +178,7 @@ Proceed to structural and distributional assurance only after:
 
 ### Gate C2 — Structural readiness
 
-Proceed to the empirical model pilot only after:
+Proceed to final scale confirmation only after:
 
 - state, basis, dependency, event, assumption, disposition, and trajectory structures are canonicalized;
 - train, validation, and test splits are structurally isolated;
@@ -159,9 +186,11 @@ Proceed to the empirical model pilot only after:
 - right-answer/wrong-basis defects are represented and killed;
 - structural holdout identities are frozen and reproducible.
 
+These requirements do not prohibit bounded development probes against development evaluation before Gate C2.
+
 ### Gate C3 — Distributional readiness
 
-Proceed to the empirical model pilot only after:
+Proceed to final scale confirmation only after:
 
 - a versioned descriptor ontology and distribution contract exist;
 - required marginal, pairwise, selected three-way, and risk-selected higher-order cells are resolved;
@@ -173,10 +202,13 @@ Proceed to the empirical model pilot only after:
 - distributional holdouts remain isolated;
 - no unresolved critical distributional gap remains.
 
+These requirements do not prohibit bounded development probes against development evaluation before Gate C3.
+
 ### Gate D — Scale authorized
 
-Proceed to release-scale generation only after the controlled model pilot demonstrates:
+Proceed to release-scale generation only after the final scale-confirmation experiment demonstrates:
 
+- that the selected effect transfers credibly to the target confirmation scale rather than vanishing or reversing;
 - structural-holdout improvement;
 - reduced forbidden inference;
 - controlled abstention and over-conservatism;
@@ -192,7 +224,7 @@ Proceed to release-scale generation only after the controlled model pilot demons
 - reproducible results;
 - zero unresolved critical mutation escapes.
 
-Training loss, aggregate accuracy, row count, or one scalar entropy score cannot authorize scale.
+Training loss, aggregate accuracy, row count, one scalar entropy score, or a positive small-model probe cannot authorize scale.
 
 ### Gate E — Runtime deployment authorized
 
@@ -515,77 +547,34 @@ Compile each episode into:
 
 Every rendered artifact must trace to one immutable episode digest. Rendered wording cannot change semantic or distributional identity without a new episode or explicit rendering contract.
 
-## 10. Phase 10 — Empirical model pilot
+## 10. Phase 10 — Final scale confirmation
 
-### 10.1 Training-method comparison
+Phase 10 is not the first empirical contact with Foundry data. E0-H, E1, and bounded semantic-stage probes provide earlier engineering feedback using development evaluation and a fixed low-cost reference recipe.
 
-Compare:
+The final experiment must be prospectively specified, adequately powered for its primary decision, and evaluated once against the blind final holdout. It must compare the selected Foundry curriculum at the target confirmation scale against the minimum control needed to determine whether the observed benefit is attributable to the curriculum rather than additional tokens or training alone.
 
-1. base model;
-2. SFT;
-3. SFT plus preference optimization;
-4. SFT plus trained verifier;
-5. verifiable-reward training when stable.
+The primary scale conclusion must classify the small-model effect as one of:
 
-### 10.2 Corpus ablations
+- transfers;
+- attenuates;
+- amplifies;
+- capacity-limited;
+- small-model-specific;
+- vanishes;
+- reverses;
+- unresolved.
 
-For the selected model methods, compare controlled corpus variants:
+Phase 10 evaluates the semantic, structural, distributional, behavioral, transfer, exposure, and economic criteria defined by Gates C2, C3, and D. It may reject scale authorization even when earlier development probes were positive.
 
-1. current structural baseline;
-2. surface-expanded baseline;
-3. scenario-world contract coverage;
-4. causal contrast coverage;
-5. failure-and-repair coverage;
-6. full Distributional Assurance vertical slice.
+Primary holdout metrics may not be inspected during target-scale training. Formal statistical thresholds, multiplicity treatment, model revisions, token budget, seeds, stopping rule, and acceptance criteria must be frozen before the blind holdout is introduced. Human approval is required before target-scale GPU execution and before a Gate D verdict.
 
-Control accepted episode or token volume where practical.
-
-### 10.3 Primary semantic and structural metrics
-
-- forbidden-inference rate;
-- evidence-impact accuracy;
-- basis-survival accuracy;
-- restoration integrity;
-- assumption-boundary accuracy;
-- right-answer/wrong-basis rejection;
-- verifier discrimination;
-- in-distribution versus structural-holdout gap.
-
-### 10.4 Distributional and behavioral metrics
-
-- invariance consistency;
-- counterfactual sensitivity;
-- ambiguity detection;
-- clarification precision;
-- missed clarification;
-- unnecessary clarification;
-- abstention and over-abstention;
-- failure localization;
-- minimal-repair fidelity;
-- preservation of unaffected valid work;
-- tool recovery and escalation;
-- unseen-world transfer;
-- leave-source-out and leave-process-out transfer;
-- temporal and tool-environment transfer;
-- worst-group and rare-cell performance;
-- clean-case regression.
-
-### 10.5 Economics and exposure
-
-- cost per accepted episode;
-- token and tool-call cost;
-- retry and branching overhead;
-- planned versus actual training mixture;
-- cumulative optimizer exposure by contract cell, source, process, failure, and contrast family;
-- checkpoint retention and forgetting.
-
-Do not authorize scale from training loss, aggregate accuracy, output style, corpus inclusion, or one diversity score alone.
+Do not authorize scale from training loss, aggregate accuracy, output style, corpus inclusion, one diversity score, or small-model performance alone.
 
 ## 11. Phases 11–12 — Governed scale and runtime loop
 
 ### Phase 11 — Measured scale-policy freeze
 
-After pilot evidence, freeze only the policies justified by measurements:
+After scale-confirmation evidence, freeze only the policies justified by measurements:
 
 - performance SLOs;
 - retry budgets;
@@ -748,20 +737,23 @@ No workstream may silently absorb another workstream's authority. Distributional
 
 ## 15. Immediate repository sequence
 
-1. Implement evidence-unit, assumption, and alternative-model registry reducers and roots.
-2. Implement the separate disposition oracle and synchronous quarantine.
-3. Execute M-03 and M-15 through the committed governed pipeline.
-4. Implement event-triggered release and promotion.
-5. Benchmark the governed vertical slice and freeze reference pilot policies only from measurements.
-6. Resume planner, constructor, rollout, semantic coverage, and structural assurance.
-7. Implement the Distributional Assurance contract, causal contrast, failure ecology, provenance, and report vertical slice over M-03/M-15.
-8. Extend the Verified Cognition Episode and compilers with epistemic, interaction, and distributional views.
-9. Run controlled corpus ablations and the empirical model pilot before authorizing release-scale generation.
-10. Freeze scale policies only from semantic, structural, distributional, transfer, and economic evidence.
-11. After the governed CSD vertical slice, extract the domain-neutral microkernel and make CSD the first domain pack.
-12. Implement the minimal domain compiler and Reasoning ABI.
-13. Prove one second domain and one cross-domain composition.
-14. Implement a minimal governed exploration vertical slice.
+1. Qualify E0-H as a bounded GPU harness exercise; freeze the aggregate empirical GPU budget in that issue before any GPU execution.
+2. Compile the E1 executable-semantics curriculum and development evaluation in parallel; execute E1 only after E0-H passes.
+3. Complete the current assumption-policy work and implement evidence-unit, assumption, and alternative-model registry reducers and roots.
+4. Implement the separate disposition oracle and synchronous quarantine.
+5. Execute M-03 and M-15 through the committed governed pipeline.
+6. Implement event-triggered release and promotion.
+7. Benchmark the governed vertical slice and freeze reference scale policies only from measurements.
+8. Resume planner, constructor, rollout, semantic coverage, and structural assurance.
+9. Implement the Distributional Assurance contract, causal contrast, failure ecology, provenance, and report vertical slice over M-03/M-15.
+10. Extend the Verified Cognition Episode and compilers with epistemic, interaction, and distributional views.
+11. Run bounded semantic-stage probes only when model-consumable outputs materially change.
+12. Run Phase 10 final scale confirmation before authorizing release-scale generation.
+13. Freeze scale policies only from semantic, structural, distributional, transfer, and economic evidence.
+14. After the governed CSD vertical slice, extract the domain-neutral microkernel and make CSD the first domain pack.
+15. Implement the minimal domain compiler and Reasoning ABI.
+16. Prove one second domain and one cross-domain composition.
+17. Implement a minimal governed exploration vertical slice.
 
 ## 16. Explicit deferrals
 
@@ -782,7 +774,9 @@ Do not implement prematurely:
 - model architecture or loss changes before corpus, sampling, and evaluation causes are isolated;
 - unrestricted online weight adaptation from deployment interactions;
 - broad multi-domain expansion before the microkernel, pack, ABI, and assurance contracts are proven;
-- open-ended curriculum scaling before epistemic-promotion failures are mechanically detectable.
+- open-ended curriculum scaling before epistemic-promotion failures are mechanically detectable;
+- automatic full-control training studies after every implementation stage;
+- additional empirical governance layers without an observed failure, documented near-miss, or concrete unresolved decision.
 
 ## 17. Strategic position
 
@@ -794,4 +788,4 @@ The program has three successive milestones:
 
 > **Milestone C — Extract the multi-domain, oracle-federated, distributionally assured, governed-exploration platform.**
 
-This ordering protects deterministic replay, semantic/disposition separation, auditable uncertainty, append-only correction, distributional claim boundaries, and exact provenance while preserving a credible path to broad reasoning coverage.
+This ordering protects deterministic replay, semantic/disposition separation, auditable uncertainty, append-only correction, distributional claim boundaries, exact provenance, and empirical feedback while preserving a credible path to broad reasoning coverage.
