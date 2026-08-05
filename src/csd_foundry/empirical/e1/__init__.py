@@ -56,9 +56,9 @@ from csd_foundry.empirical.e1.token_inventory_io import load_token_inventory
 
 # Preserve direct imports from the original compiler module while making every
 # public I/O entry point use the single hardened implementation.
-setattr(_control_paired_compiler, "write_artifact_files", write_artifact_files)
-setattr(_control_paired_compiler, "load_conventional_responses", load_conventional_responses)
-setattr(_control_paired_compiler, "load_token_inventory", load_token_inventory)
+_control_paired_compiler.write_artifact_files = write_artifact_files
+_control_paired_compiler.load_conventional_responses = load_conventional_responses
+_control_paired_compiler.load_token_inventory = load_token_inventory
 
 __all__ = [
     "ArtifactFile",
