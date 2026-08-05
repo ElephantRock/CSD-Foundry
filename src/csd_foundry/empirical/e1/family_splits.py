@@ -65,10 +65,7 @@ def _evidence_shape(item: Evidence, logical_time: int) -> dict[str, object]:
 
 
 def _evidence_shape_map(state: ControlState) -> dict[str, dict[str, object]]:
-    return {
-        item.evidence_id: _evidence_shape(item, state.logical_time)
-        for item in state.evidence
-    }
+    return {item.evidence_id: _evidence_shape(item, state.logical_time) for item in state.evidence}
 
 
 def _basis_shape(
@@ -109,7 +106,9 @@ def _referenced_shapes(
         try:
             result.append(shapes[identifier])
         except KeyError as exc:
-            raise FamilySplitError(f"{field_name} references unknown identity {identifier}") from exc
+            raise FamilySplitError(
+                f"{field_name} references unknown identity {identifier}"
+            ) from exc
     result.sort(key=canonical_sha256)
     return result
 
@@ -185,32 +184,25 @@ def _state_shape(state: ControlState) -> dict[str, object]:
 def _event_shape(event: CsdEvent, before: ControlState | None) -> dict[str, object]:
     if isinstance(event, DependencyChange):
         affected_evidence = 0
-        shared_degree = 0
         if before is not None:
             affected_evidence = sum(
                 event.dependency_id in item.dependencies for item in before.evidence
-            )
-            shared_degree = sum(
-                event.dependency_id in item.dependencies
-                for item in before.evidence
-                for _ in (0,)
             )
         return {
             "event_type": type(event).__name__,
             "apparent_direction": event.apparent_direction,
             "affected_evidence_count": affected_evidence,
-            "dependency_incidence": shared_degree,
         }
 
     if isinstance(event, Reassess):
         logical_time = 0 if before is None else before.logical_time
-        evidence_shapes = {
+        existing_evidence = {} if before is None else _evidence_shape_map(before)
+        new_evidence_shapes = {
             item.evidence_id: _evidence_shape(item, logical_time) for item in event.new_evidence
         }
-        basis_shapes = [
-            _basis_shape(item, evidence_shapes) for item in event.new_bases
-        ]
-        new_evidence = list(evidence_shapes.values())
+        all_evidence = {**existing_evidence, **new_evidence_shapes}
+        basis_shapes = [_basis_shape(item, all_evidence) for item in event.new_bases]
+        new_evidence = list(new_evidence_shapes.values())
         new_evidence.sort(key=canonical_sha256)
         basis_shapes.sort(key=canonical_sha256)
         return {
@@ -273,11 +265,9 @@ def _event_shape(event: CsdEvent, before: ControlState | None) -> dict[str, obje
 
 def _expectation_shape(
     expected: StateExpectation,
-    reference_state: ControlState,
+    evidence_shapes: dict[str, dict[str, object]],
+    basis_shapes: dict[str, dict[str, object]],
 ) -> dict[str, object]:
-    evidence_shapes = _evidence_shape_map(reference_state)
-    basis_shapes = _basis_shape_map(reference_state, evidence_shapes)
-
     evidence_statuses = [
         {
             "evidence": _referenced_shapes((evidence_id,), evidence_shapes, "evidence_statuses")[0],
@@ -335,9 +325,28 @@ def _expectation_shape(
     }
 
 
+def _transition_reference_shapes(
+    case: TransitionCase,
+) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+    evidence_shapes = _evidence_shape_map(case.before)
+    basis_shapes = _basis_shape_map(case.before, evidence_shapes)
+
+    if isinstance(case.event, Reassess):
+        logical_time = case.before.logical_time
+        for item in case.event.new_evidence:
+            evidence_shapes[item.evidence_id] = _evidence_shape(item, logical_time)
+        for item in case.event.new_bases:
+            basis_shapes[item.basis_id] = _basis_shape(item, evidence_shapes)
+    elif isinstance(case.event, RetireControl):
+        item = case.event.retirement_evidence
+        evidence_shapes[item.evidence_id] = _evidence_shape(item, case.before.logical_time)
+
+    return evidence_shapes, basis_shapes
+
+
 def _transition_shape(case: TransitionCase) -> dict[str, object]:
     before_evidence = _evidence_shape_map(case.before)
-    before_bases = _basis_shape_map(case.before, before_evidence)
+    reference_evidence, reference_bases = _transition_reference_shapes(case)
     invalidated: list[dict[str, object]] | None = None
     if case.expected_invalidated_evidence is not None:
         invalidated = _referenced_shapes(
@@ -349,14 +358,18 @@ def _transition_shape(case: TransitionCase) -> dict[str, object]:
     if case.expected_surviving_bases is not None:
         surviving = _referenced_shapes(
             case.expected_surviving_bases,
-            before_bases,
+            reference_bases,
             "expected_surviving_bases",
         )
     return {
         "case_kind": "transition",
         "before": _state_shape(case.before),
         "event": _event_shape(case.event, case.before),
-        "expected": _expectation_shape(case.expected, case.before),
+        "expected": _expectation_shape(
+            case.expected,
+            reference_evidence,
+            reference_bases,
+        ),
         "expected_invalidated_evidence": invalidated,
         "expected_surviving_bases": surviving,
         "required_trace_rules": sorted(case.required_trace_rules),
@@ -369,10 +382,16 @@ def _case_shape(
     if isinstance(case, TransitionCase):
         return _transition_shape(case)
     if isinstance(case, ObservationCase):
+        evidence_shapes = _evidence_shape_map(case.state)
+        basis_shapes = _basis_shape_map(case.state, evidence_shapes)
         return {
             "case_kind": "observation",
             "state": _state_shape(case.state),
-            "expected": _expectation_shape(case.expected, case.state),
+            "expected": _expectation_shape(
+                case.expected,
+                evidence_shapes,
+                basis_shapes,
+            ),
         }
     if isinstance(case, RejectedTransitionCase):
         return {
@@ -488,9 +507,7 @@ class FamilySplitManifest:
             raise FamilySplitError("source_commit must be a lowercase Git commit digest")
         if not self.assignments:
             raise FamilySplitError("family split manifest must contain assignments")
-        if self.assignments != tuple(
-            sorted(self.assignments, key=lambda item: item.family_digest)
-        ):
+        if self.assignments != tuple(sorted(self.assignments, key=lambda item: item.family_digest)):
             raise FamilySplitError("assignments must be canonically sorted by family digest")
 
         family_digests = tuple(item.family_digest for item in self.assignments)
@@ -572,9 +589,7 @@ def compile_family_split_manifest(
     assignments: list[FamilySplitAssignment] = []
     for family_digest, members in grouped.items():
         split = (
-            E1Split.DEVELOPMENT
-            if family_digest in development_family_digests
-            else E1Split.TRAIN
+            E1Split.DEVELOPMENT if family_digest in development_family_digests else E1Split.TRAIN
         )
         assignments.append(
             FamilySplitAssignment(
