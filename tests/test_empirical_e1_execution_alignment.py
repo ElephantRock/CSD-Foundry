@@ -37,7 +37,7 @@ def test_consistent_sequence_control_renaming_is_identity_invariant() -> None:
     )
 
 
-def test_broken_cross_step_control_identity_changes_family_digest() -> None:
+def test_broken_cross_step_control_identity_fails_closed() -> None:
     scenario = SCENARIOS["M-11"]
     changed_cases = list(scenario.cases)
     second_case = changed_cases[1]
@@ -49,10 +49,36 @@ def test_broken_cross_step_control_identity_changes_family_digest() -> None:
     )
     changed = replace(scenario, cases=tuple(changed_cases))
 
-    assert (
-        derive_scenario_family_identity(scenario).family_digest
-        != derive_scenario_family_identity(changed).family_digest
+    with pytest.raises(
+        FamilySplitError,
+        match="declared before state does not equal the preceding oracle post-state",
+    ):
+        derive_scenario_family_identity(changed)
+
+
+def test_order_sensitive_sequence_state_must_remain_executable() -> None:
+    scenario = SCENARIOS["M-11"]
+    changed_cases = list(scenario.cases)
+    fourth_case = changed_cases[3]
+    assert isinstance(fourth_case, TransitionCase)
+    assert len(fourth_case.before.evidence) > 1
+    assert len(fourth_case.before.bases) > 1
+
+    changed_cases[3] = replace(
+        fourth_case,
+        before=replace(
+            fourth_case.before,
+            evidence=tuple(reversed(fourth_case.before.evidence)),
+            bases=tuple(reversed(fourth_case.before.bases)),
+        ),
     )
+    changed = replace(scenario, cases=tuple(changed_cases))
+
+    with pytest.raises(
+        FamilySplitError,
+        match="declared before state does not equal the preceding oracle post-state",
+    ):
+        derive_scenario_family_identity(changed)
 
 
 def test_sequence_step_grammar_matches_runner_hyphen_rule() -> None:
