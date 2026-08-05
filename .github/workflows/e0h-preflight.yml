@@ -20,7 +20,7 @@ jobs:
     env:
       PIP_CACHE_DIR: /tmp/e0h-pip-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Record base environment
         run: |
@@ -53,7 +53,7 @@ jobs:
           find /tmp/e0h-preflight -maxdepth 1 -type f -print -exec cat {} \;
 
       - name: Retain preflight receipts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: e0h-preflight-receipts
           path: /tmp/e0h-preflight
