@@ -64,10 +64,7 @@ def _require_frozen_inputs(inputs: dict[str, Any]) -> None:
         raise ValueError("model and tokenizer inputs must be objects")
     if model.get("locator") != MODEL_LOCATOR or model.get("revision") != MODEL_REVISION:
         raise ValueError("model locator or revision differs from the frozen harness")
-    if (
-        tokenizer.get("locator") != TOKENIZER_LOCATOR
-        or tokenizer.get("revision") != MODEL_REVISION
-    ):
+    if tokenizer.get("locator") != TOKENIZER_LOCATOR or tokenizer.get("revision") != MODEL_REVISION:
         raise ValueError("tokenizer locator or revision differs from the frozen harness")
     if not isinstance(recipe, dict) or recipe.get("sequence_packing") is not False:
         raise ValueError("this harness requires sequence_packing=false")
@@ -117,9 +114,7 @@ def _verified_training_texts(inputs: dict[str, Any]) -> list[str]:
     expected_digest = str(dataset["sft_digest"])
     observed_digest = _sha256(dataset_path)
     if observed_digest != expected_digest:
-        raise RuntimeError(
-            f"SFT dataset digest mismatch: {observed_digest} != {expected_digest}"
-        )
+        raise RuntimeError(f"SFT dataset digest mismatch: {observed_digest} != {expected_digest}")
     return _training_texts(dataset_path)
 
 
@@ -132,9 +127,7 @@ def _require_cuda_envelope(torch: Any, inputs: dict[str, Any]) -> None:
     expected_gpu_count = int(environment["gpu_count"])
     observed_gpu_count = int(torch.cuda.device_count())
     if observed_gpu_count != expected_gpu_count:
-        raise RuntimeError(
-            f"GPU count mismatch: {observed_gpu_count} != {expected_gpu_count}"
-        )
+        raise RuntimeError(f"GPU count mismatch: {observed_gpu_count} != {expected_gpu_count}")
     hardware_model = str(environment["hardware_model"])
     observed_name = str(torch.cuda.get_device_name(0))
     if "T4" not in observed_name or "T4" not in hardware_model:
