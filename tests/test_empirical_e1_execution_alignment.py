@@ -9,6 +9,20 @@ from csd_foundry.scenarios.registry import SCENARIOS
 from csd_foundry.scenarios.spec import TransitionCase
 
 
+def test_runner_rejected_transition_scenario_fails_closed() -> None:
+    scenario = SCENARIOS["M-01"]
+    case = scenario.cases[0]
+    assert isinstance(case, TransitionCase)
+
+    changed = replace(
+        scenario,
+        cases=(replace(case, expected_invalidated_evidence=frozenset()),),
+    )
+
+    with pytest.raises(FamilySplitError, match="scenario is not executable"):
+        derive_scenario_family_identity(changed)
+
+
 def test_consistent_sequence_control_renaming_is_identity_invariant() -> None:
     scenario = SCENARIOS["M-11"]
     control_labels: dict[str, str] = {}
