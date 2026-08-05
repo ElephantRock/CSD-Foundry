@@ -9,3 +9,5 @@ dist/
 *.egg-info/
 .coverage
 htmlcov/
+experiments/e0h/v1/assets/
+experiments/e0h/v1/work/

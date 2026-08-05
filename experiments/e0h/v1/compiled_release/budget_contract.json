@@ -1,0 +1,1 @@
+{"aggregate_gpu_minutes":600,"artifact_retention_days":365,"checkpoint_retention_days":90,"e0h_gpu_minutes":60,"max_checkpoint_gib":2,"max_reruns":1,"schema_version":"e0h-budget-contract/1"}
