@@ -1,5 +1,24 @@
 """E1 executable-semantics experiment contracts and artifact compilation."""
 
+from csd_foundry.empirical.e1 import control_paired_compiler as _control_paired_compiler
+from csd_foundry.empirical.e1.artifact_set_io import (
+    E1ArtifactSetError,
+    E1ArtifactSetValidationReport,
+    validate_artifact_files,
+    write_artifact_files,
+)
+from csd_foundry.empirical.e1.control_paired_compiler import (
+    ConventionalControlResponse,
+    E1ControlArtifactBundle,
+    E1ControlArtifactError,
+    E1PairedArtifactBundle,
+    E1TokenCountInventory,
+    TokenizedRecordCount,
+    compile_e1_control_prompts,
+    compile_e1_conventional_control,
+    finalize_e1_paired_artifacts,
+)
+from csd_foundry.empirical.e1.control_response_io import load_conventional_responses
 from csd_foundry.empirical.e1.curriculum_evaluation_contract import (
     E1CurriculumArm,
     E1CurriculumArtifact,
@@ -33,11 +52,23 @@ from csd_foundry.empirical.e1.foundry_artifact_compiler import (
     validate_e1_foundry_artifacts,
     write_e1_foundry_artifacts,
 )
+from csd_foundry.empirical.e1.token_inventory_io import load_token_inventory
+
+# Preserve direct imports from the original compiler module while making every
+# public I/O entry point use the single hardened implementation.
+_control_paired_compiler.write_artifact_files = write_artifact_files
+_control_paired_compiler.load_conventional_responses = load_conventional_responses
+_control_paired_compiler.load_token_inventory = load_token_inventory
 
 __all__ = [
     "ArtifactFile",
+    "ConventionalControlResponse",
     "E1ArtifactError",
+    "E1ArtifactSetError",
+    "E1ArtifactSetValidationReport",
     "E1ArtifactValidationReport",
+    "E1ControlArtifactBundle",
+    "E1ControlArtifactError",
     "E1CurriculumArm",
     "E1CurriculumArtifact",
     "E1CurriculumEvaluationContract",
@@ -45,11 +76,16 @@ __all__ = [
     "E1ExperimentContract",
     "E1FoundryArtifactBundle",
     "E1LabelAuthority",
+    "E1PairedArtifactBundle",
     "E1Split",
+    "E1TokenCountInventory",
     "FamilySplitAssignment",
     "FamilySplitError",
     "FamilySplitManifest",
     "ScenarioFamilyIdentity",
+    "TokenizedRecordCount",
+    "compile_e1_control_prompts",
+    "compile_e1_conventional_control",
     "compile_e1_curriculum_evaluation_contract",
     "compile_e1_experiment_contract",
     "compile_e1_foundry_artifacts",
@@ -57,7 +93,12 @@ __all__ = [
     "derive_scenario_family_identity",
     "e1_task_format",
     "e1_task_format_digest",
+    "finalize_e1_paired_artifacts",
     "load_artifact_records",
+    "load_conventional_responses",
+    "load_token_inventory",
+    "validate_artifact_files",
     "validate_e1_foundry_artifacts",
+    "write_artifact_files",
     "write_e1_foundry_artifacts",
 ]
