@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from dataclasses import replace
+from typing import cast
 
 import pytest
 
@@ -121,6 +122,22 @@ def test_contract_constructor_rejects_forged_source_split_mapping() -> None:
     )
 
     with pytest.raises(FamilySplitError, match="contradicts the source split policy"):
+        replace(contract, split_manifest=forged_manifest)
+
+
+def test_contract_constructor_rejects_raw_string_assignment_split() -> None:
+    contract = _compile()
+    assignments = list(contract.split_manifest.assignments)
+    assignments[0] = replace(
+        assignments[0],
+        split=cast(E1Split, assignments[0].split.value),
+    )
+    forged_manifest = replace(
+        contract.split_manifest,
+        assignments=tuple(assignments),
+    )
+
+    with pytest.raises(FamilySplitError, match="split must be an E1Split"):
         replace(contract, split_manifest=forged_manifest)
 
 
