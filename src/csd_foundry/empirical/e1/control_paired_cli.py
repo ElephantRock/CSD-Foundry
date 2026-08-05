@@ -17,8 +17,8 @@ from csd_foundry.empirical.e1.control_paired_compiler import (
     compile_e1_control_prompts,
     compile_e1_conventional_control,
     finalize_e1_paired_artifacts,
-    load_conventional_responses,
 )
+from csd_foundry.empirical.e1.control_response_io import load_conventional_responses
 from csd_foundry.empirical.e1.experiment_contract import (
     E1ExperimentContract,
     compile_e1_experiment_contract,
