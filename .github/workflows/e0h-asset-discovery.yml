@@ -1,78 +1,68 @@
-name: E0-H Asset Discovery
+name: E0-H Dependency Discovery
 
 on:
   pull_request:
     paths:
       - ".github/workflows/e0h-asset-discovery.yml"
-      - "experiments/e0h/v1/**"
+      - "experiments/e0h/v1/run_inputs.json"
 
 permissions:
   contents: read
 
 jobs:
-  digest:
+  resolve:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11.13"
-      - name: Download exact model snapshot and compute digests
-        env:
-          HF_REPO: HuggingFaceTB/SmolLM2-135M-Instruct
-          HF_REVISION: 12fd25f77366fa6b3b4b768ec3050bf629380bac
+      - run: python -m pip install --upgrade pip
+      - name: Resolve exact CUDA 12.8 dependency graph
         run: |
+          python -m pip install \
+            --dry-run \
+            --ignore-installed \
+            --report /tmp/e0h-python-lock.raw.json \
+            --extra-index-url https://download.pytorch.org/whl/cu128 \
+            torch==2.8.0 \
+            transformers==4.55.0 \
+            accelerate==1.10.0
           python - <<'PY'
           import hashlib
           import json
-          import os
           import pathlib
-          import urllib.request
 
-          repo = os.environ["HF_REPO"]
-          revision = os.environ["HF_REVISION"]
-          files = (
-              "config.json",
-              "generation_config.json",
-              "merges.txt",
-              "model.safetensors",
-              "special_tokens_map.json",
-              "tokenizer.json",
-              "tokenizer_config.json",
-              "vocab.json",
-          )
-          output = pathlib.Path("/tmp/e0h-assets")
-          output.mkdir(parents=True, exist_ok=True)
-          receipts = []
-          for name in files:
-              url = f"https://huggingface.co/{repo}/resolve/{revision}/{name}?download=true"
-              target = output / name
-              with urllib.request.urlopen(url, timeout=300) as response, target.open("wb") as handle:
-                  while chunk := response.read(1024 * 1024):
-                      handle.write(chunk)
-              content = target.read_bytes()
-              receipts.append(
+          raw_path = pathlib.Path("/tmp/e0h-python-lock.raw.json")
+          raw = json.loads(raw_path.read_text(encoding="utf-8"))
+          packages = []
+          for item in raw["install"]:
+              metadata = item["metadata"]
+              archive = item["download_info"]["archive_info"]
+              packages.append(
                   {
-                      "path": name,
-                      "sha256": hashlib.sha256(content).hexdigest(),
-                      "size_bytes": len(content),
+                      "name": metadata["name"].lower().replace("_", "-"),
+                      "version": metadata["version"],
+                      "url": item["download_info"]["url"],
+                      "sha256": archive["hashes"]["sha256"],
                   }
               )
-          manifest = {
-              "schema_version": "e0h-hf-snapshot/1",
-              "repository": repo,
-              "revision": revision,
-              "files": receipts,
+          packages.sort(key=lambda item: item["name"])
+          payload = {
+              "schema_version": "e0h-python-lock/1",
+              "python_version": "3.11.13",
+              "extra_index_url": "https://download.pytorch.org/whl/cu128",
+              "packages": packages,
           }
-          canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
-          manifest["snapshot_digest"] = hashlib.sha256(canonical).hexdigest()
-          path = pathlib.Path("/tmp/e0h-asset-manifest.json")
-          path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          payload["lock_digest"] = hashlib.sha256(canonical).hexdigest()
+          path = pathlib.Path("/tmp/e0h-python-lock.json")
+          path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           print(path.read_text(encoding="utf-8"))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: e0h-asset-manifest
-          path: /tmp/e0h-asset-manifest.json
+          name: e0h-python-lock
+          path: /tmp/e0h-python-lock.json
           if-no-files-found: error
           retention-days: 1
