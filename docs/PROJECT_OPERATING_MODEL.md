@@ -130,17 +130,19 @@ A GPU execution run follows this protocol:
 2. Create a `gpu-experiment/` or `gpu-evaluation/` branch when repository changes or committed evidence are required.
 3. Execute only the committed or issue-defined protocol.
 4. Record deviations explicitly; do not silently adapt the experiment.
-5. Store large artifacts outside ordinary Git history when necessary.
-6. Compute immutable digests for every retained external artifact.
+5. Publish retained large artifacts through a GitHub-managed channel: GitHub Releases, GitHub Actions artifacts, or Git LFS when enabled.
+6. Compute immutable digests for every retained artifact.
 7. Commit scripts, configurations, manifests, summarized metrics, and receipts.
 8. Open or update a draft pull request linked to the task issue.
 9. Stop without merging or declaring a roadmap gate passed.
 
 The repository lane then reviews the exact branch, protocol compliance, logs, metrics, artifact bindings, and supported claims.
 
+No required handoff may depend on storage or communication outside GitHub. A temporary local artifact is non-authoritative until uploaded to a GitHub-managed channel and bound by a committed receipt.
+
 ## 7. Artifact receipts
 
-Large checkpoints, raw generated corpora, and other oversized artifacts should not normally be committed directly to Git. Commit a receipt such as:
+Large checkpoints, raw generated corpora, and other oversized artifacts should not normally be committed to ordinary Git history. Store them in a GitHub-managed artifact channel and commit a receipt such as:
 
 ```json
 {
@@ -149,7 +151,7 @@ Large checkpoints, raw generated corpora, and other oversized artifacts should n
   "execution_lane": "lane:gpu",
   "source_commit": "<git-sha>",
   "artifact_type": "model-checkpoint",
-  "artifact_uri": "<controlled-storage-reference>",
+  "artifact_uri": "github-release://<repository>/<release>/<asset>",
   "artifact_digest": "sha256:...",
   "byte_size": 0,
   "model_revision": "<exact-revision>",
@@ -159,6 +161,8 @@ Large checkpoints, raw generated corpora, and other oversized artifacts should n
   "result_status": "COMPLETED"
 }
 ```
+
+Permitted `artifact_uri` forms must resolve through GitHub, for example a GitHub Release asset, a retained GitHub Actions artifact, or a Git LFS object referenced by the repository.
 
 A summary without immutable artifact and configuration bindings is observational evidence, not a reproducible result.
 
