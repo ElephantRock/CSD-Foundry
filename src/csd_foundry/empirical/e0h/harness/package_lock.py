@@ -45,7 +45,11 @@ def _package_receipts(payload: dict[str, object]) -> tuple[dict[str, object], ..
             raise E0HRunReleaseError("python lock member must be a wheel")
         if not isinstance(name, str) or _PACKAGE_NAME.fullmatch(name) is None:
             raise E0HRunReleaseError("python lock package name is not normalized")
-        if not isinstance(version, str) or not version or any(character.isspace() for character in version):
+        if (
+            not isinstance(version, str)
+            or not version
+            or any(character.isspace() for character in version)
+        ):
             raise E0HRunReleaseError("python lock package version is invalid")
         if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
             raise E0HRunReleaseError("python lock package digest must be lowercase SHA-256")
@@ -67,9 +71,7 @@ def _lock_digest(payload: dict[str, object]) -> str:
 def _requirements_text(packages: tuple[dict[str, object], ...]) -> str:
     lines = [f"--extra-index-url {_EXPECTED_INDEX}"]
     for package in packages:
-        lines.append(
-            f"{package['name']}=={package['version']} --hash=sha256:{package['sha256']}"
-        )
+        lines.append(f"{package['name']}=={package['version']} --hash=sha256:{package['sha256']}")
     return "\n".join(lines) + "\n"
 
 
