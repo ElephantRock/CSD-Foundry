@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import importlib.metadata
 import json
 from pathlib import Path
-from typing import Any
 
 from csd_foundry.empirical.e0h import compile_e0h_run_release, validate_e0h_run_release
 from csd_foundry.empirical.e0h.harness.common import (
@@ -16,32 +14,10 @@ from csd_foundry.empirical.e0h.harness.common import (
     read_jsonl,
     verify_static_inputs,
 )
+from csd_foundry.empirical.e0h.harness.package_lock import verify_installed_python_lock
 from csd_foundry.empirical.e0h.run_release import E0HRunReleaseError
 
 _EXPECTED_TRAIN_RECORDS = 168
-_VERSION_PACKAGES = {
-    "accelerate": "accelerate_version",
-    "torch": "torch_version",
-    "transformers": "transformers_version",
-}
-
-
-def _base_version(value: str) -> str:
-    return value.split("+", maxsplit=1)[0]
-
-
-def _verify_runtime_versions(inputs: Any) -> dict[str, str]:
-    observed: dict[str, str] = {}
-    for package, field in _VERSION_PACKAGES.items():
-        version = importlib.metadata.version(package)
-        expected = getattr(inputs.environment, field)
-        normalized = _base_version(version) if package == "torch" else version
-        if normalized != expected:
-            raise E0HRunReleaseError(
-                f"{package} version mismatch; expected={expected}, observed={version}"
-            )
-        observed[package] = version
-    return observed
 
 
 def run_preflight(paths: RunPaths, *, mode: str, require_snapshot: bool) -> dict[str, object]:
@@ -49,7 +25,7 @@ def run_preflight(paths: RunPaths, *, mode: str, require_snapshot: bool) -> dict
 
     inputs = verify_static_inputs(paths, require_snapshot=require_snapshot)
     assert_python_version(inputs.environment.python_version)
-    runtime_versions = _verify_runtime_versions(inputs)
+    runtime_versions = verify_installed_python_lock(paths, inputs)
 
     bundle = compile_e0h_run_release(inputs)
     release_report = validate_e0h_run_release(paths.compiled_release, inputs)
