@@ -246,7 +246,9 @@ def command_smoke(args: argparse.Namespace) -> None:
             "exact_text_matches": sum(
                 observed.get(key) == value for key, value in expected.items()
             ),
-            "claim_boundary": "Infrastructure smoke execution only; no protected capability conclusion.",
+            "claim_boundary": (
+                "Infrastructure smoke execution only; no protected capability conclusion."
+            ),
         },
     )
 
