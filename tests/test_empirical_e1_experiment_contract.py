@@ -140,6 +140,20 @@ def test_contract_constructor_rejects_noncanonical_excluded_ids() -> None:
         )
 
 
+def test_contract_constructor_rejects_eligible_excluded_identity_overlap() -> None:
+    contract = _compile()
+    eligible_scenario_id = contract.split_manifest.assignments[0].scenario_ids[0]
+    forged_excluded_ids = tuple(
+        sorted((*contract.excluded_source_test_scenario_ids, eligible_scenario_id))
+    )
+
+    with pytest.raises(FamilySplitError, match="eligible and excluded.*overlap"):
+        replace(
+            contract,
+            excluded_source_test_scenario_ids=forged_excluded_ids,
+        )
+
+
 def test_contract_digest_binds_policy_manifest_counts_ids_and_claim_boundary() -> None:
     payload = _compile().to_dict()
     digest = payload.pop("contract_digest")
