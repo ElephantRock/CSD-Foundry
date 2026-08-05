@@ -58,13 +58,15 @@ Lane labels describe the work. They do not identify, authenticate, or prove whic
 
 ## 3. Attribution boundary
 
-Governed repository artifacts must not name or attribute work to participants, assistants, vendors, or machine owners.
+Governed repository artifacts must not name participants or attribute work to participant identity, assistant identity, or machine ownership.
+
+Technical specifications may name platforms, dependencies, models, vendors, and hardware when required for reproducibility. The prohibition applies to claims about who performed, reviewed, or approved project work.
 
 Do not include claims such as:
 
 - implemented by a named participant;
-- reviewed by a named assistant;
-- executed by a named local process owner;
+- reviewed by a named execution assistant;
+- executed by a named machine owner;
 - approved because of actor identity.
 
 Use evidence statements instead:
