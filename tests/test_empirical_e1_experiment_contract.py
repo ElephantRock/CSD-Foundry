@@ -92,6 +92,25 @@ def test_contract_rejects_unknown_split_and_missing_blind_partition() -> None:
         _compile(without_blind)
 
 
+def test_contract_constructor_rejects_forged_source_split_mapping() -> None:
+    contract = _compile()
+    assignments = list(contract.split_manifest.assignments)
+    development_index = next(
+        index for index, item in enumerate(assignments) if item.split is E1Split.DEVELOPMENT
+    )
+    assignments[development_index] = replace(
+        assignments[development_index],
+        source_splits=("train",),
+    )
+    forged_manifest = replace(
+        contract.split_manifest,
+        assignments=tuple(assignments),
+    )
+
+    with pytest.raises(FamilySplitError, match="contradicts the source split policy"):
+        replace(contract, split_manifest=forged_manifest)
+
+
 def test_contract_digest_binds_policy_manifest_counts_and_claim_boundary() -> None:
     payload = _compile().to_dict()
     digest = payload.pop("contract_digest")
