@@ -18,14 +18,8 @@ from csd_foundry.scenarios.spec import ObservationCase, TransitionCase
 _SOURCE_COMMIT = "b87d42e4103f0c8b07c58f8e8f04dfda5cf5d111"
 
 
-def _scenario_values() -> tuple[object, ...]:
-    return tuple(SCENARIOS.values())
-
-
 def test_all_seed_scenarios_have_canonical_family_identities() -> None:
-    identities = [
-        derive_scenario_family_identity(scenario) for scenario in SCENARIOS.values()
-    ]
+    identities = [derive_scenario_family_identity(scenario) for scenario in SCENARIOS.values()]
 
     assert len(identities) == 21
     assert all(len(identity.family_digest) == 64 for identity in identities)
