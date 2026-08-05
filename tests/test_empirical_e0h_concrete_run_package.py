@@ -12,6 +12,7 @@ from csd_foundry.empirical.e0h import (
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "experiments" / "e0h" / "v1"
 COMPILED = PACKAGE / "compiled_release"
+PREFLIGHT_RECEIPTS = PACKAGE / "preflight_receipts"
 
 
 def _inputs():
@@ -62,6 +63,30 @@ def test_preflight_and_container_are_immutably_bound() -> None:
     assert '"model.safetensors"' in preflight
     assert '"vocab.json"' in preflight
     assert "forward_pass_complete" in preflight
+
+
+def test_committed_preflight_receipts_bind_the_frozen_inputs() -> None:
+    inputs = json.loads((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
+    assets = json.loads(
+        (PREFLIGHT_RECEIPTS / "external_asset_receipt.json").read_text(encoding="utf-8")
+    )
+    environment = json.loads(
+        (PREFLIGHT_RECEIPTS / "environment_receipt.json").read_text(encoding="utf-8")
+    )
+    tokenization = json.loads(
+        (PREFLIGHT_RECEIPTS / "tokenization_receipt.json").read_text(encoding="utf-8")
+    )
+    device = json.loads(
+        (PREFLIGHT_RECEIPTS / "minimal_device_preflight.json").read_text(encoding="utf-8")
+    )
+
+    assert assets["resolved_revision"] == inputs["model"]["revision"]
+    assert assets["model_weight_digest"] == inputs["model"]["content_digest"]
+    assert assets["tokenizer_aggregate_digest"] == inputs["tokenizer"]["content_digest"]
+    assert environment["expected"] == inputs["environment"]
+    assert tokenization["sft_records_loaded"] == inputs["dataset"]["sft_records"]
+    assert tokenization["truncation_count"] == 0
+    assert device["forward_pass_complete"] is True
 
 
 def test_harness_commands_remain_outside_protected_metric_surface() -> None:
