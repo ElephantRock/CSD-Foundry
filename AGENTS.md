@@ -59,8 +59,10 @@ and artifact retention policy.
 
 GPU results return through a branch and draft pull request with committed scripts,
 configurations, manifests, summarized metrics, and digest-bound artifact receipts. Large
-artifacts should remain outside ordinary Git history with immutable references committed to the
-repository. GPU execution must not merge its own work or declare roadmap gates passed.
+artifacts must be published through a GitHub-managed channel such as GitHub Releases, GitHub
+Actions artifacts, or Git LFS when enabled. No required handoff may depend on storage or
+communication outside GitHub. GPU execution must not merge its own work or declare roadmap gates
+passed.
 
 ## Prohibited shortcuts
 
