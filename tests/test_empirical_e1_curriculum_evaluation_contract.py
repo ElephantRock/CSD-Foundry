@@ -124,6 +124,7 @@ def test_contract_binds_two_arms_development_evaluation_and_no_peeking() -> None
     assert contract.foundry.arm is E1CurriculumArm.FOUNDRY
     assert contract.control.token_count == contract.foundry.token_count
     assert contract.evaluation.split is E1Split.DEVELOPMENT
+    assert contract.development_family_count == contract.evaluation.family_count == 4
     assert set(contract.training_scenario_ids).isdisjoint(contract.development_scenario_ids)
     assert {"H-01", "L-01", "M-15"}.isdisjoint(contract.training_scenario_ids)
     assert {"H-01", "L-01", "M-15"}.isdisjoint(contract.development_scenario_ids)
@@ -160,6 +161,22 @@ def test_contract_rejects_curriculum_or_evaluation_scenario_drift() -> None:
 
     with pytest.raises(FamilySplitError, match="evaluation artifact does not match"):
         _compile(evaluation=replace(evaluation, scenario_ids=evaluation.scenario_ids[1:]))
+
+
+def test_contract_rejects_family_count_drift_and_wrong_runtime_artifacts() -> None:
+    contract = _compile()
+
+    with pytest.raises(FamilySplitError, match="family count does not match"):
+        replace(contract, development_family_count=contract.development_family_count - 1)
+
+    with pytest.raises(FamilySplitError, match="control must be"):
+        replace(contract, control=cast(E1CurriculumArtifact, object()))
+
+    with pytest.raises(FamilySplitError, match="foundry must be"):
+        replace(contract, foundry=cast(E1CurriculumArtifact, object()))
+
+    with pytest.raises(FamilySplitError, match="evaluation must be"):
+        replace(contract, evaluation=cast(E1EvaluationArtifact, object()))
 
 
 def test_label_authority_and_oracle_evidence_are_arm_specific() -> None:
