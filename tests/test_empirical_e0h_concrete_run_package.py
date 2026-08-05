@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 from csd_foundry.empirical.e0h import (
     compile_e0h_run_release,
@@ -13,10 +17,19 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "experiments" / "e0h" / "v1"
 COMPILED = PACKAGE / "compiled_release"
 PREFLIGHT_RECEIPTS = PACKAGE / "preflight_receipts"
+WORKFLOW = ROOT / ".github" / "workflows" / "e0h-preflight.yml"
 
 
 def _inputs():
     return load_e0h_run_release_inputs((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
+
+
+def _harness() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("e0h_harness", PACKAGE / "harness.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_concrete_e0h_inputs_compile_to_self_describing_release() -> None:
@@ -54,6 +67,7 @@ def test_preflight_and_container_are_immutably_bound() -> None:
     dockerfile = (PACKAGE / "container" / "Dockerfile").read_text(encoding="utf-8")
     requirements = (PACKAGE / "container" / "requirements.lock").read_text(encoding="utf-8")
     preflight = (PACKAGE / "preflight.py").read_text(encoding="utf-8")
+    workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert inputs["environment"]["container_image"] in dockerfile
     assert "--no-deps" in dockerfile
@@ -63,6 +77,13 @@ def test_preflight_and_container_are_immutably_bound() -> None:
     assert '"model.safetensors"' in preflight
     assert '"vocab.json"' in preflight
     assert "forward_pass_complete" in preflight
+    assert "actions/checkout@11d5960a326750d5838078e36cf38b85af677262" in workflow
+    assert (
+        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        in workflow
+    )
+    assert "actions/checkout@v4" not in workflow
+    assert "actions/upload-artifact@v4" not in workflow
 
 
 def test_committed_preflight_receipts_bind_the_frozen_inputs() -> None:
@@ -87,6 +108,45 @@ def test_committed_preflight_receipts_bind_the_frozen_inputs() -> None:
     assert tokenization["sft_records_loaded"] == inputs["dataset"]["sft_records"]
     assert tokenization["truncation_count"] == 0
     assert device["forward_pass_complete"] is True
+
+
+def test_harness_rejects_mutable_inputs_and_context_truncation(tmp_path: Path) -> None:
+    harness = _harness()
+    inputs = json.loads((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
+    inputs["model"]["revision"] = "0" * 40
+    substituted = tmp_path / "substituted-inputs.json"
+    substituted.write_text(
+        json.dumps(inputs, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    with pytest.raises(ValueError, match="model locator or revision"):
+        harness._load_inputs(substituted)
+
+    class OversizeTokenizer:
+        def __call__(self, text: str, *, add_special_tokens: bool) -> dict[str, list[int]]:
+            assert add_special_tokens is True
+            return {"input_ids": list(range(int(text)))}
+
+    with pytest.raises(RuntimeError, match="truncation is forbidden"):
+        harness._require_context_fit(OversizeTokenizer(), ["513"], 512)
+
+
+def test_harness_receipts_fail_closed_on_clobber(tmp_path: Path) -> None:
+    harness = _harness()
+    receipt = tmp_path / "receipt.json"
+    harness._write_json(receipt, {"status": "first"})
+    with pytest.raises(FileExistsError):
+        harness._write_json(receipt, {"status": "replacement"})
+
+
+def test_harness_consumes_the_frozen_training_recipe() -> None:
+    harness = (PACKAGE / "harness.py").read_text(encoding="utf-8")
+    assert 'optim=str(recipe["optimizer"])' in harness
+    assert 'lr_scheduler_type=str(recipe["scheduler"])' in harness
+    assert "truncation=False" in harness
+    assert "_require_cuda_envelope(torch, inputs)" in harness
+    assert 'path.open("x"' in harness
 
 
 def test_harness_commands_remain_outside_protected_metric_surface() -> None:
