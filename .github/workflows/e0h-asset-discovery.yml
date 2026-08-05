@@ -47,10 +47,15 @@ jobs:
           for wheel in wheels:
               with zipfile.ZipFile(wheel) as archive:
                   metadata_names = [
-                      name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+                      name
+                      for name in archive.namelist()
+                      if name.count("/") == 1 and name.endswith(".dist-info/METADATA")
                   ]
                   if len(metadata_names) != 1:
-                      raise RuntimeError(f"wheel metadata is ambiguous: {wheel.name}")
+                      raise RuntimeError(
+                          f"wheel top-level metadata is ambiguous: {wheel.name}; "
+                          f"candidates={metadata_names}"
+                      )
                   message = email.parser.BytesParser().parsebytes(
                       archive.read(metadata_names[0])
                   )
