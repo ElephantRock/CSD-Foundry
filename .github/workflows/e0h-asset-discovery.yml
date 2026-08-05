@@ -27,7 +27,8 @@ jobs:
             --extra-index-url https://download.pytorch.org/whl/cu128 \
             torch==2.8.0 \
             transformers==4.55.0 \
-            accelerate==1.10.0
+            accelerate==1.10.0 \
+            jsonschema==4.26.0
           python - <<'PY'
           import hashlib
           import json
