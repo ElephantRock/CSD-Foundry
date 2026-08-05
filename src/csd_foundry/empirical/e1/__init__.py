@@ -1,5 +1,6 @@
 """E1 executable-semantics experiment contracts and artifact compilation."""
 
+from csd_foundry.empirical.e1 import control_paired_compiler as _control_paired_compiler
 from csd_foundry.empirical.e1.artifact_set_io import (
     E1ArtifactSetError,
     E1ArtifactSetValidationReport,
@@ -52,6 +53,12 @@ from csd_foundry.empirical.e1.foundry_artifact_compiler import (
     write_e1_foundry_artifacts,
 )
 from csd_foundry.empirical.e1.token_inventory_io import load_token_inventory
+
+# Preserve direct imports from the original compiler module while making every
+# public I/O entry point use the single hardened implementation.
+setattr(_control_paired_compiler, "write_artifact_files", write_artifact_files)
+setattr(_control_paired_compiler, "load_conventional_responses", load_conventional_responses)
+setattr(_control_paired_compiler, "load_token_inventory", load_token_inventory)
 
 __all__ = [
     "ArtifactFile",
