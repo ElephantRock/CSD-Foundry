@@ -139,9 +139,7 @@ def tokenize_training_split(paths: RunPaths) -> dict[str, object]:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="python -m csd_foundry.empirical.e0h.harness.tokenize"
-    )
+    parser = argparse.ArgumentParser(prog="python -m csd_foundry.empirical.e0h.harness.tokenize")
     parser.add_argument("--run-root", type=Path, required=True)
     return parser
 
