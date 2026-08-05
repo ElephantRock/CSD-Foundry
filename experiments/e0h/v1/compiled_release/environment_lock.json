@@ -1,0 +1,1 @@
+{"accelerate_version":"1.10.0","container_image":"python:3.11.13-slim-bookworm@sha256:86adf8dbadc3d6e82ee5dd2c74bec2e1c2467cdad47886280501df722372d2e1","cuda_version":"12.8.1","gpu_count":1,"hardware_model":"NVIDIA-L4-24GB","python_version":"3.11.13","schema_version":"e0h-software-environment/1","torch_version":"2.8.0","transformers_version":"4.55.0"}
