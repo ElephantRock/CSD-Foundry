@@ -293,18 +293,18 @@ class E1CurriculumEvaluationContract:
             raise FamilySplitError("control and Foundry curriculum artifacts must differ")
         if self.control.manifest_digest == self.foundry.manifest_digest:
             raise FamilySplitError("control and Foundry curriculum manifests must differ")
-        training_artifact_digests = {
+        artifact_manifest_digests = (
             self.control.artifact_digest,
-            self.foundry.artifact_digest,
-        }
-        if self.evaluation.artifact_digest in training_artifact_digests:
-            raise FamilySplitError("evaluation artifact must differ from training curricula")
-        training_manifest_digests = {
             self.control.manifest_digest,
+            self.foundry.artifact_digest,
             self.foundry.manifest_digest,
-        }
-        if self.evaluation.manifest_digest in training_manifest_digests:
-            raise FamilySplitError("evaluation manifest must differ from training curricula")
+            self.evaluation.artifact_digest,
+            self.evaluation.manifest_digest,
+        )
+        if len(set(artifact_manifest_digests)) != len(artifact_manifest_digests):
+            raise FamilySplitError(
+                "curriculum and evaluation artifact/manifest digests must be globally distinct"
+            )
 
     def _digest_payload(self) -> dict[str, object]:
         return {
