@@ -232,9 +232,7 @@ def test_label_authority_and_verification_evidence_are_arm_specific() -> None:
     with pytest.raises(FamilySplitError, match="evidence must differ"):
         replace(
             foundry,
-            independent_verification_evidence_digest=(
-                foundry.executable_oracle_evidence_digest
-            ),
+            independent_verification_evidence_digest=(foundry.executable_oracle_evidence_digest),
         )
 
 
