@@ -109,6 +109,8 @@ class E1CurriculumArtifact:
             ("task_format_digest", self.task_format_digest),
         ):
             _require_digest(value, field=field)
+        if self.artifact_digest == self.manifest_digest:
+            raise FamilySplitError("curriculum artifact and manifest digests must differ")
         _require_canonical_ids(self.scenario_ids, field="curriculum scenario_ids")
         _require_positive_int(self.record_count, field="curriculum record_count")
         _require_positive_int(self.token_count, field="curriculum token_count")
@@ -201,6 +203,8 @@ class E1EvaluationArtifact:
             ),
         ):
             _require_digest(value, field=field)
+        if self.artifact_digest == self.manifest_digest:
+            raise FamilySplitError("evaluation artifact and manifest digests must differ")
         _require_canonical_ids(self.scenario_ids, field="evaluation scenario_ids")
         _require_positive_int(self.record_count, field="evaluation record_count")
         _require_positive_int(self.family_count, field="evaluation family_count")
