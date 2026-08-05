@@ -166,6 +166,58 @@ def test_family_identity_preserves_shared_reference_topology() -> None:
     )
 
 
+def test_family_identity_preserves_cross_case_shared_event_topology() -> None:
+    scenario = SCENARIOS["M-10"]
+    cases = list(scenario.cases)
+    third_case = cases[2]
+    assert isinstance(third_case, TransitionCase)
+    assert isinstance(third_case.event, DependencyChange)
+
+    cases[2] = replace(
+        third_case,
+        event=replace(third_case.event, dependency_id="DEP-M10-FRESH"),
+    )
+    changed = replace(scenario, cases=tuple(cases))
+
+    assert (
+        derive_scenario_family_identity(scenario).family_digest
+        != derive_scenario_family_identity(changed).family_digest
+    )
+
+
+def test_family_identity_preserves_sequence_group_coordinates() -> None:
+    scenario = SCENARIOS["M-11"]
+    coordinate_renames = (
+        "ALT/branch-x/1-alpha",
+        "ALT/branch-x/2-beta",
+        "ALT/branch-y/1-beta",
+        "ALT/branch-y/2-alpha",
+    )
+    renamed = replace(
+        scenario,
+        scenario_id="ALT-M-11",
+        cases=tuple(
+            replace(case, case_id=case_id)
+            for case, case_id in zip(scenario.cases, coordinate_renames, strict=True)
+        ),
+    )
+    regrouped_cases = list(scenario.cases)
+    regrouped_cases[1] = replace(
+        regrouped_cases[1],
+        case_id="M-11/order-b/2-reassess",
+    )
+    regrouped = replace(scenario, cases=tuple(regrouped_cases))
+
+    assert (
+        derive_scenario_family_identity(scenario).family_digest
+        == derive_scenario_family_identity(renamed).family_digest
+    )
+    assert (
+        derive_scenario_family_identity(scenario).family_digest
+        != derive_scenario_family_identity(regrouped).family_digest
+    )
+
+
 def test_family_identity_changes_when_executable_rules_change() -> None:
     scenario = SCENARIOS["M-01"]
     changed_rules = frozenset(sorted(scenario.rule_ids)[1:])
