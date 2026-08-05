@@ -113,9 +113,7 @@ def _validate_sequence_execution(spec: ScenarioSpec) -> None:
         return
 
     failures = [
-        f"{case.case_id}: {'; '.join(case.details)}"
-        for case in result.cases
-        if not case.accepted
+        f"{case.case_id}: {'; '.join(case.details)}" for case in result.cases if not case.accepted
     ]
     raise FamilySplitError("sequence scenario is not executable: " + " | ".join(failures))
 
