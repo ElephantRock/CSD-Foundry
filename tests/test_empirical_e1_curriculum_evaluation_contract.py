@@ -175,6 +175,16 @@ def test_contract_rejects_token_or_task_format_mismatch() -> None:
         _compile(foundry=replace(foundry, task_format_digest=_digest("other-format")))
 
 
+def test_artifact_and_manifest_evidence_boundaries_are_distinct() -> None:
+    _, control, _, evaluation = _artifacts()
+
+    with pytest.raises(FamilySplitError, match="curriculum artifact and manifest"):
+        replace(control, manifest_digest=control.artifact_digest)
+
+    with pytest.raises(FamilySplitError, match="evaluation artifact and manifest"):
+        replace(evaluation, manifest_digest=evaluation.artifact_digest)
+
+
 def test_contract_rejects_training_or_evaluation_artifact_reuse() -> None:
     _, control, foundry, evaluation = _artifacts()
 
