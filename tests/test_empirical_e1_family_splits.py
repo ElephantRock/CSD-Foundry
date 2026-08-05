@@ -106,33 +106,27 @@ def test_family_identity_preserves_shared_reference_topology() -> None:
     case = scenario.cases[0]
     assert isinstance(case, ObservationCase)
     assert len(case.state.evidence) == 1
-    assert len(case.state.bases) == 1
+    assert len(case.state.bases) == 2
 
+    original_evidence_id = case.state.evidence[0].evidence_id
     first_evidence = replace(case.state.evidence[0], evidence_id="EVIDENCE-1")
     second_evidence = replace(first_evidence, evidence_id="EVIDENCE-2")
     first_basis = replace(
         case.state.bases[0],
-        basis_id="BASIS-1",
         member_evidence_ids=frozenset({first_evidence.evidence_id}),
     )
     separate_basis = replace(
-        first_basis,
-        basis_id="BASIS-2",
+        case.state.bases[1],
         member_evidence_ids=frozenset({second_evidence.evidence_id}),
     )
     shared_basis = replace(
-        first_basis,
-        basis_id="BASIS-2",
+        case.state.bases[1],
         member_evidence_ids=frozenset({first_evidence.evidence_id}),
     )
-    current_bases = frozenset({first_basis.basis_id, separate_basis.basis_id})
-
     separate_state = replace(
         case.state,
         evidence=(first_evidence, second_evidence),
         bases=(first_basis, separate_basis),
-        current_source_basis_ids=current_bases,
-        current_verdict_basis_ids=current_bases,
     )
     shared_state = replace(
         separate_state,
@@ -140,8 +134,20 @@ def test_family_identity_preserves_shared_reference_topology() -> None:
     )
     expected = replace(
         case.expected,
-        current_source_basis_ids=current_bases,
-        current_verdict_basis_ids=current_bases,
+        evidence_statuses=tuple(
+            (
+                first_evidence.evidence_id if evidence_id == original_evidence_id else evidence_id,
+                status,
+            )
+            for evidence_id, status in case.expected.evidence_statuses
+        ),
+        evidence_outcomes=tuple(
+            (
+                first_evidence.evidence_id if evidence_id == original_evidence_id else evidence_id,
+                outcome,
+            )
+            for evidence_id, outcome in case.expected.evidence_outcomes
+        ),
     )
     separate_scenario = replace(
         scenario,
