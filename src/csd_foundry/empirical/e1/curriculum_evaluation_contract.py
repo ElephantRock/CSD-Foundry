@@ -25,9 +25,10 @@ _PERMITTED_LIVE_TELEMETRY = (
 _PROTECTED_METRIC_VISIBILITY = "after_all_predetermined_checkpoints_complete"
 _CLAIM_BOUNDARY = (
     "This contract fixes the paired E1 curriculum and development-evaluation identities, "
-    "comparison invariants, metric identities, and no-peeking boundary. It does not "
-    "authorize GPU execution, establish that any artifact is pedagogically effective, "
-    "represent the external Phase 10 blind holdout, or establish general reasoning transfer."
+    "comparison invariants, tokenizer identity, metric identities, and no-peeking boundary. "
+    "It does not authorize GPU execution, establish that any artifact is pedagogically "
+    "effective, represent the external Phase 10 blind holdout, or establish general "
+    "reasoning transfer."
 )
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
@@ -222,6 +223,7 @@ class E1CurriculumEvaluationContract:
     release: str
     source_commit: str
     selection_contract_digest: str
+    tokenizer_revision_digest: str
     training_scenario_ids: tuple[str, ...]
     development_scenario_ids: tuple[str, ...]
     development_family_count: int
@@ -236,6 +238,7 @@ class E1CurriculumEvaluationContract:
             field="E1 curriculum/evaluation source_commit",
         )
         _require_digest(self.selection_contract_digest, field="selection_contract_digest")
+        _require_digest(self.tokenizer_revision_digest, field="tokenizer_revision_digest")
         _require_canonical_ids(self.training_scenario_ids, field="training_scenario_ids")
         _require_canonical_ids(
             self.development_scenario_ids,
@@ -287,6 +290,7 @@ class E1CurriculumEvaluationContract:
             "release": self.release,
             "source_commit": self.source_commit,
             "selection_contract_digest": self.selection_contract_digest,
+            "tokenizer_revision_digest": self.tokenizer_revision_digest,
             "training_scenario_ids": list(self.training_scenario_ids),
             "development_scenario_ids": list(self.development_scenario_ids),
             "development_family_count": self.development_family_count,
@@ -339,6 +343,7 @@ def compile_e1_curriculum_evaluation_contract(
     *,
     release: str,
     source_commit: str,
+    tokenizer_revision_digest: str,
     control: E1CurriculumArtifact,
     foundry: E1CurriculumArtifact,
     evaluation: E1EvaluationArtifact,
@@ -362,6 +367,7 @@ def compile_e1_curriculum_evaluation_contract(
         release=release,
         source_commit=source_commit,
         selection_contract_digest=selection_contract.contract_digest,
+        tokenizer_revision_digest=tokenizer_revision_digest,
         training_scenario_ids=training_scenario_ids,
         development_scenario_ids=development_scenario_ids,
         development_family_count=development_family_count,
