@@ -9,10 +9,18 @@ This directory instantiates the E0-H release compiler on one bounded reference s
 - Hardware: one NVIDIA L4 24 GB
 - Python: 3.11.13
 - PyTorch: 2.8.0+cu128
+- CUDA runtime family: 12.8
 - Transformers: 4.55.0
 - Accelerate: 1.10.0
 - Maximum training: eight optimizer steps
 - E0-H allocation: 60 GPU minutes from a 600 GPU-minute aggregate program budget
+
+## External asset and access assumptions
+
+- The exact model revision must remain retrievable from the declared repository or an equivalent trusted mirror that reproduces the committed file receipts.
+- The operator is responsible for lawful model access and acceptance of all applicable license terms.
+- This package records immutable identities and digests. It does not redistribute model weights or mechanically establish legal authority to use them.
+- These assumptions govern execution availability only; they are not semantic evidence and cannot support a model-quality claim.
 
 ## Build
 
@@ -23,7 +31,7 @@ docker build \
   .
 ```
 
-The base image is digest pinned. All Python distributions are version and SHA-256 pinned in `requirements-cu128.lock`; `python_lock.json` preserves filenames, sizes, versions, and hashes for the complete resolved graph.
+The base image is digest pinned. All Python distributions are version and SHA-256 pinned in `requirements-cu128.lock`; `python_lock.json` preserves filenames, sizes, versions, and hashes for the complete resolved graph. The lock validator requires the exact `torch==2.8.0+cu128` wheel and a CUDA 12.8 runtime package family.
 
 ## Prepare immutable assets
 
@@ -43,7 +51,7 @@ python -m csd_foundry.empirical.e0h.harness.preflight \
   --require-snapshot
 ```
 
-Preflight validates the static dataset and smoke-fixture bytes, model snapshot, Python graph, execution-package manifest, committed compiled release, runtime versions, GPU count/model, CUDA availability, and bf16 support. It still reports `gpu_execution_authorized=false`; execution requires the separate human authorization recorded in issue #69.
+Preflight validates the static dataset and smoke-fixture bytes, model snapshot, Python graph, execution-package manifest, committed compiled release, runtime versions, GPU count/model, CUDA availability, exact CUDA 12.8 runtime identity, and bf16 support. It still reports `gpu_execution_authorized=false`; execution requires the separate human authorization recorded in issue #69.
 
 ## Bounded execution sequence
 

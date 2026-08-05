@@ -64,8 +64,14 @@ def run_preflight(paths: RunPaths, *, mode: str, require_snapshot: bool) -> dict
             raise E0HRunReleaseError(f"GPU model mismatch; expected NVIDIA L4, observed={names}")
         if not bool(torch.cuda.is_bf16_supported()):
             raise E0HRunReleaseError("configured GPU does not support bf16")
+        runtime_cuda = str(torch.version.cuda)
+        if runtime_cuda != inputs.environment.cuda_version:
+            raise E0HRunReleaseError(
+                "CUDA runtime mismatch; "
+                f"expected={inputs.environment.cuda_version}, observed={runtime_cuda}"
+            )
         device["names"] = names
-        device["cuda_runtime"] = str(torch.version.cuda)
+        device["cuda_runtime"] = runtime_cuda
     elif mode != "cpu":
         raise E0HRunReleaseError("preflight mode must be cpu or gpu")
 

@@ -75,6 +75,13 @@ def _requirements_text(packages: tuple[dict[str, object], ...]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _locked_version(by_name: dict[str, dict[str, object]], name: str) -> str:
+    package = by_name.get(name)
+    if package is None:
+        raise E0HRunReleaseError(f"python lock omits required package: {name}")
+    return cast(str, package["version"])
+
+
 def verify_python_lock(paths: RunPaths, inputs: E0HRunReleaseInputs) -> dict[str, object]:
     """Verify the committed wheel graph, its digest, and the pip hash lock."""
 
@@ -104,16 +111,29 @@ def verify_python_lock(paths: RunPaths, inputs: E0HRunReleaseInputs) -> dict[str
     packages = _package_receipts(payload)
     by_name = {cast(str, package["name"]): package for package in packages}
     for package_name, environment_field in _EXPECTED_ROOT_PACKAGES.items():
-        package = by_name.get(package_name)
-        if package is None:
-            raise E0HRunReleaseError(f"python lock omits required package: {package_name}")
         expected = getattr(inputs.environment, environment_field)
-        observed = cast(str, package["version"]).split("+", maxsplit=1)[0]
+        observed = _locked_version(by_name, package_name).split("+", maxsplit=1)[0]
         if observed != expected:
             raise E0HRunReleaseError(
                 f"python lock {package_name} version mismatch; "
                 f"expected={expected}, observed={observed}"
             )
+
+    cuda_tag = inputs.environment.cuda_version.replace(".", "")
+    expected_torch_wheel = f"{inputs.environment.torch_version}+cu{cuda_tag}"
+    observed_torch_wheel = _locked_version(by_name, "torch")
+    if observed_torch_wheel != expected_torch_wheel:
+        raise E0HRunReleaseError(
+            "python lock torch CUDA wheel mismatch; "
+            f"expected={expected_torch_wheel}, observed={observed_torch_wheel}"
+        )
+    runtime_version = _locked_version(by_name, "nvidia-cuda-runtime-cu12")
+    runtime_family = ".".join(runtime_version.split(".")[:2])
+    if runtime_family != inputs.environment.cuda_version:
+        raise E0HRunReleaseError(
+            "python lock CUDA runtime family mismatch; "
+            f"expected={inputs.environment.cuda_version}, observed={runtime_family}"
+        )
 
     if requirements_path.is_symlink() or not requirements_path.is_file():
         raise E0HRunReleaseError("hash-locked requirements file is unavailable")

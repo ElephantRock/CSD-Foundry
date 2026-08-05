@@ -1,0 +1,102 @@
+name: E0-H CUDA Freeze Regeneration
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e .
+      - name: Verify the corrected static Python/CUDA lock
+        run: |
+          python - <<'PY'
+          from csd_foundry.empirical.e0h.harness.common import RunPaths, load_inputs
+          from csd_foundry.empirical.e0h.harness.package_lock import verify_python_lock
+
+          paths = RunPaths.resolve("experiments/e0h/v1")
+          verify_python_lock(paths, load_inputs(paths))
+          PY
+      - name: Regenerate and validate the exact compiled release
+        run: |
+          python -m csd_foundry.empirical.e0h.run_release_cli compile \
+            --inputs experiments/e0h/v1/run_inputs.json \
+            --output-dir /tmp/e0h-compiled-release
+          python -m csd_foundry.empirical.e0h.run_release_cli validate \
+            --inputs experiments/e0h/v1/run_inputs.json \
+            --output-dir /tmp/e0h-compiled-release
+          rm -rf experiments/e0h/v1/compiled_release
+          cp -a /tmp/e0h-compiled-release experiments/e0h/v1/compiled_release
+      - name: Regenerate and validate the execution-package manifest
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          from csd_foundry.empirical.e0h.harness.common import RunPaths, load_inputs
+          from csd_foundry.empirical.e0h.harness.package_manifest import (
+              expected_execution_package_paths,
+              verify_execution_package_manifest,
+          )
+
+          claim_boundary = (
+              "The execution-package manifest binds repository bytes needed to reconstruct and "
+              "run E0-H. It does not authorize GPU execution, protected metrics, E1 execution, "
+              "or a reasoning claim."
+          )
+          root = Path.cwd()
+          receipts = []
+          for relative in sorted(expected_execution_package_paths()):
+              path = root / relative
+              if path.is_symlink() or not path.is_file():
+                  raise RuntimeError(f"execution-package member is not a regular file: {relative}")
+              content = path.read_bytes()
+              receipts.append(
+                  {
+                      "path": relative,
+                      "sha256": hashlib.sha256(content).hexdigest(),
+                      "size_bytes": len(content),
+                  }
+              )
+          inputs = json.loads(
+              (root / "experiments/e0h/v1/run_inputs.json").read_text(encoding="utf-8")
+          )
+          python_lock = json.loads(
+              (root / "experiments/e0h/v1/python_lock.json").read_text(encoding="utf-8")
+          )
+          run_contract = root / "experiments/e0h/v1/compiled_release/e0h_run_contract.json"
+          payload = {
+              "schema_version": "e0h-execution-package-manifest/1",
+              "compiler_base_commit": inputs["source_commit"],
+              "run_contract_digest": hashlib.sha256(run_contract.read_bytes()).hexdigest(),
+              "python_lock_digest": python_lock["lock_digest"],
+              "file_count": len(receipts),
+              "files": receipts,
+              "gpu_execution_authorized": False,
+              "claim_boundary": claim_boundary,
+          }
+          manifest = root / "experiments/e0h/v1/execution_package_manifest.json"
+          manifest.write_text(
+              json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          paths = RunPaths.resolve(root / "experiments/e0h/v1")
+          verify_execution_package_manifest(paths, load_inputs(paths))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e0h-cuda-freeze-regeneration
+          path: |
+            experiments/e0h/v1/compiled_release
+            experiments/e0h/v1/execution_package_manifest.json
+          if-no-files-found: error
+          retention-days: 1
