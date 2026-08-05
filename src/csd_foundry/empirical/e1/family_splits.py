@@ -333,13 +333,22 @@ def _transition_reference_shapes(
 
     if isinstance(case.event, Reassess):
         logical_time = case.before.logical_time
-        for item in case.event.new_evidence:
-            evidence_shapes[item.evidence_id] = _evidence_shape(item, logical_time)
-        for item in case.event.new_bases:
-            basis_shapes[item.basis_id] = _basis_shape(item, evidence_shapes)
+        for evidence_item in case.event.new_evidence:
+            evidence_shapes[evidence_item.evidence_id] = _evidence_shape(
+                evidence_item,
+                logical_time,
+            )
+        for basis_item in case.event.new_bases:
+            basis_shapes[basis_item.basis_id] = _basis_shape(
+                basis_item,
+                evidence_shapes,
+            )
     elif isinstance(case.event, RetireControl):
-        item = case.event.retirement_evidence
-        evidence_shapes[item.evidence_id] = _evidence_shape(item, case.before.logical_time)
+        retirement_evidence = case.event.retirement_evidence
+        evidence_shapes[retirement_evidence.evidence_id] = _evidence_shape(
+            retirement_evidence,
+            case.before.logical_time,
+        )
 
     return evidence_shapes, basis_shapes
 
