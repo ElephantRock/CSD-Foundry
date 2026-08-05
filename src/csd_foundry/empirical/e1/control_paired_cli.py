@@ -7,7 +7,10 @@ import json
 from pathlib import Path
 from typing import cast
 
-from csd_foundry.empirical.e1.artifact_set_io import validate_artifact_files
+from csd_foundry.empirical.e1.artifact_set_io import (
+    validate_artifact_files,
+    write_artifact_files,
+)
 from csd_foundry.empirical.e1.control_paired_compiler import (
     E1ControlArtifactBundle,
     E1PairedArtifactBundle,
@@ -15,7 +18,6 @@ from csd_foundry.empirical.e1.control_paired_compiler import (
     compile_e1_conventional_control,
     finalize_e1_paired_artifacts,
     load_conventional_responses,
-    write_artifact_files,
 )
 from csd_foundry.empirical.e1.experiment_contract import (
     E1ExperimentContract,
