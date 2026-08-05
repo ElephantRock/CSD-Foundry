@@ -327,7 +327,7 @@ class E1CurriculumEvaluationContract:
         )
         if len(set(artifact_manifest_evidence_digests)) != len(artifact_manifest_evidence_digests):
             raise FamilySplitError(
-                "curriculum, evaluation, oracle, and verification role digests must be globally distinct"
+                "all artifact, manifest, oracle, and verification digests must be globally distinct"
             )
 
     @property
