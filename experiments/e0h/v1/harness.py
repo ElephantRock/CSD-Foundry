@@ -141,7 +141,8 @@ def _require_context_fit(tokenizer: Any, texts: list[str], context: int) -> None
     over_context = [length for length in lengths if length > context]
     if over_context:
         raise RuntimeError(
-            f"{len(over_context)} training records exceed context length {context}; truncation is forbidden"
+            f"{len(over_context)} training records exceed context length {context}; "
+            "truncation is forbidden"
         )
 
 
