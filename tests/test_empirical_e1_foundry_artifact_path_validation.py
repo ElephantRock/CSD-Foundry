@@ -80,6 +80,4 @@ def test_validator_rejects_symlink_even_when_target_bytes_match(tmp_path: Path) 
     report = _validate(output)
 
     assert not report.success
-    assert report.errors == (
-        f"{artifact.path}: expected a regular non-symlink file",
-    )
+    assert report.errors == (f"{artifact.path}: expected a regular non-symlink file",)
