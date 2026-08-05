@@ -19,7 +19,7 @@ from csd_foundry.empirical.e0h.run_release import (
 from csd_foundry.empirical.e0h.seed_binding import SeedDatasetBinding
 
 # Preserve direct submodule imports while enforcing one exact seed-identity implementation.
-_run_release.SeedDatasetBinding = SeedDatasetBinding
+_run_release.SeedDatasetBinding = SeedDatasetBinding  # type: ignore[misc]
 
 __all__ = [
     "BudgetContract",
