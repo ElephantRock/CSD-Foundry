@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 20
     container:
       image: pytorch/pytorch@sha256:0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726
+    env:
+      PIP_CACHE_DIR: /tmp/e0h-pip-cache
     steps:
       - uses: actions/checkout@v4
 
