@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from csd_foundry.empirical.e1 import (
     E1Split,
     FamilySplitError,
@@ -12,7 +13,6 @@ from csd_foundry.empirical.e1 import (
 from csd_foundry.kernel.events import DependencyChange
 from csd_foundry.scenarios.registry import SCENARIOS
 from csd_foundry.scenarios.spec import ObservationCase, TransitionCase
-
 
 _SOURCE_COMMIT = "b87d42e4103f0c8b07c58f8e8f04dfda5cf5d111"
 
