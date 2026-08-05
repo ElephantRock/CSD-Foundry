@@ -59,9 +59,10 @@ def test_concrete_package_reconstructs_and_remains_non_authorizing() -> None:
     assert package_manifest["file_count"] == len(expected_execution_package_paths())
     assert package_manifest["gpu_execution_authorized"] is False
     assert inputs.evaluation.protected_metrics_access is False
-    assert b'"gpu_execution_authorized":false' in (
-        paths.compiled_release / "e0h_run_contract.json"
-    ).read_bytes()
+    assert (
+        b'"gpu_execution_authorized":false'
+        in (paths.compiled_release / "e0h_run_contract.json").read_bytes()
+    )
 
 
 def test_python_requirements_tamper_fails_closed(tmp_path: Path) -> None:
@@ -102,24 +103,14 @@ def test_execution_package_member_tamper_fails_closed(tmp_path: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
     manifest_source = _RUN_ROOT / "execution_package_manifest.json"
-    manifest_destination = (
-        temporary_root / "experiments" / "e0h" / "v1" / manifest_source.name
-    )
+    manifest_destination = temporary_root / "experiments" / "e0h" / "v1" / manifest_source.name
     shutil.copy2(manifest_source, manifest_destination)
 
     paths = RunPaths.resolve(temporary_root / "experiments" / "e0h" / "v1")
     inputs = load_inputs(paths)
     verify_execution_package_manifest(paths, inputs)
 
-    target = (
-        temporary_root
-        / "src"
-        / "csd_foundry"
-        / "empirical"
-        / "e0h"
-        / "harness"
-        / "common.py"
-    )
+    target = temporary_root / "src" / "csd_foundry" / "empirical" / "e0h" / "harness" / "common.py"
     target.write_bytes(target.read_bytes() + b"\n")
     with pytest.raises(E0HRunReleaseError, match="digest mismatch"):
         verify_execution_package_manifest(paths, inputs)
