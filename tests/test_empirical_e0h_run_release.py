@@ -219,6 +219,20 @@ def test_e0h_requires_exact_seed_boundary_and_metric_denial() -> None:
         replace(_inputs().evaluation, protected_metrics_access=True)
 
 
+def test_e0h_rejects_scalar_type_confusion_and_mutable_version_aliases() -> None:
+    with pytest.raises(E0HRunReleaseError, match="sequence_packing must be a boolean"):
+        replace(_inputs().recipe, sequence_packing=1)
+    with pytest.raises(E0HRunReleaseError, match="protected_metrics_access must be a boolean"):
+        replace(_inputs().evaluation, protected_metrics_access=0)
+    with pytest.raises(E0HRunReleaseError, match="mutable version tokens"):
+        replace(_inputs().environment, python_version="3.latest")
+    with pytest.raises(E0HRunReleaseError, match="concrete release identifier"):
+        replace(
+            _inputs().storage,
+            checkpoint_uri="github-release://ElephantRock/CSD-Foundry/",
+        )
+
+
 def test_e0h_loader_rejects_noncanonical_and_unknown_fields() -> None:
     raw = _raw(_inputs())
     raw["unexpected"] = True
