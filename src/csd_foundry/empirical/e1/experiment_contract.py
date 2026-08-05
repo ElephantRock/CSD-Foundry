@@ -67,9 +67,21 @@ class E1ExperimentContract:
         ):
             raise FamilySplitError("excluded source-test scenario identifiers must be sorted")
 
-        assigned_count = sum(len(item.scenario_ids) for item in self.split_manifest.assignments)
-        if assigned_count != self.eligible_scenario_count:
+        assigned_scenario_ids = tuple(
+            scenario_id
+            for assignment in self.split_manifest.assignments
+            for scenario_id in assignment.scenario_ids
+        )
+        if len(assigned_scenario_ids) != len(set(assigned_scenario_ids)):
+            raise FamilySplitError("eligible scenario identifiers must be unique across assignments")
+        if len(assigned_scenario_ids) != self.eligible_scenario_count:
             raise FamilySplitError("eligible scenario count does not match split assignments")
+
+        overlap = sorted(set(assigned_scenario_ids) & set(self.excluded_source_test_scenario_ids))
+        if overlap:
+            raise FamilySplitError(
+                f"eligible and excluded source-test scenario identifiers overlap: {overlap}"
+            )
 
         for assignment in self.split_manifest.assignments:
             expected_source_split = _EXPECTED_SOURCE_SPLIT[assignment.split]
