@@ -13,6 +13,7 @@ from csd_foundry.empirical.e1 import (
 from csd_foundry.kernel.events import DependencyChange
 from csd_foundry.scenarios.registry import SCENARIOS
 from csd_foundry.scenarios.spec import ObservationCase, TransitionCase
+from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
 _SOURCE_COMMIT = "b87d42e4103f0c8b07c58f8e8f04dfda5cf5d111"
 
@@ -207,6 +208,12 @@ def test_family_identity_preserves_sequence_group_coordinates() -> None:
         case_id="M-11/order-b/2-reassess",
     )
     regrouped = replace(scenario, cases=tuple(regrouped_cases))
+    split_prefix_cases = list(scenario.cases)
+    split_prefix_cases[1] = replace(
+        split_prefix_cases[1],
+        case_id="OTHER/order-a/2-reassess",
+    )
+    split_prefix = replace(scenario, cases=tuple(split_prefix_cases))
 
     assert (
         derive_scenario_family_identity(scenario).family_digest
@@ -215,6 +222,10 @@ def test_family_identity_preserves_sequence_group_coordinates() -> None:
     assert (
         derive_scenario_family_identity(scenario).family_digest
         != derive_scenario_family_identity(regrouped).family_digest
+    )
+    assert (
+        derive_scenario_family_identity(scenario).family_digest
+        != derive_scenario_family_identity(split_prefix).family_digest
     )
 
 
@@ -259,6 +270,29 @@ def test_manifest_assigns_an_entire_symbolic_family_to_one_split() -> None:
     )
     assert development.scenario_ids == ("M-03", "M-03-PARAPHRASE")
     assert manifest.to_dict()["family_overlap"] is False
+
+
+def test_manifest_digest_binds_overlap_and_claim_boundary() -> None:
+    scenarios = tuple(SCENARIOS.values())
+    development_digest = derive_scenario_family_identity(scenarios[0]).family_digest
+    manifest = compile_family_split_manifest(
+        scenarios,
+        development_family_digests=frozenset({development_digest}),
+        release="e1-dev",
+        source_commit=_SOURCE_COMMIT,
+    )
+    payload = manifest.to_dict()
+    digest = payload.pop("manifest_digest")
+
+    assert canonical_sha256(payload) == digest
+
+    broadened = dict(payload)
+    broadened["claim_boundary"] = "This manifest proves all evaluation validity."
+    assert canonical_sha256(broadened) != digest
+
+    overlap_changed = dict(payload)
+    overlap_changed["family_overlap"] = True
+    assert canonical_sha256(overlap_changed) != digest
 
 
 def test_manifest_is_independent_of_scenario_input_order() -> None:
