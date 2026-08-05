@@ -38,9 +38,8 @@ _CLAIM_BOUNDARY = (
     "format while accepting externally generated canonical-JSON targets without executable-"
     "oracle, invariant, or mutation-derived semantic validation. Paired finalization establishes "
     "artifact identity, prompt pairing, tokenizer-count coverage, no-truncation eligibility, and "
-    "equal processed token budgets under one fixed context length. It does not establish control "
-    "label correctness, authorize GPU execution, expose protected metrics, or establish learning "
-    "value."
+    "equal exact token budgets under one tokenizer revision. It does not establish control label "
+    "correctness, authorize GPU execution, expose protected metrics, or establish learning value."
 )
 _CONTROL_FILES = {
     "prompts": "control_prompts.jsonl",
@@ -51,6 +50,11 @@ _CONTROL_FILES = {
 _PAIRED_FILES = {
     "contract": "paired_e1_contract.json",
     "manifest": "paired_e1_manifest.json",
+}
+_PROHIBITED_CONTROL_FIELDS = {
+    "reference_label",
+    "executable_oracle_receipt_digest",
+    "independent_verification_receipt_digest",
 }
 
 
@@ -136,10 +140,12 @@ class TokenizedRecordCount:
 
 @dataclass(frozen=True, slots=True)
 class E1TokenCountInventory:
-    """Tokenizer-bound no-truncation evidence for both E1 training arms."""
+    """Artifact- and tokenizer-bound no-truncation evidence for both E1 arms."""
 
     tokenizer_revision_digest: str
     counting_command_digest: str
+    control_artifact_digest: str
+    foundry_artifact_digest: str
     context_length: int
     control: tuple[TokenizedRecordCount, ...]
     foundry: tuple[TokenizedRecordCount, ...]
@@ -147,9 +153,21 @@ class E1TokenCountInventory:
     def __post_init__(self) -> None:
         _require_digest(self.tokenizer_revision_digest, field="tokenizer_revision_digest")
         _require_digest(self.counting_command_digest, field="counting_command_digest")
+        _require_digest(self.control_artifact_digest, field="control_artifact_digest")
+        _require_digest(self.foundry_artifact_digest, field="foundry_artifact_digest")
+        if self.control_artifact_digest == self.foundry_artifact_digest:
+            raise E1ControlArtifactError("control and Foundry artifact digests must differ")
         _require_positive_int(self.context_length, field="context_length")
         self._validate_side(self.control, prefix=_CONTROL_PREFIX, field="control")
         self._validate_side(self.foundry, prefix=_FOUNDRY_PREFIX, field="foundry")
+        if len(self.control) != len(self.foundry):
+            raise E1ControlArtifactError(
+                "control and Foundry token inventories must contain the same record count"
+            )
+        if self.control_token_count != self.foundry_token_count:
+            raise E1ControlArtifactError(
+                "control and Foundry token inventories must have equal exact token counts"
+            )
 
     def _validate_side(
         self,
@@ -160,9 +178,9 @@ class E1TokenCountInventory:
     ) -> None:
         if not isinstance(values, tuple) or not values:
             raise E1ControlArtifactError(f"{field} token counts must be a nonempty tuple")
-        ids = tuple(item.record_id for item in values)
         if any(not isinstance(item, TokenizedRecordCount) for item in values):
             raise E1ControlArtifactError(f"{field} token counts contain an invalid record")
+        ids = tuple(item.record_id for item in values)
         if any(not record_id.startswith(prefix) for record_id in ids):
             raise E1ControlArtifactError(f"{field} token counts use a wrong record prefix")
         if ids != tuple(sorted(ids)) or len(ids) != len(set(ids)):
@@ -176,20 +194,32 @@ class E1TokenCountInventory:
             )
 
     @property
-    def processed_token_count_per_arm(self) -> int:
-        if len(self.control) != len(self.foundry):
-            raise E1ControlArtifactError(
-                "control and Foundry token inventories must contain the same record count"
-            )
-        return len(self.control) * self.context_length
+    def control_token_count(self) -> int:
+        return sum(item.raw_token_count for item in self.control)
+
+    @property
+    def foundry_token_count(self) -> int:
+        return sum(item.raw_token_count for item in self.foundry)
+
+    @property
+    def token_count_per_arm(self) -> int:
+        if self.control_token_count != self.foundry_token_count:
+            raise E1ControlArtifactError("token inventories are not exactly matched")
+        return self.control_token_count
+
+    @property
+    def inventory_digest(self) -> str:
+        return canonical_sha256(self.to_dict())
 
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": "e1-token-count-inventory/1",
             "tokenizer_revision_digest": self.tokenizer_revision_digest,
             "counting_command_digest": self.counting_command_digest,
+            "control_artifact_digest": self.control_artifact_digest,
+            "foundry_artifact_digest": self.foundry_artifact_digest,
             "context_length": self.context_length,
-            "processed_token_count_per_arm": self.processed_token_count_per_arm,
+            "token_count_per_arm": self.token_count_per_arm,
             "control": [item.to_dict() for item in self.control],
             "foundry": [item.to_dict() for item in self.foundry],
         }
@@ -256,6 +286,7 @@ class E1PairedArtifactBundle:
         return {
             "schema_version": "e1-paired-artifact-bundle/1",
             "contract_digest": self.contract.contract_digest,
+            "token_inventory_digest": self.token_inventory.inventory_digest,
             "token_inventory": self.token_inventory.to_dict(),
             "files": [item.receipt() for item in self.files],
             "claim_boundary": _CLAIM_BOUNDARY,
@@ -346,8 +377,8 @@ def compile_e1_conventional_control(
         target = _canonical_target(response.target, record_id=response.record_id)
         records.append(
             {
-                "schema_version": "e1-conventional-control-record/1",
                 **prompt,
+                "schema_version": "e1-conventional-control-record/1",
                 "label_authority": "conventional_synthetic",
                 "target": target,
             }
@@ -382,9 +413,7 @@ def compile_e1_conventional_control(
             }
         ),
     )
-    scenario_ids = tuple(
-        sorted({str(record["scenario_id"]) for record in control_records})
-    )
+    scenario_ids = tuple(sorted({str(record["scenario_id"]) for record in control_records}))
     record_ids = tuple(str(record["record_id"]) for record in control_records)
     manifest_payload = {
         "schema_version": "e1-control-curriculum-manifest/1",
@@ -419,7 +448,9 @@ def compile_e1_conventional_control(
         manifest_file.sha256,
     }
     if len(role_digests) != 4:
-        raise E1ControlArtifactError("control prompt, artifact, evidence, and manifest digests differ")
+        raise E1ControlArtifactError(
+            "control prompt, artifact, evidence, and manifest digests must differ"
+        )
     return E1ControlArtifactBundle(
         release=release,
         source_commit=foundry.source_commit,
@@ -441,6 +472,44 @@ def compile_e1_conventional_control(
 
 def _token_ids(values: tuple[TokenizedRecordCount, ...]) -> tuple[str, ...]:
     return tuple(item.record_id for item in values)
+
+
+def _validate_paired_records(
+    foundry_records: tuple[dict[str, object], ...],
+    control_records: tuple[dict[str, object], ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    foundry_ids = tuple(str(record.get("record_id", "")) for record in foundry_records)
+    control_ids = tuple(str(record.get("record_id", "")) for record in control_records)
+    expected_control_ids = tuple(_control_record_id(record_id) for record_id in foundry_ids)
+    if control_ids != expected_control_ids:
+        raise E1ControlArtifactError("control records do not pair one-to-one with Foundry records")
+    paired_fields = (
+        "split",
+        "scenario_id",
+        "family_digest",
+        "case_id",
+        "case_type",
+        "task_format_digest",
+        "prompt_messages",
+    )
+    for foundry_record, control_record in zip(
+        foundry_records, control_records, strict=True
+    ):
+        control_id = str(control_record["record_id"])
+        if control_record.get("paired_foundry_record_id") != foundry_record["record_id"]:
+            raise E1ControlArtifactError(f"{control_id}: paired Foundry record ID mismatch")
+        if control_record.get("label_authority") != "conventional_synthetic":
+            raise E1ControlArtifactError(f"{control_id}: control label authority mismatch")
+        prohibited = sorted(_PROHIBITED_CONTROL_FIELDS & set(control_record))
+        if prohibited:
+            raise E1ControlArtifactError(
+                f"{control_id}: control record carries prohibited Foundry fields: {prohibited}"
+            )
+        for field in paired_fields:
+            if control_record.get(field) != foundry_record.get(field):
+                raise E1ControlArtifactError(f"{control_id}: paired field mismatch: {field}")
+        _canonical_target(control_record.get("target"), record_id=control_id)
+    return foundry_ids, control_ids
 
 
 def finalize_e1_paired_artifacts(
@@ -475,18 +544,20 @@ def finalize_e1_paired_artifacts(
     if control.task_format_digest != foundry.task_format_digest:
         raise E1ControlArtifactError("control and Foundry task formats differ")
 
-    foundry_records = load_artifact_records(foundry.file("foundry_train.jsonl").content)
-    control_records = load_artifact_records(control.file("control_train.jsonl").content)
-    foundry_ids = tuple(str(record["record_id"]) for record in foundry_records)
-    control_ids = tuple(str(record["record_id"]) for record in control_records)
-    expected_control_ids = tuple(_control_record_id(record_id) for record_id in foundry_ids)
-    if control_ids != expected_control_ids:
-        raise E1ControlArtifactError("control records do not pair one-to-one with Foundry records")
+    foundry_train = foundry.file("foundry_train.jsonl")
+    control_train = control.file("control_train.jsonl")
+    if token_inventory.control_artifact_digest != control_train.sha256:
+        raise E1ControlArtifactError("control tokenizer inventory artifact digest mismatch")
+    if token_inventory.foundry_artifact_digest != foundry_train.sha256:
+        raise E1ControlArtifactError("Foundry tokenizer inventory artifact digest mismatch")
+    foundry_records = load_artifact_records(foundry_train.content)
+    control_records = load_artifact_records(control_train.content)
+    foundry_ids, control_ids = _validate_paired_records(foundry_records, control_records)
     if _token_ids(token_inventory.control) != control_ids:
         raise E1ControlArtifactError("control tokenizer inventory does not cover exact records")
     if _token_ids(token_inventory.foundry) != foundry_ids:
         raise E1ControlArtifactError("Foundry tokenizer inventory does not cover exact records")
-    processed_token_count = token_inventory.processed_token_count_per_arm
+    token_count = token_inventory.token_count_per_arm
 
     training_scenario_ids = foundry.training_scenario_ids
     if control.scenario_ids != training_scenario_ids:
@@ -494,26 +565,26 @@ def finalize_e1_paired_artifacts(
     control_artifact = E1CurriculumArtifact(
         arm=E1CurriculumArm.CONTROL,
         label_authority=E1LabelAuthority.CONVENTIONAL_SYNTHETIC,
-        artifact_digest=control.file("control_train.jsonl").sha256,
+        artifact_digest=control_train.sha256,
         manifest_digest=control.file("control_curriculum_manifest.json").sha256,
         generation_command_digest=control.generation_command_digest,
         validation_command_digest=control.validation_command_digest,
         task_format_digest=control.task_format_digest,
         scenario_ids=control.scenario_ids,
         record_count=control.record_count,
-        token_count=processed_token_count,
+        token_count=token_count,
     )
     foundry_artifact = E1CurriculumArtifact(
         arm=E1CurriculumArm.FOUNDRY,
         label_authority=E1LabelAuthority.EXECUTABLE_SEMANTICS,
-        artifact_digest=foundry.file("foundry_train.jsonl").sha256,
+        artifact_digest=foundry_train.sha256,
         manifest_digest=foundry.file("foundry_curriculum_manifest.json").sha256,
         generation_command_digest=foundry.generation_command_digest,
         validation_command_digest=foundry.validation_command_digest,
         task_format_digest=foundry.task_format_digest,
         scenario_ids=foundry.training_scenario_ids,
         record_count=foundry.training_record_count,
-        token_count=processed_token_count,
+        token_count=token_count,
         executable_oracle_evidence_digest=foundry.file(
             "executable_oracle_evidence.json"
         ).sha256,
@@ -557,11 +628,11 @@ def finalize_e1_paired_artifacts(
                 "source_commit": source_commit,
                 "selection_contract_digest": selection.contract_digest,
                 "contract": contract_file.receipt(),
-                "control_artifact": control.file("control_train.jsonl").receipt(),
+                "control_artifact": control_train.receipt(),
                 "control_manifest": control.file(
                     "control_curriculum_manifest.json"
                 ).receipt(),
-                "foundry_artifact": foundry.file("foundry_train.jsonl").receipt(),
+                "foundry_artifact": foundry_train.receipt(),
                 "foundry_manifest": foundry.file(
                     "foundry_curriculum_manifest.json"
                 ).receipt(),
@@ -578,7 +649,8 @@ def finalize_e1_paired_artifacts(
                     "independent_verification_evidence.json"
                 ).receipt(),
                 "token_inventory": token_inventory.to_dict(),
-                "processed_token_count_per_arm": processed_token_count,
+                "token_inventory_digest": token_inventory.inventory_digest,
+                "token_count_per_arm": token_count,
                 "protected_metric_visibility": (
                     "after_all_predetermined_checkpoints_complete"
                 ),
@@ -616,6 +688,8 @@ def load_conventional_responses(content: bytes) -> tuple[ConventionalControlResp
         parsed = load_json_text(line)
         if not isinstance(parsed, dict):
             raise E1ControlArtifactError(f"response line {line_number} is not an object")
+        if canonical_json_text(parsed).removesuffix("\n") != line:
+            raise E1ControlArtifactError(f"response line {line_number} is not canonical JSON")
         record_id = parsed.get("record_id")
         target = parsed.get("target")
         if not isinstance(record_id, str) or not isinstance(target, str):
@@ -627,15 +701,19 @@ def load_conventional_responses(content: bytes) -> tuple[ConventionalControlResp
 
 
 def load_token_inventory(content: str) -> E1TokenCountInventory:
-    """Load one closed token-count inventory object."""
+    """Load one closed canonical token-count inventory object."""
 
     parsed = load_json_text(content)
     if not isinstance(parsed, dict):
         raise E1ControlArtifactError("token inventory is not an object")
+    if canonical_json_text(parsed) != content:
+        raise E1ControlArtifactError("token inventory bytes are not canonical JSON")
     expected_fields = {
         "schema_version",
         "tokenizer_revision_digest",
         "counting_command_digest",
+        "control_artifact_digest",
+        "foundry_artifact_digest",
         "context_length",
         "control",
         "foundry",
@@ -665,6 +743,8 @@ def load_token_inventory(content: str) -> E1TokenCountInventory:
     return E1TokenCountInventory(
         tokenizer_revision_digest=cast(str, parsed["tokenizer_revision_digest"]),
         counting_command_digest=cast(str, parsed["counting_command_digest"]),
+        control_artifact_digest=cast(str, parsed["control_artifact_digest"]),
+        foundry_artifact_digest=cast(str, parsed["foundry_artifact_digest"]),
         context_length=cast(int, parsed["context_length"]),
         control=load_side(parsed["control"], field="control"),
         foundry=load_side(parsed["foundry"], field="foundry"),
