@@ -90,7 +90,7 @@ def finalize_execution(
             raise E0HRunReleaseError("failure reason exceeds 500 characters")
 
     remaining = Decimal(inputs.budget.aggregate_gpu_minutes) - Decimal(minutes)
-    result = {
+    result: dict[str, object] = {
         "schema_version": "e0h-execution-result/1",
         "classification": classification,
         "failure_reason": failure_reason,
