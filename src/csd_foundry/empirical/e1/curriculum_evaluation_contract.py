@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
-import re
 
 from csd_foundry.empirical.e1.execution_splits import E1Split, FamilySplitError
 from csd_foundry.empirical.e1.experiment_contract import E1ExperimentContract
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
 _CONTRACT_SCHEMA_VERSION = "e1-curriculum-evaluation-contract/1"
-_PRIMARY_METRIC_ID = (
-    "structural-holdout-exact-semantic-decision-accuracy/family-macro/1"
-)
+_PRIMARY_METRIC_ID = "structural-holdout-exact-semantic-decision-accuracy/family-macro/1"
 _SAFETY_METRIC_ID = "clean-case-regression/base-and-control/1"
 _PERMITTED_LIVE_TELEMETRY = (
     "checkpoint_creation",
@@ -212,9 +210,7 @@ class E1CurriculumEvaluationContract:
             self.development_scenario_ids,
             field="development_scenario_ids",
         )
-        overlap = sorted(
-            set(self.training_scenario_ids) & set(self.development_scenario_ids)
-        )
+        overlap = sorted(set(self.training_scenario_ids) & set(self.development_scenario_ids))
         if overlap:
             raise FamilySplitError(
                 f"training and development scenario identifiers overlap: {overlap}"
@@ -287,9 +283,7 @@ def compile_e1_curriculum_evaluation_contract(
     """Bind paired curricula and shared development evaluation to one E1 selection."""
 
     if source_commit != selection_contract.source_commit:
-        raise FamilySplitError(
-            "curriculum/evaluation and selection source commits must match"
-        )
+        raise FamilySplitError("curriculum/evaluation and selection source commits must match")
     training_scenario_ids = _scenario_ids_for_split(selection_contract, E1Split.TRAIN)
     development_scenario_ids = _scenario_ids_for_split(
         selection_contract,
