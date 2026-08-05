@@ -1,22 +1,25 @@
 """Tests for the repository-side E1 experiment selection contract."""
 
+from collections.abc import Iterable
 from dataclasses import replace
 
 import pytest
 
 from csd_foundry.empirical.e1 import (
+    E1ExperimentContract,
     E1Split,
     FamilySplitError,
     compile_e1_experiment_contract,
 )
 from csd_foundry.scenarios.registry import SCENARIOS
+from csd_foundry.scenarios.spec import ScenarioSpec
 from csd_foundry.synthesis.v0_4.serialization import canonical_sha256
 
 _SOURCE_COMMIT = "94fb719c89a1adbc97a5c1e188c1c038e7253dab"
 _RELEASE = "e1-candidate/1"
 
 
-def _compile(scenarios: object = None):  # type: ignore[no-untyped-def]
+def _compile(scenarios: Iterable[ScenarioSpec] | None = None) -> E1ExperimentContract:
     selected = SCENARIOS.values() if scenarios is None else scenarios
     return compile_e1_experiment_contract(
         selected,
@@ -29,9 +32,7 @@ def test_current_catalog_compiles_expected_candidate_partition() -> None:
     contract = _compile()
     assignments = contract.split_manifest.assignments
     scenario_counts = {
-        split: sum(
-            len(item.scenario_ids) for item in assignments if item.split is split
-        )
+        split: sum(len(item.scenario_ids) for item in assignments if item.split is split)
         for split in E1Split
     }
 
