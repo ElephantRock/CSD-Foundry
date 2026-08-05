@@ -227,21 +227,21 @@ def _transition_case(
         )
     if (replay_after, replay_trace) != (oracle.after, oracle.trace):
         raise E1ArtifactError(f"{case.case_id}: replay disagrees with oracle")
-    task_input = {
+    task_input: dict[str, object] = {
         "schema_version": "e1-semantic-decision-input/1",
         "case_type": "transition",
         "before": to_json_value(before),
         "event_type": type(case.event).__name__,
         "event": to_json_value(case.event),
     }
-    label = {
+    label: dict[str, object] = {
         "schema_version": "e1-semantic-decision-label/1",
         "case_type": "transition",
         "acceptance": "accepted",
         "after": to_json_value(oracle.after),
         "trace": to_json_value(oracle.trace),
     }
-    oracle_receipt = {
+    oracle_receipt: dict[str, object] = {
         "schema_version": "e1-executable-oracle-case/1",
         "scenario_id": spec.scenario_id,
         "case_id": case.case_id,
@@ -255,7 +255,7 @@ def _transition_case(
         "trace_digest": canonical_sha256(oracle.trace),
         "label_digest": canonical_sha256(label),
     }
-    verification_receipt = {
+    verification_receipt: dict[str, object] = {
         "schema_version": "e1-independent-verification-case/1",
         "scenario_id": spec.scenario_id,
         "case_id": case.case_id,
@@ -276,20 +276,20 @@ def _observation_case(
     violations = (*validate_state(case.state), *validate_temporal_state(case.state))
     if violations:
         raise E1ArtifactError(f"{case.case_id}: invalid observation: {_violations(violations)}")
-    task_input = {
+    task_input: dict[str, object] = {
         "schema_version": "e1-semantic-decision-input/1",
         "case_type": "observation",
         "state": to_json_value(case.state),
         "assertion": case.assertion,
     }
-    label = {
+    label: dict[str, object] = {
         "schema_version": "e1-semantic-decision-label/1",
         "case_type": "observation",
         "acceptance": "accepted",
         "assertion_status": "holds",
         "state": to_json_value(case.state),
     }
-    oracle = {
+    oracle: dict[str, object] = {
         "schema_version": "e1-executable-oracle-case/1",
         "scenario_id": spec.scenario_id,
         "case_id": case.case_id,
@@ -299,7 +299,7 @@ def _observation_case(
         "state_digest": canonical_sha256(case.state),
         "label_digest": canonical_sha256(label),
     }
-    verification = {
+    verification: dict[str, object] = {
         "schema_version": "e1-independent-verification-case/1",
         "scenario_id": spec.scenario_id,
         "case_id": case.case_id,
@@ -325,7 +325,7 @@ def _rejected_case(
         raise E1ArtifactError(
             f"{case.case_id}: rejection evidence incomplete; missing={sorted(missing)}"
         )
-    task_input = {
+    task_input: dict[str, object] = {
         "schema_version": "e1-semantic-decision-input/1",
         "case_type": "rejected_transition",
         "before": to_json_value(case.before),
@@ -333,13 +333,13 @@ def _rejected_case(
         "event": None if case.event is None else to_json_value(case.event),
         "proposed_after": to_json_value(case.proposed_after),
     }
-    label = {
+    label: dict[str, object] = {
         "schema_version": "e1-semantic-decision-label/1",
         "case_type": "rejected_transition",
         "acceptance": "rejected",
         "invariant_ids": list(invariant_ids),
     }
-    oracle = {
+    oracle: dict[str, object] = {
         "schema_version": "e1-executable-oracle-case/1",
         "scenario_id": spec.scenario_id,
         "case_id": case.case_id,
@@ -348,7 +348,7 @@ def _rejected_case(
         "input_digest": canonical_sha256(task_input),
         "label_digest": canonical_sha256(label),
     }
-    verification = {
+    verification: dict[str, object] = {
         "schema_version": "e1-independent-verification-case/1",
         "scenario_id": spec.scenario_id,
         "case_id": case.case_id,
