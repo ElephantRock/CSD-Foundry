@@ -137,7 +137,9 @@ def test_contract_embeds_selection_and_binds_no_peeking_policy() -> None:
     assert isinstance(nested_selection, dict)
     assert nested_selection["contract_digest"] == contract.selection_contract_digest
     assert payload["selection_contract_digest"] == contract.selection_contract_digest
-    assert contract.training_scenario_ids == _scenario_ids(contract.selection_contract, E1Split.TRAIN)
+    assert contract.training_scenario_ids == _scenario_ids(
+        contract.selection_contract, E1Split.TRAIN
+    )
     assert contract.development_scenario_ids == _scenario_ids(
         contract.selection_contract, E1Split.DEVELOPMENT
     )
