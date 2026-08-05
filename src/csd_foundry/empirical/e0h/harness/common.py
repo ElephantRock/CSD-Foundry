@@ -185,7 +185,10 @@ def verify_snapshot_manifest(paths: RunPaths, inputs: E0HRunReleaseInputs) -> di
         raise E0HRunReleaseError("unexpected snapshot manifest schema")
     if manifest["repository"] != "HuggingFaceTB/SmolLM2-135M-Instruct":
         raise E0HRunReleaseError("unexpected model repository")
-    if manifest["revision"] != inputs.model.revision or inputs.model.revision != inputs.tokenizer.revision:
+    if (
+        manifest["revision"] != inputs.model.revision
+        or inputs.model.revision != inputs.tokenizer.revision
+    ):
         raise E0HRunReleaseError("snapshot revision does not match model and tokenizer inputs")
 
     receipts = _manifest_files(manifest)
@@ -225,9 +228,7 @@ def verify_snapshot_manifest(paths: RunPaths, inputs: E0HRunReleaseInputs) -> di
     if inputs.tokenizer.content_digest != tokenizer_digest:
         raise E0HRunReleaseError("run inputs do not bind the tokenizer snapshot digest")
 
-    model_receipt = next(
-        receipt for receipt in receipts if receipt["path"] == "model.safetensors"
-    )
+    model_receipt = next(receipt for receipt in receipts if receipt["path"] == "model.safetensors")
     if inputs.model.content_digest != model_receipt["sha256"]:
         raise E0HRunReleaseError("run inputs do not bind the model weight digest")
     return manifest
