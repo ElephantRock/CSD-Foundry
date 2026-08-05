@@ -696,7 +696,9 @@ def compile_e1_foundry_artifacts(
                 "family_count": development_family_count,
                 "record_count": len(development_records),
                 "artifact": development_file.receipt(),
-                "metric_execution_status": ("not_executed_protected_until_checkpoints_complete"),
+                "metric_execution_status": (
+                    "not_executed_protected_until_checkpoints_complete"
+                ),
             }
         ),
     )
@@ -801,8 +803,12 @@ def validate_e1_foundry_artifacts(
         )
     for item in expected.files:
         path = directory / item.path
-        if path.is_file() and path.read_bytes() != item.content:
-            observed = hashlib.sha256(path.read_bytes()).hexdigest()
+        if path.is_symlink() or not path.is_file():
+            errors.append(f"{item.path}: expected a regular non-symlink file")
+            continue
+        observed_bytes = path.read_bytes()
+        if observed_bytes != item.content:
+            observed = hashlib.sha256(observed_bytes).hexdigest()
             errors.append(f"{item.path}: expected {item.sha256}, observed {observed}")
     return E1ArtifactValidationReport(not errors, tuple(errors))
 
