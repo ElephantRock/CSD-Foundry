@@ -159,8 +159,13 @@ def test_contract_rejects_curriculum_or_evaluation_scenario_drift() -> None:
     with pytest.raises(FamilySplitError, match="Foundry curriculum does not match"):
         _compile(foundry=replace(foundry, scenario_ids=foundry.scenario_ids[1:]))
 
+    drifted_evaluation = replace(
+        evaluation,
+        scenario_ids=evaluation.scenario_ids[1:],
+        family_count=evaluation.family_count - 1,
+    )
     with pytest.raises(FamilySplitError, match="evaluation artifact does not match"):
-        _compile(evaluation=replace(evaluation, scenario_ids=evaluation.scenario_ids[1:]))
+        _compile(evaluation=drifted_evaluation)
 
 
 def test_contract_rejects_family_count_drift_and_wrong_runtime_artifacts() -> None:
