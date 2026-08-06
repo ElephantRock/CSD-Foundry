@@ -123,9 +123,7 @@ def test_compiled_release_reconstructs_exactly() -> None:
 
 def test_compiled_release_denies_gpu_execution() -> None:
     contract = json.loads(
-        (RELEASE_ROOT / "compiled_release" / "e0h_run_contract.json").read_text(
-            encoding="utf-8"
-        )
+        (RELEASE_ROOT / "compiled_release" / "e0h_run_contract.json").read_text(encoding="utf-8")
     )
     assert contract["gpu_execution_authorized"] is False
     assert contract["required_terminal_classification"] == [
