@@ -62,5 +62,8 @@ module = "csd_foundry.empirical.e0h.windows_native"
 disable_error_code = ["attr-defined", "import-not-found"]
 
 [tool.ruff.lint.per-file-ignores]
+"experiments/e0h/windows_native_v1/compile_release.py" = ["UP035"]
+"experiments/e0h/windows_native_v1/native_controller.py" = ["UP035"]
 "scripts/generate_csd_reasoning_seed.py" = ["E501"]
+"src/csd_foundry/empirical/e0h/windows_native.py" = ["UP035"]
 "src/csd_foundry/kernel/temporal_invariants.py" = ["E501"]
