@@ -112,8 +112,7 @@ def _validate_environment(
     framework = observed.get("framework")
     hardware = observed.get("hardware")
     if not all(
-        isinstance(value, Mapping)
-        for value in (operating_system, python, framework, hardware)
+        isinstance(value, Mapping) for value in (operating_system, python, framework, hardware)
     ):
         raise RuntimeError("observed environment has an invalid shape")
     assert isinstance(operating_system, Mapping)
@@ -194,9 +193,7 @@ def _validate_distribution_requirements(
     checked: list[dict[str, str]] = []
     for raw in requirements:
         requirement = Requirement(raw)
-        if requirement.marker is not None and not requirement.marker.evaluate(
-            {"extra": ""}
-        ):
+        if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
             continue
         normalized = _normalized_name(requirement.name)
         if normalized not in pins:
@@ -240,13 +237,10 @@ def _training_stack_receipt() -> dict[str, object]:
         "pyarrow_version": str(pyarrow.__version__),
         "trainer_class": f"{trainer_class.__module__}.{trainer_class.__name__}",
         "training_arguments_class": (
-            f"{training_arguments_class.__module__}."
-            f"{training_arguments_class.__name__}"
+            f"{training_arguments_class.__module__}.{training_arguments_class.__name__}"
         ),
         "auto_model_class": f"{auto_model.__module__}.{auto_model.__name__}",
-        "auto_tokenizer_class": (
-            f"{auto_tokenizer.__module__}.{auto_tokenizer.__name__}"
-        ),
+        "auto_tokenizer_class": (f"{auto_tokenizer.__module__}.{auto_tokenizer.__name__}"),
     }
 
 
@@ -316,9 +310,7 @@ def main() -> None:
             "package_count": len(inventory),
             "package_inventory_digest": inventory_digest,
             "expected_package_count": inputs["candidate_evidence"]["package_count"],
-            "expected_package_inventory_digest": environment_raw[
-                "host_inventory_digest"
-            ],
+            "expected_package_inventory_digest": environment_raw["host_inventory_digest"],
         },
     )
     write_canonical_json(
@@ -329,9 +321,7 @@ def main() -> None:
             "requirements": requirement_receipt,
         },
     )
-    write_canonical_json(
-        args.output_dir / "training_stack_preflight.json", training_stack
-    )
+    write_canonical_json(args.output_dir / "training_stack_preflight.json", training_stack)
     write_canonical_json(
         args.output_dir / "tokenization_receipt.json",
         base.tokenize(compatibility_inputs),

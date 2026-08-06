@@ -47,9 +47,7 @@ def _load_canonical(path: Path) -> dict[str, object]:
     return value
 
 
-def _environment_lock(
-    raw: Mapping[str, object], candidate_evidence: object
-) -> dict[str, object]:
+def _environment_lock(raw: Mapping[str, object], candidate_evidence: object) -> dict[str, object]:
     observed = {field: raw.get(field) for field in _EXPECTED_ENVIRONMENT}
     mismatches = {
         field: {"expected": expected, "observed": observed[field]}
@@ -93,9 +91,7 @@ def _environment_lock(
     }
 
 
-def compile_files(
-    inputs: dict[str, object], dependency: dict[str, object]
-) -> dict[str, object]:
+def compile_files(inputs: dict[str, object], dependency: dict[str, object]) -> dict[str, object]:
     if inputs.get("release") != RELEASE:
         raise ValueError("release identity mismatch")
     environment_raw = inputs.get("environment")
@@ -112,9 +108,7 @@ def compile_files(
     commands = inputs.get("commands")
     if not isinstance(commands, dict):
         raise ValueError("commands must be an object")
-    command_digests = {
-        name: canonical_sha256(argv) for name, argv in sorted(commands.items())
-    }
+    command_digests = {name: canonical_sha256(argv) for name, argv in sorted(commands.items())}
     launch_commands = {
         "schema_version": "e0h-windows-native-launch-commands/2",
         "interpreter_binding": "sys.executable",
@@ -209,9 +203,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--validate", action="store_true")
     args = parser.parse_args()
-    files = compile_files(
-        _load_canonical(args.inputs), _load_canonical(args.dependency_lock)
-    )
+    files = compile_files(_load_canonical(args.inputs), _load_canonical(args.dependency_lock))
     if args.validate:
         validate_release(files, args.output_dir)
     else:

@@ -30,10 +30,7 @@ def test_repaired_dependency_lock_binds_trainer_import_closure() -> None:
     lock = json.loads(path.read_text(encoding="utf-8"))
     assert canonical_json_text(lock) == path.read_text(encoding="utf-8")
     assert canonical_sha256(lock) == DEPENDENCY_DIGEST
-    pins = {
-        item["name"].casefold().replace("_", "-"): item["version"]
-        for item in lock["packages"]
-    }
+    pins = {item["name"].casefold().replace("_", "-"): item["version"] for item in lock["packages"]}
     assert pins["datasets"] == "3.4.1"
     assert pins["pyarrow"] == "19.0.1"
     assert pins["dill"] == "0.3.8"
@@ -45,9 +42,7 @@ def test_repaired_dependency_lock_binds_trainer_import_closure() -> None:
     assert artifacts["datasets"]["sha256"] == (
         "b91cf257bd64132fa9d953dd4768ab6d63205597301f132a74271cfcce8b5dd3"
     )
-    assert artifacts["pyarrow"]["filename"] == (
-        "pyarrow-19.0.1-cp312-cp312-win_amd64.whl"
-    )
+    assert artifacts["pyarrow"]["filename"] == ("pyarrow-19.0.1-cp312-cp312-win_amd64.whl")
     assert artifacts["pyarrow"]["sha256"] == (
         "5bd1618ae5e5476b7654c7b55a6364ae87686d4724538c24185bbb2952679960"
     )
@@ -55,9 +50,7 @@ def test_repaired_dependency_lock_binds_trainer_import_closure() -> None:
 
 def test_repaired_candidate_reference_is_sanitized_and_delta_bound() -> None:
     reference = json.loads(
-        (RELEASE_ROOT / "environment_candidate_reference.json").read_text(
-            encoding="utf-8"
-        )
+        (RELEASE_ROOT / "environment_candidate_reference.json").read_text(encoding="utf-8")
     )
     serialized = canonical_json_text(reference)
     assert "GPU-" not in serialized
@@ -72,15 +65,9 @@ def test_repaired_candidate_reference_is_sanitized_and_delta_bound() -> None:
 
 
 def test_repaired_release_reconstructs_exactly() -> None:
-    compiler = _load_script(
-        RELEASE_ROOT / "compile_release.py", "e0h_windows_v2_compiler"
-    )
-    inputs = json.loads(
-        (RELEASE_ROOT / "run_inputs.json").read_text(encoding="utf-8")
-    )
-    dependency = json.loads(
-        (RELEASE_ROOT / "dependency_lock.json").read_text(encoding="utf-8")
-    )
+    compiler = _load_script(RELEASE_ROOT / "compile_release.py", "e0h_windows_v2_compiler")
+    inputs = json.loads((RELEASE_ROOT / "run_inputs.json").read_text(encoding="utf-8"))
+    dependency = json.loads((RELEASE_ROOT / "dependency_lock.json").read_text(encoding="utf-8"))
     files = compiler.compile_files(inputs, dependency)
     compiler.validate_release(files, RELEASE_ROOT / "compiled_release")
     assert set(files) == {
@@ -98,18 +85,12 @@ def test_repaired_release_reconstructs_exactly() -> None:
 
 
 def test_repaired_release_is_distinct_and_execution_denied() -> None:
-    inputs = json.loads(
-        (RELEASE_ROOT / "run_inputs.json").read_text(encoding="utf-8")
-    )
+    inputs = json.loads((RELEASE_ROOT / "run_inputs.json").read_text(encoding="utf-8"))
     contract = json.loads(
-        (RELEASE_ROOT / "compiled_release" / "e0h_run_contract.json").read_text(
-            encoding="utf-8"
-        )
+        (RELEASE_ROOT / "compiled_release" / "e0h_run_contract.json").read_text(encoding="utf-8")
     )
     assert inputs["release"] == RELEASE
-    assert inputs["repair_lineage"]["failed_run_id"] == (
-        "e0h-windows-native-20260806T081010Z"
-    )
+    assert inputs["repair_lineage"]["failed_run_id"] == ("e0h-windows-native-20260806T081010Z")
     assert inputs["repair_lineage"]["failure_classification"] == "HARNESS_FAILED"
     assert inputs["repair_lineage"]["rerun_consumed"] is False
     assert "windows_native_v2" in inputs["commands"]["preflight"][1]
@@ -123,12 +104,10 @@ def test_repaired_preflight_exercises_exact_training_import_path() -> None:
     assert "_load_stack()" in source
     assert "import datasets" in source
     assert "import pyarrow" in source
-    base_harness = (ROOT / "experiments" / "e0h" / "v1" / "harness.py").read_text(
-        encoding="utf-8"
-    )
+    base_harness = (ROOT / "experiments" / "e0h" / "v1" / "harness.py").read_text(encoding="utf-8")
     assert "Trainer" in base_harness
     assert "TrainingArguments" in base_harness
-    assert "pip\", \"list\", \"--format=json\"" in source
+    assert 'pip", "list", "--format=json"' in source
     assert "host_inventory_digest" in source
     assert "dependency_requirements_receipt.json" in source
     assert "training_stack_preflight.json" in source
@@ -145,9 +124,7 @@ def test_repaired_runtime_reuses_reviewed_v1_implementation() -> None:
 
 
 def test_repair_requirement_is_hash_locked() -> None:
-    requirement = (RELEASE_ROOT / "repair_requirements.txt").read_text(
-        encoding="utf-8"
-    )
+    requirement = (RELEASE_ROOT / "repair_requirements.txt").read_text(encoding="utf-8")
     assert requirement == (
         "pyarrow==19.0.1 "
         "--hash=sha256:5bd1618ae5e5476b7654c7b55a6364ae87686d4724538c24185bbb2952679960\n"

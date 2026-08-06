@@ -10,9 +10,7 @@ from types import ModuleType
 
 def _load_harness() -> ModuleType:
     path = Path(__file__).parents[1] / "windows_native_v1" / "native_harness.py"
-    spec = importlib.util.spec_from_file_location(
-        "e0h_windows_native_v1_harness_for_v2", path
-    )
+    spec = importlib.util.spec_from_file_location("e0h_windows_native_v1_harness_for_v2", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"unable to load reviewed native harness from {path}")
     module = importlib.util.module_from_spec(spec)
