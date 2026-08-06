@@ -35,9 +35,7 @@ def _require_cuda_envelope(torch: Any, inputs: dict[str, Any]) -> None:
 
     expected_name = str(environment["hardware_model"])
     if expected_name != EXPECTED_GPU_NAME:
-        raise RuntimeError(
-            f"frozen GPU model mismatch: {expected_name!r} != {EXPECTED_GPU_NAME!r}"
-        )
+        raise RuntimeError(f"frozen GPU model mismatch: {expected_name!r} != {EXPECTED_GPU_NAME!r}")
 
     observed_name = str(torch.cuda.get_device_name(0))
     if observed_name != expected_name:
