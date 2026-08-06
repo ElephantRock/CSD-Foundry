@@ -1,0 +1,1 @@
+{"allowed_health_metrics":["checkpoint_creation","gpu_memory","gpu_utilization","non_finite_values","publication_failures","storage_failures","throughput","training_loss"],"protected_metrics_access":false,"smoke_fixture_digest":"5ebd75980df43dd5d2a062e1190baed5e5d1604cb268230a440e4dce29048f8e"}
