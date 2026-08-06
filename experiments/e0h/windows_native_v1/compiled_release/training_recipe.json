@@ -1,0 +1,1 @@
+{"checkpoint_interval_steps":4,"context_length":512,"deterministic_dataloader":true,"gradient_accumulation_steps":4,"learning_rate":"0.00005","max_grad_norm":"1.0","max_steps":8,"micro_batch_size":1,"optimizer":"adamw_torch","precision":"fp16","scheduler":"linear","seed":1729,"sequence_packing":false,"warmup_steps":1}
