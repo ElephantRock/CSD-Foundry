@@ -1,0 +1,106 @@
+name: CI Recovery PR 88
+
+on:
+  push:
+    branches:
+      - ci-recovery/pr-88
+
+permissions:
+  contents: read
+
+env:
+  TARGET_SHA: 04af743d8113f5ffa20f894c57096c77ce1d1c9c
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout exact governed target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Verify exact target
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$TARGET_SHA"
+          echo "Validated target: $actual"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - run: ruff format --check .
+      - run: ruff check .
+      - run: mypy src
+      - run: pytest
+      - run: python scripts/validate_csd_reasoning_seed.py --directory data/seed/v0.1
+      - run: python -m compileall -q src scripts tests
+      - run: csd-foundry scenarios validate --release v0.1
+      - run: csd-foundry mutations evaluate --release v0.1
+      - run: csd-foundry temporal validate --release v0.3
+      - run: csd-foundry temporal mutations --release v0.3
+      - run: csd-foundry synthesize contracts --release v0.4
+      - run: csd-foundry synthesize determinism --release v0.4
+      - run: csd-foundry synthesize identities --release v0.4
+      - run: csd-foundry synthesize replay --release v0.4
+      - run: csd-foundry synthesize execution --release v0.4
+      - run: csd-foundry synthesize publication --release v0.4
+      - run: csd-foundry synthesize reconciliation --release v0.4
+      - run: python scripts/validate_contract_freeze_v0_5.py
+      - run: csd-foundry-governance --release v0.5
+      - run: csd-foundry-admission --release v0.5
+      - run: csd-foundry-evidence-v0-5 --release v0.5
+      - run: csd-foundry-evidence-mutations-v0-5 --release v0.5
+      - run: csd-foundry-temporal-v0-5 --release v0.5
+      - run: csd-foundry demo > /tmp/csd-foundry-demo.json
+      - run: test -s /tmp/csd-foundry-demo.json
+      - run: pip wheel . --no-deps --wheel-dir /tmp/csd-wheelhouse
+
+      - name: Validate installed wheel outside repository
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m venv /tmp/csd-installed
+          /tmp/csd-installed/bin/pip install /tmp/csd-wheelhouse/csd_foundry-*.whl
+
+          cd /tmp
+
+          /tmp/csd-installed/bin/csd-foundry scenarios validate --release v0.1 > scenario-report.json
+          /tmp/csd-installed/bin/csd-foundry temporal validate --release v0.3 > temporal-report.json
+          /tmp/csd-installed/bin/csd-foundry temporal mutations --release v0.3 > mutation-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize contracts --release v0.4 > contracts-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize determinism --release v0.4 > determinism-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize identities --release v0.4 > identities-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize replay --release v0.4 > replay-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize execution --release v0.4 > execution-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize publication --release v0.4 > publication-report.json
+          /tmp/csd-installed/bin/csd-foundry synthesize reconciliation --release v0.4 > reconciliation-report.json
+          /tmp/csd-installed/bin/csd-foundry-governance --release v0.5 > governance-report.json
+          /tmp/csd-installed/bin/csd-foundry-admission --release v0.5 > admission-report.json
+          /tmp/csd-installed/bin/csd-foundry-evidence-v0-5 --release v0.5 > evidence-report.json
+          /tmp/csd-installed/bin/csd-foundry-evidence-mutations-v0-5 --release v0.5 > evidence-mutation-report.json
+          /tmp/csd-installed/bin/csd-foundry-temporal-v0-5 --release v0.5 > temporal-v0-5-report.json
+
+          test -s scenario-report.json
+          test -s temporal-report.json
+          test -s mutation-report.json
+          test -s contracts-report.json
+          test -s determinism-report.json
+          test -s identities-report.json
+          test -s replay-report.json
+          test -s execution-report.json
+          test -s publication-report.json
+          test -s reconciliation-report.json
+          test -s governance-report.json
+          test -s admission-report.json
+          test -s evidence-report.json
+          test -s evidence-mutation-report.json
+          test -s temporal-v0-5-report.json
