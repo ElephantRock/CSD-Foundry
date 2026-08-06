@@ -24,19 +24,27 @@ def _inputs():
     return load_e0h_run_release_inputs((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
 
 
-def _harness() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("e0h_harness", PACKAGE / "harness.py")
+def _module(path: Path, name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
+def _harness() -> ModuleType:
+    return _module(PACKAGE / "harness.py", "e0h_harness")
+
+
+def _rtx3080ti_harness() -> ModuleType:
+    return _module(PACKAGE / "rtx3080ti_harness.py", "e0h_rtx3080ti_harness")
+
+
 def test_concrete_e0h_inputs_compile_to_self_describing_release() -> None:
     inputs = _inputs()
     bundle = compile_e0h_run_release(inputs)
 
-    assert bundle.release == "e0h-harness-v1"
+    assert bundle.release == "e0h-harness-rtx3080ti-v1"
     assert bundle.source_commit == "6bfd2f653c12055de99ae4b39556c78937d96239"
     assert len(bundle.files) == 10
     assert (
@@ -139,11 +147,58 @@ def test_harness_receipts_fail_closed_on_clobber(tmp_path: Path) -> None:
 
 def test_harness_consumes_the_frozen_training_recipe() -> None:
     harness = (PACKAGE / "harness.py").read_text(encoding="utf-8")
+    inputs = json.loads((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
+
     assert 'optim=str(recipe["optimizer"])' in harness
     assert 'lr_scheduler_type=str(recipe["scheduler"])' in harness
     assert "truncation=False" in harness
     assert "_require_cuda_envelope(torch, inputs)" in harness
     assert 'path.open("x"' in harness
+    assert "rtx3080ti_harness.py train" in inputs["commands"]["training"]
+
+
+class _FakeCuda:
+    def __init__(self, *, available: bool, count: int, name: str) -> None:
+        self._available = available
+        self._count = count
+        self._name = name
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def device_count(self) -> int:
+        return self._count
+
+    def get_device_name(self, index: int) -> str:
+        assert index == 0
+        return self._name
+
+
+class _FakeTorch:
+    def __init__(self, cuda: _FakeCuda) -> None:
+        self.cuda = cuda
+
+
+def test_rtx3080ti_adapter_requires_the_exact_gpu() -> None:
+    adapter = _rtx3080ti_harness()
+    inputs = json.loads((PACKAGE / "run_inputs.json").read_text(encoding="utf-8"))
+
+    adapter._require_cuda_envelope(
+        _FakeTorch(_FakeCuda(available=True, count=1, name="NVIDIA GeForce RTX 3080 Ti")),
+        inputs,
+    )
+
+    with pytest.raises(RuntimeError, match="GPU model mismatch"):
+        adapter._require_cuda_envelope(
+            _FakeTorch(_FakeCuda(available=True, count=1, name="NVIDIA GeForce RTX 3080")),
+            inputs,
+        )
+
+    with pytest.raises(RuntimeError, match="GPU count mismatch"):
+        adapter._require_cuda_envelope(
+            _FakeTorch(_FakeCuda(available=True, count=2, name="NVIDIA GeForce RTX 3080 Ti")),
+            inputs,
+        )
 
 
 def test_harness_commands_remain_outside_protected_metric_surface() -> None:
