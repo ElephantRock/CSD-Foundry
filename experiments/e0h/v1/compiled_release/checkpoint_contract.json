@@ -1,1 +1,1 @@
-{"checkpoint_uri":"github-release://ElephantRock/CSD-Foundry/e0h-harness-v1-checkpoint","digest_publication_required":true,"max_checkpoint_gib":1,"reload_required":true,"retention_days":90,"save_required":true,"schema_version":"e0h-checkpoint-contract/1"}
+{"checkpoint_uri":"github-release://ElephantRock/CSD-Foundry/e0h-harness-rtx3080ti-v1-checkpoint","digest_publication_required":true,"max_checkpoint_gib":1,"reload_required":true,"retention_days":90,"save_required":true,"schema_version":"e0h-checkpoint-contract/1"}
