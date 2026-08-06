@@ -3,7 +3,7 @@ name: CI Recovery PR 88
 on:
   push:
     branches:
-      - ci-recovery/pr-88
+      - main
 
 permissions:
   contents: read
@@ -22,13 +22,25 @@ jobs:
           ref: ${{ env.TARGET_SHA }}
           fetch-depth: 0
 
-      - name: Verify exact target
+      - name: Verify exact governed target
         shell: bash
+        env:
+          IMPLEMENTATION_SHA: cfac62da30d501f4744f88d31fee5d3096d1cfb6
+          TARGET_TREE: 3ecbc99640d6792c9773793807d2248027fe75cc
         run: |
           set -euo pipefail
-          actual="$(git rev-parse HEAD)"
-          test "$actual" = "$TARGET_SHA"
-          echo "Validated target: $actual"
+
+          actual_sha="$(git rev-parse HEAD)"
+          actual_parent="$(git rev-parse HEAD^)"
+          actual_tree="$(git rev-parse HEAD^{tree})"
+
+          test "$actual_sha" = "$TARGET_SHA"
+          test "$actual_parent" = "$IMPLEMENTATION_SHA"
+          test "$actual_tree" = "$TARGET_TREE"
+
+          echo "Validated target SHA: $actual_sha"
+          echo "Validated implementation parent: $actual_parent"
+          echo "Validated target tree: $actual_tree"
 
       - uses: actions/setup-python@v5
         with:
