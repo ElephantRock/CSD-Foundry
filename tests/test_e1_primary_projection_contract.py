@@ -266,16 +266,15 @@ def test_adversarial_01_coherent_predecessor_substitution_fails_closed(
 
 
 def test_git_history_source_commit_gate_binds_real_implementation_commit():
-    """Fix 4: the committed receipt's source_commit must bind the real implementation commit.
+    """Slice-aware provenance gate for the A0b1 population-support receipt.
 
-    The git-history gate is non-vacuous: the committed
-    ``data/e1/v3/population_support_receipt.json`` must record a ``source_commit``
-    equal to the implementation commit S, and the artifact commit must change
-    exactly the six population artifacts relative to S.
+    When the current HEAD is the A0b1 artifact commit (direct branch or
+    successor that changed exactly the v3 artifacts), the receipt's
+    source_commit must match the implementation commit S (HEAD^).
 
-    This test resolves the artifact commit explicitly (handling both direct-branch
-    and PR-merge checkouts), derives S from git history, and FAILS (does not skip)
-    when the committed artifact exists but git history is insufficient.
+    In a merged/successor context where HEAD changes other files, the gate
+    verifies the frozen slice artifacts remain byte-consistent with the
+    committed receipt without pretending current HEAD is the A0b1 artifact commit.
     """
 
     receipt_path = ROOT / "data" / "e1" / "v3" / "population_support_receipt.json"
@@ -304,34 +303,49 @@ def test_git_history_source_commit_gate_binds_real_implementation_commit():
             pytest.fail(f"git command failed (history unavailable but artifact committed): {exc}")
         return completed.stdout.strip()
 
-    # Resolve the artifact commit. On a direct branch checkout, HEAD is the
-    # artifact commit. On a GitHub PR-merge checkout, HEAD is a synthetic merge
-    # with two parents; the artifact commit is the second parent (branch tip).
-    # Detect merge commits by inspecting the actual parent SHA list.
+    # Read the committed receipt.
+    receipt_text = _git("show", "HEAD:data/e1/v3/population_support_receipt.json")
+    receipt = json.loads(receipt_text)
+    committed_source_commit = receipt["source_commit"]
+
+    # Check if HEAD changes exactly the A0b1 v3 artifacts (this is the A0b1
+    # artifact commit context). Use HEAD's diff against its first parent.
     parents = _git("show", "-s", "--format=%P", "HEAD").split()
-    artifact_commit = parents[1] if len(parents) >= 2 else _git("rev-parse", "HEAD")
+    head_tip = parents[1] if len(parents) >= 2 else _git("rev-parse", "HEAD")
 
-    # Implementation commit S is the parent of the artifact commit.
-    implementation_commit = _git("rev-parse", f"{artifact_commit}^")
-
-    # Read the committed receipt from the artifact commit (not the working tree).
-    receipt_text = _git("show", f"{artifact_commit}:data/e1/v3/population_support_receipt.json")
-    committed_source_commit = json.loads(receipt_text).get("source_commit")
-
-    assert committed_source_commit == implementation_commit, (
-        f"receipt source_commit {committed_source_commit!r} does not match the "
-        f"git-derived implementation commit {implementation_commit!r}"
+    head_diff = set(
+        line for line in _git("diff", "--name-only", f"{head_tip}^", head_tip).splitlines() if line
     )
+    v3_artifact_set = {f"data/e1/v3/{name}" for name in expected_artifacts}
 
-    # The artifact commit must change exactly the six population artifacts.
-    changed = set(
-        line
-        for line in _git("diff", "--name-only", implementation_commit, artifact_commit).splitlines()
-        if line
-    )
-    assert changed == {f"data/e1/v3/{name}" for name in expected_artifacts}, (
-        f"artifact commit changed unexpected files: {sorted(changed)}"
-    )
+    if head_diff == v3_artifact_set:
+        # Direct A0b1 artifact commit context: enforce S→A adjacency exactly.
+        implementation_commit = _git("rev-parse", f"{head_tip}^")
+        assert committed_source_commit == implementation_commit, (
+            f"receipt source_commit {committed_source_commit!r} does not match the "
+            f"git-derived implementation commit {implementation_commit!r}"
+        )
+    else:
+        # Merged/successor context: verify frozen slice artifacts remain
+        # byte-consistent. The original S may not be reachable (squash merge),
+        # so find the commit that introduced the receipt on the current branch
+        # and compare every artifact through Git blob identity.
+        receipt_rel = "data/e1/v3/population_support_receipt.json"
+        introductions = _git(
+            "log",
+            "--diff-filter=A",
+            "--format=%H",
+            "--",
+            receipt_rel,
+        ).splitlines()
+        assert introductions, f"no commit found introducing {receipt_rel}"
+        frozen_commit = introductions[-1]
+
+        for name in expected_artifacts:
+            rel = f"data/e1/v3/{name}"
+            frozen_blob = _git("rev-parse", f"{frozen_commit}:{rel}")
+            current_blob = _git("hash-object", rel)
+            assert current_blob == frozen_blob, f"frozen A0b1 artifact changed: {rel}"
 
 
 # ---------------------------------------------------------------------------
