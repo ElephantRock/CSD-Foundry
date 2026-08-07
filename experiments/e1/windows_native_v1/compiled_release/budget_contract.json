@@ -1,0 +1,1 @@
+{"budget":{"aggregate_gpu_minutes":240,"all_sealed_inference_gpu_minutes":10,"artifact_retention_days":90,"checkpoint_retention_days":90,"e1_maximum_gpu_minutes":60,"max_checkpoint_gib":1,"max_reruns":1,"per_training_attempt_gpu_minutes":15},"release":"e1-windows-native-v1","schema_version":"e1-windows-native-budget-contract/1"}
