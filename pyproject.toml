@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 authors = [{name = "ElephantRock"}]
 dependencies = [
   "jsonschema>=4.23",
+  "transformers",
 ]
 
 [project.optional-dependencies]
