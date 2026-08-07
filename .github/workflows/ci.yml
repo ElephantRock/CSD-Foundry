@@ -18,8 +18,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Cache Hugging Face tokenizer assets
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-tokenizer-sshleifer-tiny-gpt2-d1856183d08a67c27a8e4ca1492d1d32b96c7c1a
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
+      - run: |
+          # Pre-warm the frozen tokenizer cache so downstream tests do not pay
+          # the network cost. The tokenizer is ~3MB and pins to one revision.
+          python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('sshleifer/tiny-gpt2', revision='d1856183d08a67c27a8e4ca1492d1d32b96c7c1a')"
       - run: ruff format --check .
       - run: ruff check .
       - run: mypy src
