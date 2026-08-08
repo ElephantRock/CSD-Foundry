@@ -1,30 +1,38 @@
 # CSD Foundry Strategic Roadmap
 
-**Status:** Active program roadmap  
-**Version:** 1.3  
-**Date:** 2026-08-05  
-**Approved:** 2026-08-05  
-**Approval issue:** #67  
-**Approval PR:** #68  
+**Status:** Active program roadmap upon containing-commit merge  
+**Version:** 2.0  
+**Date:** 2026-08-08  
+**Authorization issue:** #101  
+**Supersedes:** Version 1.3 upon merge  
+**Repository authority:** containing merged commit  
 **Governing architecture:** `docs/FOUNDRY_PLATFORM_CHARTER_v1.1.md`  
-**Distributional doctrine:** `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`
+**Distributional doctrine:** `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md`  
+**G1 terminal record:** `docs/G1_TERMINAL_DECISION_v1.0.md`
 
 ## 1. Strategic objective
 
-Build CSD Foundry in two successive stages:
+Build CSD Foundry as a proof-carrying cognition manufacturing and governance platform while separating two questions that Version 1.3 coupled too tightly:
 
-1. complete CSD as a verifier-backed, structurally assured, distributionally governed cognition-data manufacturing and runtime-governance domain; and
-2. extract the reusable platform boundaries required for multi-domain, oracle-federated, distributionally assured, and governed open-ended reasoning.
+1. **Can the platform manufacture, verify, govern, replay, quarantine, release, and use reasoning artifacts correctly?**
+2. **Does a particular model-training formulation measurably improve because it consumes those artifacts?**
 
-The immediate objective remains to execute governed CSD semantics, synthesize deterministic trajectories, challenge declared models without claiming external truth, quarantine invalidated assets, compile governed releases, and produce multiple training and evaluation products from one verified episode.
+Version 2.0 adopts a platform-first dual-track program:
 
-The longer-term platform objective is:
+- **Track I — Verified Reasoning Infrastructure** builds and proves the executable, deterministic, structurally assured, distributionally governed platform. Track I may progress without a positive model-learning result.
+- **Track L — Empirical Learning** tests prospectively specified learning hypotheses against immutable Track-I releases. Track L remains separately authorized, compute-bounded, and falsifiable.
+
+The stronger learning-oriented product still requires both tracks to succeed. Infrastructure success does not become evidence of model improvement, and model improvement may not compensate for invalid semantics, weak provenance, structural leakage, or distributional defects.
+
+The immediate infrastructure objective remains to execute governed CSD semantics, resolve evidence and assumptions under explicit authority, replay materially different alternative models, separate semantic conclusions from operational disposition, quarantine invalidated assets, compile governed releases, and produce immutable proof-carrying cognition episodes.
+
+The longer-term platform objective remains:
 
 > A proof-carrying cognition manufacturing and governance platform that combines bounded executable semantics, external specialist oracles, empirical evidence, adjudicated processes, governed exploration, and distributionally assured cognition manufacturing while preserving an exact claim boundary for every material result.
 
-The platform charter is normative for strategic direction and constitutional boundaries. `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` defines the approved subsystem doctrine and initial contract model. This roadmap remains normative for sequencing and release gates. Exact syntax, schemas, algorithms, model choices, thresholds, quotas, and deployment topology remain versioned implementation decisions.
+The platform charter remains normative for strategic direction, authority boundaries, claim boundaries, and constitutional invariants. `docs/DISTRIBUTIONAL_ASSURANCE_v0.1.md` remains normative for Distributional Assurance doctrine. This roadmap is normative for sequencing and release gates. Exact syntax, schemas, algorithms, models, thresholds, quotas, and deployment topology remain versioned implementation decisions.
 
-The governing quality model is:
+The governing quality model remains:
 
 ```text
 Foundry quality
@@ -36,284 +44,464 @@ Oracle integrity
 
 No plane substitutes for another.
 
-## 2. Current position
+## 2. Roadmap decision and claim boundary
+
+### 2.1 G1-v1 is closed, failed, and permanent history
+
+The E1 → calibration → E2 → E3 learning-signal sequence is repository-effective and closed.
+
+```text
+E1     NO_OBSERVED_SIGNAL
+E2     HARMFUL
+E3     HARMFUL
+G1     NOT PASSED
+```
+
+The durable terminal conclusion is:
+
+> Under the current small paired-SFT formulation, replacing conventional synthetic label authority with executable-semantic label authority has not demonstrated a robust incremental learning benefit.
+
+Version 2.0 does **not** weaken, relabel, supersede, reinterpret, or retry that conclusion. There is no E4 implied by this roadmap. A future learning program must begin from a materially new hypothesis and its own authorization gate.
+
+### 2.2 Why the roadmap changes
+
+G1 tested one model-consumable use of the infrastructure: small paired SFT over a terminal semantic-decision representation. It did not test whether the executable kernel, registry governance, alternative-model replay, disposition, quarantine, release provenance, verifier data, repair data, runtime decision gating, or proof-carrying cognition episodes have independent value.
+
+Version 1.3 allowed a learning result to become a linear dependency for infrastructure whose correctness does not logically depend on model internalization. Version 2.0 removes that dependency without converting infrastructure progress into a learning claim.
+
+### 2.3 Three permitted product claims
+
+The roadmap distinguishes three increasingly strong product states.
+
+**Verified Reasoning Infrastructure** may claim that the platform deterministically manufactures and governs proof-carrying reasoning artifacts under declared semantics, assurance, provenance, and distribution contracts.
+
+**Governed Runtime Reasoning System** may additionally claim that model or agent proposals can be accepted, rejected, held, escalated, quarantined, or otherwise dispositioned through the executable governance boundary. Correctness does not require the proposing model to internalize CSD semantics.
+
+**Learning-Validated Reasoning Foundry** may additionally claim measured model improvement attributable to a pinned Foundry product under a prospectively governed empirical program.
+
+Only the third state is a learning-success claim.
+
+## 3. Current position
 
 The repository has completed:
 
 - executable CSD semantics and independent invariant checks;
 - manifest-complete coverage of the 21 seed scenarios;
-- deterministic temporal and governance semantics;
 - deterministic choice, identity, replay, execution inventory, publication, reconciliation, and sealing;
 - v0.5 foundational governance contracts and conformance vectors;
 - v0.5-A canonicalization and typed contract objects;
 - v0.5-B `ValidatedEvent` admission and failure receipts;
-- v0.5-C atomic temporal claim, ordered projections, failure-no-advance, crash recovery, and committed-head visibility.
+- v0.5-C atomic temporal claim, ordered projections, failure-no-advance, crash recovery, and committed-head visibility;
+- E0-H single-host GPU harness qualification;
+- the executable-semantics artifact compiler, strict A-E response ABI, parser, protected evaluation, and sealed execution path required for G1-v1;
+- repository-effective G1-v1 closure with durable E1/E2/E3 evidence and provenance correction.
 
-The current implementation frontier is v0.5-D: substantive evidence-unit, assumption, and alternative-model registries.
+The empirical record established that task acquisition is achievable under response-token-only supervision, that E2's positive Foundry differential was non-ratifiable because safety failed, and that the differential did not survive the precommitted equal safety correction in E3. No robust Foundry learning advantage was demonstrated.
 
-The repository now contains approved architecture documents for Distributional Assurance, but it has not implemented their executable contracts or empirical gates.
+The current implementation frontier remains v0.5-D and the assumption-policy read path. In particular, historical policy resolution and grant selection are not complete while a selected grant tuple can be trusted without cryptographic or mechanical binding back to its authoritative source ledger.
 
 The repository has not yet completed:
 
-- substantive governed registries;
+- the remaining assumption-policy binding and historical-stability correction;
+- substantive evidence-unit, assumption, and alternative-model registry reducers and roots;
+- separation-of-duty execution and related governed authority checks required by later assumption work;
 - a substantive disposition oracle;
 - synchronous quarantine eligibility;
 - the committed M-03/M-15 governed vertical slice;
 - event-triggered release and promotion;
-- complete trajectory planning and construction;
+- complete trajectory planning and constraint-valid construction;
 - structural canonicalization and holdouts;
-- executable Distributional Assurance schemas, validators, contracts, contrasts, or reports;
-- a canonical Verified Cognition Episode and data compilers;
-- the E0-H harness qualification, E1 executable-semantics probe, or final scale confirmation;
+- executable Distributional Assurance schemas, validators, contracts, contrasts, and reports;
+- the canonical Verified Cognition Episode and its compilers;
+- runtime decision-gate fault qualification;
 - a domain-neutral microkernel/domain-pack split;
 - CognitionDL or the Domain Entry Compiler;
 - the Reasoning ABI and oracle federation;
 - governed open-ended exploration.
 
-## 3. Program sequence
+No empirical learning work is currently authorized.
+
+## 4. Dual-track architecture
 
 ```text
-Completed
-Phase 0   Freeze foundational v0.5 contracts
-Phase 1   Complete v0.4 streaming reconciliation and canonical merge
-Phase 2A  Implement v0.5 canonicalization and typed contracts
-Phase 2B  Implement validated-event admission
-Phase 2C  Implement atomic temporal claim and completion
-
-Parallel empirical feedback
-E0-H      Qualify the training and evaluation harness without an efficacy claim
-E1        Test whether executable Foundry semantics produce learning value
-Stage probes
-          Run only when a stage materially changes model-consumable semantics
-
-Current CSD milestone
-Phase 3   Implement evidence, assumption, and alternative-model registries
-Phase 4   Implement the separate disposition oracle and quarantine
-Phase 5   Prove the committed M-03 / M-15 governed vertical slice
-Phase 6   Implement event-triggered release and promotion
-Phase 7   Build performance harness and constraint-valid synthesis
-Phase 8   Add structural and distributional assurance
-Phase 9   Build Verified Cognition Episode and data compilers
-Phase 10  Run final scale-confirmation experiment
-Phase 11  Freeze scale policies and compile the governed corpus
-Phase 12  Deploy runtime governance and failure/distribution-gap harvesting
-
-Platform extraction and breadth
-Phase 13  Extract the domain-neutral microkernel and make CSD the first domain pack
-Phase 14  Implement CognitionDL and the minimal Domain Entry Compiler
-Phase 15  Implement the Reasoning ABI, assurance classes, and cross-domain composition
-Phase 16  Prove a second domain and one cross-domain governed decision
-Phase 17  Implement the governed exploration plane and Open Reasoning Episode
-Phase 18  Connect domain and distribution gaps to progressive formalization
+                         Constitutional invariants
+                                 │
+                         CSD semantic kernel
+                                 │
+                 deterministic identity / replay
+                                 │
+                ┌────────────────┴────────────────┐
+                │                                 │
+                ▼                                 ▼
+   TRACK I — VERIFIED REASONING          TRACK L — EMPIRICAL LEARNING
+          INFRASTRUCTURE
+                │                                 │
+ authority / registries                  immutable Track-I release
+ assumptions / evidence                           │
+ alternative models                              ▼
+ disposition / quarantine               L0 hypothesis authorization
+ release / assurance                              │
+ synthesis / VCEs                                 ▼
+ runtime decision gate                   bounded learning experiments
+ platform extraction                              │
+                │                                 ▼
+                │                         structural replication
+                │                                 │
+                └──────────────┬──────────────────┘
+                               ▼
+                    LEARNING-VALIDATED PRODUCT
 ```
 
-E0-H and E1 may begin before Phase 3 is complete. E1 data and evaluation compilation may proceed in parallel with E0-H; GPU execution of E1 begins only after E0-H establishes that the training, checkpoint, evaluation, and evidence handoff path works. Later learning probes attach only to stages that materially change model-consumable semantics. Infrastructure-only changes continue to rely on deterministic, adversarial, concurrency, restart, and publication tests rather than automatic retraining.
+### 4.1 Track I — Verified Reasoning Infrastructure
 
-Phases 13–18 must not interrupt completion of the governed CSD vertical slice. New v0.5 work should avoid unnecessary CSD-specific coupling where the domain-neutral boundary is already clear, but premature refactoring is prohibited.
+Track I establishes mechanical and governance properties. Its evidence is deterministic execution, independent verification, adversarial mutation, concurrency and restart behavior, provenance, release reconstruction, structural isolation, distribution-contract conformance, fault testing, and measured economics.
 
-Distributional Assurance implementation belongs in Phases 7–12. Its documentation work may proceed earlier, but its executable work may not displace Phases 3–6.
+Track I does not need a positive model-training result to progress.
 
-### 3.1 Minimal empirical loop
+### 4.2 Track L — Empirical Learning
 
-The empirical track is a bounded feedback instrument for Foundry engineering, not a second governance system.
+Track L asks whether a specific model-consumable product causes a useful model-behavior change. It consumes pinned Track-I releases and may test SFT, process supervision, verifiers, repair learning, counterfactual contrasts, preference or reward formulations, or other prospectively specified products.
 
-1. Run a learning probe only when a stage introduces or materially changes a model-consumable semantic distinction.
-2. The default probe compares the previous-stage curriculum with the previous-stage curriculum plus the new-stage data.
-3. Broader controls are reserved for major architectural forks. They require an explicit costed proposal and human approval before additional GPU work begins.
-4. Do not inspect primary evaluation metrics during training. Live monitoring is limited to infrastructure and optimization health such as utilization, memory, throughput, crashes, non-finite loss, training loss, checkpoint creation, and artifact publication.
-5. Early stage results are directional engineering evidence. They may be classified as promising, harmful, no observed signal, or technically invalid; they do not establish a confirmatory scientific claim.
-6. One aggregate empirical GPU budget must be frozen in the E0-H issue before any GPU execution. One formal continuation review occurs when approximately half of that budget has been spent. An ambiguous result does not automatically authorize additional compute.
-7. Development evaluation may be used during iteration only after canonical symbolic-family split isolation prevents scenario-family and paraphrase-derived overlap between training and evaluation. One final blind holdout remains outside the working repository until Phase 10 and is introduced by project authority for scale confirmation.
-8. Phase 10 must test whether the selected small-model effect transfers, attenuates, amplifies, vanishes, or reverses at the target confirmation scale.
+Track L may not mutate the semantic authority, provenance, or released bytes of the Track-I artifact used by an experiment.
 
-E0-H is limited to harness qualification. It may test loading, tokenization, optimization health, checkpoint production, deterministic evaluation execution on smoke fixtures, artifact publication, and receipt completeness. It may not inspect protected task metrics or support a claim that Foundry data improves reasoning.
+### 4.3 Verified Cognition Episode boundary
 
-E1 is the first substantive learning-value test. It uses the completed executable kernel to compare a bounded executable-semantics curriculum against a bounded control under a fixed small-model recipe, with one primary capability metric and one safety metric. Its metric-bearing evaluation may run only after canonical symbolic-family split isolation prevents scenario-family and paraphrase-derived overlap between training and evaluation. Its purpose is to decide whether the current semantic representation merits continued empirical investment, not to authorize scale.
+The **Verified Cognition Episode (VCE)** is the canonical boundary object between the tracks.
 
-**Empirical governance freeze:** no new empirical policy, tier, schema, approval layer, statistical mechanism, evaluation-access class, or governance artifact may be introduced unless it addresses an observed failure, a documented near-miss, or a concrete decision that this minimal protocol cannot resolve. Clarification is permitted; expansion of the control surface is not.
+Track I produces immutable VCE releases. A VCE binds the semantic, epistemic, interaction, disposition, quarantine, provenance, structural, and distributional views applicable to one governed reasoning episode.
 
-## 4. Program gates
+Track L consumes versioned views of a pinned VCE release. Rendering or training choices may create new view artifacts, but they do not rewrite the underlying episode identity or authority.
 
-### Gate A — Deterministic substrate complete
+### 4.4 Cross-track firewall
 
-**Status: passed.**
+The following rules are mandatory:
 
-Shard-independent reconciliation, full replay, and canonical publication produce byte-identical semantic output across approved 1/2/7 shard topologies and bounded crash/retry schedules.
+1. A Track-I release is immutable once issued.
+2. Track-L experiments bind the exact Track-I release identity, renderer or compiler version, model revision, training objective, controls, evaluation identities, and budget.
+3. A learning failure may motivate a future infrastructure proposal but may not retroactively change the release used by that experiment.
+4. Infrastructure invariants may not be weakened to make a learning metric easier to pass.
+5. Infrastructure success may not be reported as model-learning success.
+6. No implementation stage automatically schedules a GPU probe.
+7. Future learning work requires explicit authorization after L0, even when Track I materially changes a model-consumable view.
 
-### Gate B1 — Admission and temporal authority complete
+## 5. Program sequence
 
-**Status: passed for the single-host reference implementation.**
+### 5.1 Completed history
 
-- `ValidatedEvent` is the sole temporal coordinator input;
-- concurrent successor claims have exactly one winner;
-- failed projection leaves the committed head unchanged;
-- prepared completion is not visible until committed-head publication;
-- recovery is idempotent;
-- release compilation is excluded from ordinary clock ticks.
+```text
+Phase 0    Freeze foundational v0.5 contracts
+Phase 1    Complete v0.4 streaming reconciliation and canonical merge
+Phase 2A   Implement v0.5 canonicalization and typed contracts
+Phase 2B   Implement validated-event admission
+Phase 2C   Implement atomic temporal claim and completion
+E0-H       Qualify the bounded GPU training/evaluation harness
+G1-v1      E1 → calibration → E2 → E3
+           terminal: G1 NOT PASSED; empirical sequence CLOSED
+```
 
-This does not establish production key management, distributed consensus, or multi-host lease safety.
+### 5.2 Track-I implementation sequence
 
-### Gate B2 — Governance vertical slice complete
+The existing phase vocabulary is retained where practical so historical issues and PRs remain intelligible.
 
-Proceed to synthesis scaling only after:
+```text
+Current frontier
+Phase 3    Finish authority/read-path work and implement governed registries
+Phase 4    Implement separate disposition oracle and synchronous quarantine
+Phase 5    Prove M-03 / M-15 governed vertical slice
+Phase 6    Implement event-triggered release and promotion
+Phase 7    Build performance harness and constraint-valid synthesis
+Phase 8    Add structural and Distributional Assurance
+Phase 9    Build Verified Cognition Episode and product compilers
+Phase 11-I Freeze measured infrastructure release policies and manufacture governed episodes
+Phase 12   Qualify runtime decision governance and failure/distribution-gap harvesting
 
-- substantive registry reducers and roots are implemented;
-- disposition cites a committed semantic receipt and cannot rewrite semantic state;
-- every material graph difference triggers full shadow replay;
-- invalidation produces immediate quarantine;
+Platform extraction and breadth
+Phase 13   Extract domain-neutral microkernel and make CSD the first domain pack
+Phase 14   Implement CognitionDL and the minimal Domain Entry Compiler
+Phase 15   Implement Reasoning ABI, assurance classes, and cross-domain composition
+Phase 16   Prove a second domain and one cross-domain governed decision
+Phase 17   Implement governed exploration and Open Reasoning Episode
+Phase 18   Connect domain and distribution gaps to progressive formalization
+```
+
+`Phase 10 — Final scale confirmation` from Version 1.3 is removed from the Track-I dependency graph. Its legitimate function survives only as **L4 — Target-scale confirmation** if a future learning hypothesis earns that stage.
+
+The old automatic semantic-stage probe concept is retired. Infrastructure-only changes rely on appropriate deterministic, adversarial, concurrency, restart, publication, structural, distributional, and fault tests. They do not trigger retraining by default.
+
+### 5.3 Track-L sequence
+
+```text
+Historical
+G1-v1   CLOSED / NOT PASSED
+
+Future, inactive until separately authorized
+L0      New-hypothesis authorization
+L1      Bounded acquisition / screening
+L2      Structural replication
+L3      Product-view or curriculum comparison
+L4      Target-scale confirmation
+L5      Learning-product authorization
+```
+
+There is no automatic arrow from Track I into L0 and no automatic arrow from a failed learning experiment back into infrastructure changes.
+
+## 6. Track-I program gates
+
+### I0 — Deterministic foundation
+
+**Status: PASSED for the single-host reference implementation.**
+
+This gate includes the former Gate A and Gate B1 substance:
+
+- shard-independent reconciliation and canonical publication;
+- independent full replay;
+- immutable identity and no-clobber publication;
+- `ValidatedEvent` as the sole temporal coordinator input;
+- exactly one concurrent successor winner;
+- failure-no-advance;
+- prepared completion hidden until committed-head publication;
+- idempotent recovery;
+- explicit exclusion of release compilation from ordinary clock ticks.
+
+This does not establish production key management, distributed consensus, multi-host lease safety, or a general-purpose live governance service.
+
+### I1 — Authority integrity
+
+Proceed to substantive epistemic governance only after:
+
+- historical policy resolution is deterministically reconstructable;
+- selected grant and authority tuples are mechanically bound to their authoritative ledger state rather than trusted as detached caller-supplied data;
+- action, authority, scope, materiality, and effective interval checks fail closed;
+- policy and grant identities remain stable under historical replay;
+- required separation-of-duty and authority-path checks are executable where the governed transition requires them;
+- authority resolution cannot silently substitute a current policy for the policy effective at the governed snapshot.
+
+The current assumption-policy read-path defect belongs here.
+
+### I2 — Epistemic governance
+
+Proceed to governed disposition only after substantive event-sourced registries exist for:
+
+- evidence units;
+- assumptions;
+- alternative models.
+
+The registries must be deterministic, append-only, digest-rooted, reconstructable, versioned, and policy-pinned. They must preserve provenance, authority, temporal validity, challenge state, dependency impact, and historical lifecycle.
+
+Decision-critical assumptions must be falsifiable, expirable, challengeable, and linked to impact. Evidence must represent scope, lineage, correlation, independence, expiry, and separation status. Alternative models must carry material difference, scope, challenge basis, and admission state.
+
+### I3 — Governed vertical slice
+
+Proceed to release and synthesis work only after:
+
+- a structurally separate `DispositionOracle` cites committed semantic evidence and cannot rewrite semantic state;
+- immediate eligibility-layer quarantine exists for known-questionable assets;
+- every material primary/shadow graph difference triggers full replay until irrelevance is independently certified;
 - historical reconstruction remains available;
-- M-03 and M-15 pass end to end;
-- promotion uses current evidence and creates a new manifest.
+- M-03 passes end to end through expiry, basis recomputation, semantic projection, registry updates, disposition, quarantine, and committed completion;
+- M-15 passes end to end through primary/shadow replay, invariant or divergent classification, and disposition without external-truth promotion.
 
-### Gate C1 — Semantic synthesis readiness
+### I4 — Governed release and synthesis
 
-Proceed to structural and distributional assurance only after:
+Proceed to structural and Distributional Assurance only after:
 
+- release compilation occurs only after explicit requests against completed snapshots;
+- promotion uses evidence current at the request snapshot;
+- required assurance checks are rerun;
+- quarantined assets are rejected;
+- earlier releases remain immutable;
 - joint semantic coverage planning is complete;
 - constraint-valid state and event construction is executable;
 - complete semantic and disposition rollout is available;
-- failed attempts produce typed rejection evidence;
+- failed attempts emit typed rejection evidence;
 - search exhaustion remains distinct from infeasibility;
 - accepted trajectories replay deterministically.
 
-### Gate C2 — Structural readiness
+### I5 — Structural and distributional readiness
 
-Proceed to final scale confirmation only after:
+Proceed to canonical VCE product release only after structural and Distributional Assurance requirements are executable.
 
-- state, basis, dependency, event, assumption, disposition, and trajectory structures are canonicalized;
-- train, validation, and test splits are structurally isolated;
-- severity-aware mutation gates pass;
-- right-answer/wrong-basis defects are represented and killed;
-- structural holdout identities are frozen and reproducible.
+Structural readiness requires:
 
-These full release-readiness requirements do not prohibit bounded development probes before Gate C2, but every metric-bearing probe must first enforce canonical symbolic-family split isolation with no scenario-family or paraphrase-derived overlap between training and evaluation.
+- canonical state, basis, dependency, event, assumption, disposition, and trajectory structures;
+- structurally isolated train/development/test or benchmark partitions where such views exist;
+- severity-aware mutation gates;
+- right-answer/wrong-basis defects represented and killed;
+- reproducible structural holdout identities.
 
-### Gate C3 — Distributional readiness
+Distributional readiness requires:
 
-Proceed to final scale confirmation only after:
+- a versioned scenario-world descriptor ontology and distribution contract;
+- required marginal, pairwise, selected three-way, and risk-selected higher-order cells resolved;
+- causal `INVARIANCE`, `SENSITIVITY`, `INFORMATION_REMOVAL`, and `FAILURE_AND_REPAIR` families;
+- typed failure ecology and minimal-repair conformance vectors;
+- generating-process and recursive-ancestry provenance;
+- before/after filter-loss reports;
+- rare-cell retention or explicit exception receipts;
+- isolated distributional holdouts where declared;
+- no unresolved critical distributional gap for the release claim.
 
-- a versioned descriptor ontology and distribution contract exist;
-- required marginal, pairwise, selected three-way, and risk-selected higher-order cells are resolved;
-- causal invariance, sensitivity, information-removal, and failure/repair families are compiled;
-- typed failure ecology and minimal-repair conformance vectors pass;
-- generating-process and recursive-ancestry provenance is complete;
-- filter stages emit before-and-after coverage loss;
-- required rare cells remain present or carry approved exceptions;
-- distributional holdouts remain isolated;
-- no unresolved critical distributional gap remains.
+Distributional adequacy may block a distributional release claim. It may not establish or rewrite semantic truth.
 
-These requirements do not prohibit bounded development probes against development evaluation before Gate C3.
+### I6 — Verified Cognition Product
 
-### Gate D — Scale authorized
+The VCE is ready as the canonical CSD product only after each released episode can bind, where applicable:
 
-Proceed to release-scale generation only after the final scale-confirmation experiment demonstrates:
+- initial state and validated events;
+- semantic receipts and operation traces;
+- final state and registry roots;
+- alternative-model replays;
+- evidence, assumptions, ambiguity, and epistemic status;
+- disposition and quarantine context;
+- actor turns, tool observations, failure, retry, escalation, and repair;
+- scenario-world and distribution-contract identity;
+- causal contrast and failure-topology identity;
+- generating-process provenance and ancestry;
+- release eligibility and complete provenance.
 
-- that the selected effect transfers credibly to the target confirmation scale rather than vanishing or reversing;
-- structural-holdout improvement;
-- reduced forbidden inference;
-- controlled abstention and over-conservatism;
-- causal invariance consistency;
-- counterfactual sensitivity correctness;
-- ambiguity handling with bounded missed and unnecessary clarification;
-- failure localization and minimal-repair fidelity;
-- reduced right-answer/wrong-basis defects;
-- independent source, process, discourse, tool, temporal, and structural transfer where declared;
-- rare-cell and worst-group retention;
-- actual optimizer exposure consistent with the approved contract;
-- acceptable verified-episode economics;
-- reproducible results;
-- zero unresolved critical mutation escapes.
+Compilers may then derive SFT, verifier, repair, preference, process, reward, uncertainty, benchmark, and transfer views from the immutable episode. A rendered row is not the canonical product.
 
-Training loss, aggregate accuracy, row count, one scalar entropy score, or a positive small-model probe cannot authorize scale.
+### I7 — Runtime governance
 
-### Gate E — Runtime deployment authorized
+Deploy or rely on runtime decision governance only after production-like single-host fault qualification demonstrates:
 
-Deploy runtime governance only after deterministic receipts, escalation ownership, quarantine, historical reconstruction, incident replay, and distribution-gap capture pass production-like fault testing.
+```text
+model or agent proposal
+→ structured parse
+→ semantic verification
+→ evidence / assumption / model resolution
+→ disposition
+→ permit / flag / request evidence / escalate / block
+→ audit receipt
+```
 
-### Gate F — Multi-domain platform architecture proven
+Required evidence includes deterministic receipts, escalation ownership, quarantine, historical reconstruction, incident replay, privacy/provenance handling for captured failures, and distribution-gap recording.
+
+Runtime observations do not enter training automatically.
+
+### I8 — Multi-domain platform architecture
 
 Proceed to broad domain expansion only after:
 
 - CSD operates as a versioned domain pack over a domain-neutral microkernel;
+- the microkernel retains only cross-domain constitutional primitives and mechanisms;
 - a second domain is compiled through the domain-definition toolchain;
 - at least one external oracle is integrated through the Reasoning ABI;
 - one cross-domain decision is composed under assurance policy;
 - domain-pack constitutional violations fail closed;
 - cross-domain distributional claims remain contract-bounded.
 
-### Gate G — Governed exploration proven
+### I9 — Governed exploration
 
-Proceed to open-ended curriculum scaling only after:
+Proceed to open-ended cognition-product scaling only after:
 
 - hypotheses remain distinct from verified claims;
 - epistemic type and assurance class are independently checked;
 - structurally distinct hypotheses are distinguished from paraphrases;
-- a selected question or test updates the hypothesis graph;
+- selected questions or tests update the hypothesis graph;
 - unsupported epistemic promotion is mechanically rejected;
 - outcome and search-quality evaluation are defined;
-- novelty and distribution-gap discovery cannot override relevance, coherence, or claim boundaries.
+- novelty and distribution-gap discovery cannot override relevance, coherence, constraints, or claim boundaries.
 
-## 5. Completed foundation
+## 7. Track-L program gates
 
-### Phase 0 — Foundational v0.5 contract freeze
+Track L is inactive after G1-v1 closure until L0 is separately authorized.
 
-Frozen:
+### L0 — New-hypothesis authorization
 
-- identity and authority boundaries;
-- canonicalization;
-- event admission;
-- temporal ordering;
-- projection receipts;
-- registry events;
-- disposition;
-- quarantine;
-- release and promotion;
-- rejection codes;
-- APIs and conformance vectors.
+No GPU execution may begin until a new hypothesis is recorded in GitHub and prospectively freezes:
 
-Existing v0.1-v0.4 bytes remain immutable. Empirical thresholds and optimizations remain unfrozen.
+- the unique Foundry capability being tested;
+- why G1-v1 does not already answer the question;
+- the pinned Track-I release and exact model-consumable view;
+- matched control or controls;
+- model and tokenizer revisions;
+- training objective and inference ABI;
+- structural and distributional split isolation;
+- one primary capability metric and explicit safety criteria;
+- minimum decision-relevant effect or classification rule;
+- protected-metric visibility rules;
+- seeds and stopping rule;
+- GPU budget ceiling;
+- terminal classes;
+- artifact retention and provenance requirements.
 
-### Phase 1 — v0.4 deterministic execution substrate
+Changing model size, training steps, representation, anchors, class balance, loss, or control after a failed experiment is not automatically a new hypothesis. The proposal must identify a new causal question rather than an E4-like retry by renaming.
 
-Completed:
+### L1 — Bounded acquisition / screening
 
-- bounded streaming merge;
-- global lowest-valid-attempt resolution;
-- independent `FULL_REPLAY`;
-- conflict escalation;
-- separate semantic and run-evidence manifests;
-- no-clobber final publication;
-- 1/2/7-shard invariance.
+L1 asks whether the proposed target can be acquired at all under the frozen low-cost recipe. It is a technical and causal screening stage, not evidence of Foundry advantage.
 
-### Phases 2A–2C — Governed admission and temporal completion
+If the task cannot be acquired, stop or return to L0 with a materially revised hypothesis. Do not spend scale budget to diagnose basic acquisition.
 
-Completed:
+### L2 — Structural replication
 
-- executable v0.5 canonicalization;
-- immutable typed contracts;
-- accepted and rejected event-admission receipts;
-- committed-context and policy pinning;
-- compare-and-append temporal claims;
-- mandatory projection ordering;
-- failure receipts without sequence advancement;
-- prepared-completion recovery;
-- current visibility only through committed-head state.
+A learning signal must replicate on fresh structural families or other prospectively isolated units relevant to the claim. The replication must preserve control parity and safety rules.
 
-Registry, disposition, and quarantine artifacts in v0.5-C are typed orchestration commitments only. Their substantive behavior remains ahead.
+A one-off positive development differential does not pass L2.
 
-## 6. Phases 3–6 — Complete governed CSD execution
+### L3 — Product-view or curriculum comparison
 
-### Phase 3 — Governed registries
+L3 compares the specific Foundry product against the minimum matched control required by the hypothesis. Examples of legitimate future questions include, if separately authorized:
 
-Implement event-sourced registries for:
+- proof-carrying process supervision versus terminal-label supervision;
+- verifier training on invariant-breaking mutations versus conventional negatives;
+- repair learning from mechanically localized defects versus generic critique data;
+- controlled counterfactual contrasts versus ordinary synthetic examples;
+- semantic/disposition separation training versus answer-only supervision.
 
-- evidence units;
-- assumptions;
-- alternative models.
+These examples are not pre-authorized experiments.
 
-Each registry must be deterministic, append-only, digest-rooted, reconstructable, and versioned. It must preserve provenance, authority, temporal validity, challenge state, and historical lifecycle.
+### L4 — Target-scale confirmation
 
-Evidence admission must represent scope, lineage, correlation, independence, expiry, and separation status. Assumptions must be falsifiable, expirable, and linked to decision impact. Alternative models must carry material difference, scope, challenge basis, and admission status.
+L4 replaces the old Version-1.3 Phase 10. It exists only after L2 and L3 establish a reproducible, safety-compatible effect worth confirming.
+
+The target-scale experiment must be prospectively specified, appropriately powered for its decision, and evaluated against a blind holdout introduced only after all criteria are frozen. It must determine whether the bounded effect transfers, attenuates, amplifies, vanishes, reverses, or remains unresolved at the target confirmation scale.
+
+Training loss, aggregate accuracy, row count, one scalar diversity score, or a positive small-model run cannot authorize L4 or L5.
+
+### L5 — Learning-product authorization
+
+A learning-oriented release may claim Foundry-attributable benefit only after the approved empirical program demonstrates, as applicable to its declared claim:
+
+- reproducible structural-holdout improvement;
+- reduced forbidden inference;
+- controlled abstention and over-conservatism;
+- causal invariance consistency;
+- counterfactual sensitivity correctness;
+- ambiguity handling;
+- failure localization and minimal-repair fidelity;
+- reduced right-answer/wrong-basis defects;
+- independent transfer where declared;
+- rare-cell and worst-group retention;
+- optimizer exposure consistent with contract;
+- acceptable verified-episode economics;
+- zero unresolved critical mutation escapes relevant to the release.
+
+The exact acceptance thresholds belong to the L0 contract for that program, not to this roadmap.
+
+## 8. Success states
+
+The program must report infrastructure and learning state separately.
+
+| Track-I state | Track-L state | Permitted interpretation |
+|---|---|---|
+| fail | fail | architecture and learning program unsuccessful |
+| pass | fail / unvalidated | verified reasoning platform works within its claim boundary; learning product unvalidated |
+| fail | apparent pass | learning claim rejected because trustworthy semantic/assurance foundation is absent |
+| pass | pass | full Learning-Validated Reasoning Foundry success |
+
+This matrix prevents two opposite errors: discarding a mechanically useful platform because one training formulation failed, and declaring the overall learning thesis solved merely because the infrastructure is rigorous.
+
+## 9. Track-I implementation details
+
+### Phase 3 — Authority completion and governed registries
+
+First close the remaining assumption-policy read-path binding defect. The selected policy/grant result must be inseparable from, or independently reconstructable against, the authoritative ledger state it claims to represent.
+
+Then implement event-sourced registries for evidence units, assumptions, and alternative models.
+
+Each registry must be deterministic, append-only, digest-rooted, reconstructable, and versioned. It must preserve provenance, authority, temporal validity, challenge state, dependency impact, and historical lifecycle.
 
 ### Phase 4 — Disposition and quarantine
 
@@ -332,7 +520,7 @@ Implement synchronous quarantine epochs and `may_use_asset()` so known-questiona
 
 ### Phase 5 — M-03/M-15 governed vertical slice
 
-Use M-03 to prove:
+M-03 must prove:
 
 ```text
 validated clock event
@@ -346,7 +534,7 @@ validated clock event
 → committed completion
 ```
 
-Use M-15 to prove:
+M-15 must prove:
 
 ```text
 primary graph
@@ -356,184 +544,41 @@ primary graph
 → disposition change without external-truth assertion
 ```
 
-Phase 5 proves the governed execution substrate. Later Distributional Assurance work reuses M-03 and M-15 to create controlled world and contrast families; it does not weaken or redefine this governed proof.
-
 ### Phase 6 — Event-triggered release and promotion
 
 Release compilation runs only after explicit requests against completed snapshots.
 
-Promotion must:
+Promotion must use current evidence, rerun required assurance checks, reject quarantined assets, enforce reuse class externally, create a new immutable release identity and manifest, and preserve earlier releases unchanged.
 
-- use evidence current at the request snapshot;
-- rerun required assurance checks;
-- reject quarantined assets;
-- enforce maximum reuse class externally;
-- create a new immutable release identity and manifest;
-- preserve earlier releases unchanged.
+### Phase 7 — Performance and constraint-valid synthesis
 
-## 7. Phase 7 — Performance and constraint-valid synthesis
+Measure before freezing policy. Benchmark assumption counts, full primary/shadow replay, registry reduction, temporal commit latency, disposition by class, quarantine indexes, release compilation, and verified-episode cost.
 
-Measure before freezing policy. Benchmark:
+Build joint semantic, structural, and distributional planning over rule composition, state and basis topology, dependency structure, alternative-basis count, event depth, temporal/governance composition, authority path, decision class, assumption fragility, mutation family, context, actor intention, information state, ambiguity, expertise, discourse, tool condition, authority state, risk, reasoning-policy family, failure topology, and outcome class.
 
-- assumption counts;
-- full primary/shadow replay;
-- registry reduction;
-- temporal commit latency;
-- disposition by class;
-- quarantine indexes;
-- release compilation;
-- verified-episode cost.
+Implement canonical scenario-world descriptors, generating-process and recursive-ancestry provenance, a versioned distribution-contract compiler, required quota authorities, explicit impossible/forbidden/unsupported/unresolved/required/holdout dispositions, and typed rejection evidence.
 
-Build a joint semantic and distributional planning boundary across:
+Every accepted trajectory requires a target, constraint proof, eligibility proof, deterministic identities, validated events, complete semantic/disposition replay, process provenance, contract-cell assignment, and exact rejection evidence for failed attempts.
 
-### Semantic and structural dimensions
-
-- rule composition;
-- state topology;
-- basis topology;
-- dependency structure;
-- alternative-basis count;
-- event depth;
-- temporal and governance composition;
-- authority path;
-- decision class;
-- assumption fragility;
-- mutation family.
-
-### Scenario-world dimensions
-
-- context family;
-- actor intention;
-- information state;
-- ambiguity class;
-- expertise relation;
-- discourse form;
-- tool condition;
-- authority state;
-- risk class;
-- reasoning-policy family;
-- failure topology;
-- outcome class.
-
-Implement:
-
-- canonical scenario-world descriptors;
-- generating-process and recursive-ancestry provenance;
-- a versioned distribution-contract compiler;
-- marginal, weighted pairwise, selected three-way, and risk-selected higher-order planning;
-- separate `OBSERVED_FREQUENCY`, `RISK_WEIGHTED`, `CURRICULUM`, `TRANSFER`, `ASSURANCE`, and `EXPLORATION` quota authorities;
-- explicit impossible, forbidden, unsupported, unresolved, required, and holdout dispositions.
-
-Every accepted trajectory requires a target, constraint proof, eligibility proof, deterministic identities, validated events, complete semantic/disposition replay, process provenance, contract-cell assignment, and typed rejection evidence for failed attempts.
-
-## 8. Phase 8 — Structural and Distributional Assurance
-
-### 8.1 Structural assurance
+### Phase 8 — Structural and Distributional Assurance
 
 Canonicalize state, basis, dependency, event, assumption, disposition, and reasoning-policy structures before split assignment.
 
-Hold out:
-
-- topology;
-- rule composition;
-- event depth;
-- basis-survival form;
-- hidden-dependency pattern;
-- temporal/governance path;
-- assumption and disposition family.
+Hold out topology, rule composition, event depth, basis-survival form, hidden-dependency pattern, temporal/governance path, assumption family, disposition family, and declared distributional worlds.
 
 Run deterministic and stochastic mutation campaigns across semantic decisions, evidence impact, basis recomputation, history, authority, admission, graphs, disposition, quarantine, promotion, and release eligibility.
 
+Implement causal `INVARIANCE`, `SENSITIVITY`, `INFORMATION_REMOVAL`, and `FAILURE_AND_REPAIR` families; typed failure ecology; conditional coverage matrices; source and process concentration reports; ancestry reports; filter-loss reports; rare-cell retention; and distributional holdouts.
+
 Search exhaustion remains unresolved and never becomes infeasibility without a machine-checkable witness.
 
-### 8.2 Distributional Assurance
+### Phase 9 — Verified Cognition Episode and compilers
 
-Implement:
+Make the VCE the canonical CSD product.
 
-- causal `INVARIANCE` families for irrelevant changes;
-- causal `SENSITIVITY` families for consequential changes;
-- `INFORMATION_REMOVAL` families for clarification, observation, qualification, abstention, or escalation;
-- `FAILURE_AND_REPAIR` families with exact failure point, affected consequences, unaffected work, minimum legal repair, prohibited overcorrection, and post-repair conformance;
-- typed failure ecology;
-- conditional coverage matrices;
-- source and generating-process concentration reports;
-- recursive-ancestry reports;
-- pre-filter and post-filter coverage-loss reports;
-- rare-cell retention and explicit exception receipts;
-- distributional holdouts across source, process, discourse, tool, time, organization, and selected high-order worlds.
+Each episode contains linked semantic, epistemic, interaction, distributional, disposition, quarantine, and provenance views over one immutable identity.
 
-Do not count surface paraphrases as new causal worlds. Do not maximize friction or path diversity when the governed problem has one valid efficient route.
-
-### 8.3 Initial CSD distributional families
-
-Use the governed M-03 and M-15 slices as the first executable Distributional Assurance families.
-
-M-03 shall cover selected:
-
-- complete, incomplete, contradictory, stale, and ambiguous evidence states;
-- available, partial, malformed, unavailable, timeout, and unknown-commit tool conditions;
-- sufficient, insufficient, and contested authority;
-- novice, peer, expert, and mixed-audience interactions;
-- unsupported verdict, wrong basis, right-answer/wrong-basis, missed clarification, unnecessary clarification, failed repair, and overbroad rollback cases.
-
-M-15 shall cover selected:
-
-- hidden-dependency changes;
-- materially different alternative models;
-- inappropriate irrelevance certification;
-- correct conclusions from incomplete structures;
-- invariant versus divergent classifications;
-- unresolved external truth without unsupported promotion.
-
-## 9. Phase 9 — Verified Cognition Episode and compilers
-
-Make the Verified Cognition Episode the canonical CSD product.
-
-Each episode contains linked views over one immutable identity.
-
-### Semantic view
-
-- initial state;
-- validated events;
-- semantic receipts;
-- operation traces;
-- final state;
-- registry roots;
-- shadow replays.
-
-### Epistemic view
-
-- active and eliminated hypotheses where applicable;
-- support status;
-- ambiguity class;
-- permitted and forbidden commitments;
-- abstention or escalation basis.
-
-### Interaction view
-
-- user or actor turns;
-- tool calls and environment observations;
-- failures, retries, fallback, escalation, and repair;
-- exact execution receipts where applicable.
-
-### Distributional view
-
-- scenario-world digest;
-- distribution-contract digest and contract-cell identities;
-- causal contrast-family identity;
-- failure-topology identity;
-- reasoning-policy family;
-- generating-process identity and ancestry;
-- distributional claim boundary.
-
-The episode also binds:
-
-- disposition receipts;
-- quarantine context;
-- release eligibility;
-- complete provenance.
-
-Compile each episode into:
+Compile each eligible episode into versioned views including:
 
 - SFT;
 - preference pairs;
@@ -547,34 +592,9 @@ Compile each episode into:
 
 Every rendered artifact must trace to one immutable episode digest. Rendered wording cannot change semantic or distributional identity without a new episode or explicit rendering contract.
 
-## 10. Phase 10 — Final scale confirmation
+### Phase 11-I — Measured infrastructure release policy
 
-Phase 10 is not the first empirical contact with Foundry data. E0-H, E1, and bounded semantic-stage probes provide earlier engineering feedback using development evaluation and a fixed low-cost reference recipe.
-
-The final experiment must be prospectively specified, adequately powered for its primary decision, and evaluated once against the blind final holdout. It must compare the selected Foundry curriculum at the target confirmation scale against the minimum control needed to determine whether the observed benefit is attributable to the curriculum rather than additional tokens or training alone.
-
-The primary scale conclusion must classify the small-model effect as one of:
-
-- transfers;
-- attenuates;
-- amplifies;
-- capacity-limited;
-- small-model-specific;
-- vanishes;
-- reverses;
-- unresolved.
-
-Phase 10 evaluates the semantic, structural, distributional, behavioral, transfer, exposure, and economic criteria defined by Gates C2, C3, and D. It may reject scale authorization even when earlier development probes were positive.
-
-Primary holdout metrics may not be inspected during target-scale training. Formal statistical thresholds, multiplicity treatment, model revisions, token budget, seeds, stopping rule, and acceptance criteria must be frozen before the blind holdout is introduced. Human approval is required before target-scale GPU execution and before a Gate D verdict.
-
-Do not authorize scale from training loss, aggregate accuracy, output style, corpus inclusion, one diversity score, or small-model performance alone.
-
-## 11. Phases 11–12 — Governed scale and runtime loop
-
-### Phase 11 — Measured scale-policy freeze
-
-After scale-confirmation evidence, freeze only the policies justified by measurements:
+After I4-I6 evidence, freeze only policies justified by measurements:
 
 - performance SLOs;
 - retry budgets;
@@ -586,15 +606,13 @@ After scale-confirmation evidence, freeze only the policies justified by measure
 - recursive-ancestry limits;
 - rare-cell floors;
 - filter-loss thresholds;
-- causal contrast and transfer thresholds;
-- regression tolerances;
-- release volume.
+- release volume and retention policy.
 
-Compile the governed corpus only after Gates C1, C2, C3, and D pass.
+This phase may authorize governed VCE manufacturing within the infrastructure claim boundary. It does **not** authorize a learning-benefit claim or target-scale model training. A learning corpus intended to carry a Foundry-improvement claim remains gated by L5.
 
 ### Phase 12 — Runtime governance and gap harvesting
 
-At runtime:
+At runtime or production-like batch decision time:
 
 ```text
 model proposal
@@ -605,160 +623,134 @@ model proposal
   → permit / flag / request evidence / escalate / block
 ```
 
-Runtime failures feed:
+Failures may generate governed assumption/dependency challenges, replay requests, quarantine, mutation candidates, distribution-gap records, failure-topology candidates, unseen high-order world combinations, temporal-shift cases, tool-drift cases, and formalization proposals.
 
-- assumption and dependency challenges;
-- full replay;
-- quarantine;
-- mutation families;
-- curriculum and retraining;
-- reevaluation;
-- distribution-gap records;
-- new failure-topology candidates;
-- previously unseen high-order world combinations;
-- temporal-shift and tool-drift cases;
-- distribution-contract revision proposals.
+Runtime observations require privacy, provenance, semantic, disposition, and release governance before any later training use.
 
-Runtime observations do not enter training automatically. They require privacy, provenance, semantic, disposition, and release governance.
+### Phases 13–16 — Multi-domain platform extraction
 
-## 12. Phases 13–16 — Extract the multi-domain platform
+Extract the domain-neutral governance microkernel and make CSD the first domain pack. The microkernel owns only cross-domain constitutional mechanisms and primitives. CSD retains its domain states, events, invariants, policies, constructors, mutations, renderers, benchmarks, claim boundaries, and domain-specific distributional contracts.
 
-### Phase 13 — Microkernel and CSD domain pack
+Implement the minimal CognitionDL / Domain Entry Compiler, then the Reasoning ABI, oracle receipt schema, oracle identity and version governance, assurance classes, assurance propagation, revocation, and cross-domain composition.
 
-Separate:
+Prove a second domain and at least one cross-domain governed decision before broad domain expansion.
 
-```text
-domain-neutral governance microkernel
-        +
-CSD domain pack
-```
+### Phases 17–18 — Governed open-ended reasoning
 
-The microkernel owns immutable identity, evidence lifecycle, support expressions, dependencies, temporal admissibility, authority, assumptions, alternative models, disposition, quarantine, release eligibility, and provenance.
+Implement a separate exploration plane for interpretations, hypotheses, candidate representations, analogies, plans, questions, experiments, candidate oracles, doctrine gaps, scenario worlds, and distribution gaps.
 
-The CSD pack owns CSD states, events, invariants, policies, constructors, mutations, renderers, benchmarks, claim boundaries, and domain-specific distributional descriptors and contracts.
+Its outputs remain candidates until promoted through explicit evidence, oracle, adjudication, or domain-governance routes.
 
-### Phase 14 — CognitionDL and Domain Entry Compiler
+Connect repeated unsupported requests and measured gaps to candidate formal islands and distribution-contract revisions through counterexample-guided review and shadow execution.
 
-Implement a minimal declarative domain-definition toolchain with:
+## 10. Distributional Assurance execution requirements
 
-- typed domain primitives;
-- transition and invariant declarations;
-- authority and temporal policies;
-- unsupported-scope declarations;
-- oracle declarations;
-- static analysis;
-- generated conformance vectors;
-- generated basic mutation families;
-- typed renderer interfaces;
-- scenario-world and causal-contrast interfaces;
-- versioned domain-pack manifests.
+Distributional Assurance remains cross-cutting and does not become semantic authority.
 
-LLMs may propose candidate doctrine or descriptors from source materials, but independent approval is required before release.
+The infrastructure must distinguish meaningful behavioral support from row, topic, format, source, persona, or paraphrase counts. Distributional claims require explicit descriptor ontology, distribution contract, generating-process provenance, causal contrast evidence, filter-loss accounting, ancestry, concentration, rare-cell retention, and bounded claim language.
 
-### Phase 15 — Reasoning ABI and assurance composition
+Initial CSD distributional families continue to use M-03 and M-15.
 
-Implement:
+M-03 families should exercise complete, incomplete, contradictory, stale, and ambiguous evidence; tool availability and failure modes; sufficient, insufficient, and contested authority; audience/expertise variation; unsupported verdicts; wrong basis; right-answer/wrong-basis; missed and unnecessary clarification; failed repair; and overbroad rollback.
 
-- oracle receipt schema;
-- oracle identity and version pinning;
-- environment and witness commitments;
-- assurance classes;
-- oracle revocation;
-- assurance propagation;
-- cross-domain composition receipts.
+M-15 families should exercise hidden-dependency changes, materially different alternative models, inappropriate irrelevance certification, correct conclusions from incomplete structures, invariant versus divergent classifications, and unresolved external truth without unsupported promotion.
 
-Exact tools, deterministic models, empirical systems, adjudicated processes, and heuristic models must retain distinct permitted claims.
+Do not count surface paraphrases as new causal worlds. Do not maximize friction or path diversity when the governed problem has one valid efficient route.
 
-Cross-domain distributional claims must validate descriptor and contract compatibility and may not silently inherit broader coverage than their components support.
+## 11. Track-L empirical protocol
 
-### Phase 16 — Second domain and composition proof
+Track L is a bounded empirical decision system, not a second semantic authority.
 
-Recommended first domains:
+The following rules survive from the useful parts of the Version-1.3 empirical protocol:
 
-1. software release management;
-2. ML evaluation and data governance.
+1. Freeze the experiment contract before GPU execution.
+2. Protected primary metrics remain hidden until predetermined checkpoints or terminal execution are complete.
+3. Live monitoring is limited to infrastructure and optimization health unless the contract explicitly authorizes otherwise.
+4. Canonical symbolic-family and structural isolation precede metric-bearing evaluation.
+5. Controls must be sufficient to isolate the causal question, including token and task-format parity where relevant.
+6. Independent verification remains separate from the executable label oracle where the claim depends on semantic correctness.
+7. Budgets and stop conditions are frozen prospectively; ambiguous outcomes do not authorize more compute automatically.
+8. Terminal classifications are applied exactly as committed. Failed criteria are not weakened after observing the result.
+9. GPU results return through durable GitHub evidence and digest-bound receipts.
+10. No empirical governance layer is added merely for ceremony. New controls require an observed failure, near-miss, or concrete unresolved decision.
 
-Prove one composed model-release decision using receipts from both domains plus promotion authority, disposition, and a bounded distribution contract.
+The missing standalone calibration receipt remains historical fact and must not be reconstructed as if it had existed at execution time.
 
-## 13. Phases 17–18 — Governed open-ended reasoning
+## 12. Economics
 
-### Phase 17 — Exploration plane
+Track I and Track L use different economic measures.
 
-Implement a separate exploration plane that can produce:
+Track-I measurements may include:
 
-- problem interpretations;
-- plural hypotheses;
-- candidate representations;
-- analogies;
-- plans;
-- questions;
-- experiments;
-- candidate oracles;
-- candidate doctrine gaps;
-- candidate scenario worlds and distribution gaps.
+- verified semantic decisions per CPU-second;
+- verified episodes per dollar;
+- mutation pairs per episode;
+- independent checks per episode;
+- replay cost per alternative model;
+- quarantine propagation latency;
+- release compilation latency;
+- provenance and storage overhead;
+- deterministic rebuild cost.
 
-Its canonical object is an Open Reasoning Episode or governed exploration graph. Every material node carries epistemic status, assumptions, evidence, provenance, and a discriminating test or explicit limitation where applicable.
+Track-L measurements may include:
 
-Exploration never becomes verification by model agreement, novelty, or distributional rarity alone.
+- model improvement per verified training token;
+- model improvement per GPU-dollar;
+- forbidden-inference reduction per GPU-dollar;
+- verifier or repair gain per VCE family;
+- worst-group gain per verified episode.
 
-### Phase 18 — Formalization and distributional flywheel
+Cheap infrastructure is not evidence of learning value, and expensive learning is not justified by infrastructure sunk cost.
 
-Connect unsupported runtime requests and repeated gaps to structured records:
-
-```text
-unsupported request or distribution gap
-→ hypotheses and candidate concepts
-→ repeated gap pattern
-→ candidate ontology, descriptor, rule, contrast, or failure topology
-→ counterexample-guided review
-→ shadow execution
-→ approved formal island or distribution-contract revision
-→ new domain-pack or contract version
-→ verified curriculum
-```
-
-Domain breadth grows from observed demand, reusable structure, and measured gaps rather than speculative ontology expansion or indiscriminate row generation.
-
-## 14. Workstreams
+## 13. Workstreams
 
 | Workstream | Responsibility |
 |---|---|
-| Semantic Kernel | Current CSD states, events, transitions, traces, invariants |
+| Semantic Kernel | CSD states, events, transitions, traces, invariants |
 | Deterministic Substrate | Choice, identity, replay, execution, sharding, storage, publication |
-| Reality Assurance | Evidence, assumptions, alternative models, disposition, quarantine, promotion |
-| Synthesis and Data | Semantic targets, constructors, episodes, canonicalization, mutations, compilers |
-| Distributional Assurance | Scenario worlds, distribution contracts, causal contrasts, failure ecology, process provenance, conditional coverage, filter-loss audits, optimizer-exposure audits, independent transfer gates |
-| Learning and Evaluation | Training, verifiers, benchmarks, structural and distributional evaluation, runtime gate |
+| Authority and Epistemic Governance | Policy/grant resolution, evidence, assumptions, alternative models, dependency and authority paths |
+| Disposition and Quarantine | Separate operational disposition, eligibility, quarantine, historical reconstruction |
+| Synthesis and VCE Products | Semantic targets, constructors, episodes, canonicalization, mutations, compilers |
+| Distributional Assurance | Scenario worlds, distribution contracts, causal contrasts, failure ecology, process provenance, coverage and filter-loss audits |
+| Runtime Governance | Proposal parsing, decision gate, incident replay, escalation, runtime gap harvesting |
+| Empirical Learning | L0-L5 experiment design, training, verifiers, repair learning, benchmarks, target-scale confirmation |
 | Platform Compiler | Microkernel extraction, CognitionDL, domain packs, static analysis |
 | Oracle Federation | Reasoning ABI, adapters, witness validation, assurance composition |
 | Governed Exploration | Hypothesis graphs, search control, epistemic typing, delayed outcomes, gap discovery |
 
-No workstream may silently absorb another workstream's authority. Distributional Assurance may block a distributional release claim but may not rewrite semantic state or disposition policy.
+No workstream may silently absorb another workstream's authority.
 
-## 15. Immediate repository sequence
+## 14. Immediate repository sequence
 
-1. Qualify E0-H as a bounded GPU harness exercise; freeze the aggregate empirical GPU budget in that issue before any GPU execution.
-2. Compile the E1 executable-semantics curriculum and development evaluation in parallel; execute E1 only after E0-H passes.
-3. Complete the current assumption-policy work and implement evidence-unit, assumption, and alternative-model registry reducers and roots.
-4. Implement the separate disposition oracle and synchronous quarantine.
+The next repository work is Track I only unless a separate L0 authorization is issued.
+
+1. Close the outstanding assumption-policy historical-resolution/grant-binding defect before merging the read-path slice.
+2. Complete authority checks required by governed assumption work, including separation-of-duty and dependency validation where specified by the frozen contracts.
+3. Implement substantive evidence-unit, assumption, and alternative-model registry reducers and roots.
+4. Implement the separate disposition oracle and synchronous quarantine eligibility.
 5. Execute M-03 and M-15 through the committed governed pipeline.
 6. Implement event-triggered release and promotion.
-7. Benchmark the governed vertical slice and freeze reference scale policies only from measurements.
-8. Resume planner, constructor, rollout, semantic coverage, and structural assurance.
+7. Benchmark the governed vertical slice and freeze only measured infrastructure policies.
+8. Resume constraint-valid planning, construction, rollout, semantic coverage, and structural assurance.
 9. Implement the Distributional Assurance contract, causal contrast, failure ecology, provenance, and report vertical slice over M-03/M-15.
-10. Extend the Verified Cognition Episode and compilers with epistemic, interaction, and distributional views.
-11. Run bounded semantic-stage probes only when model-consumable outputs materially change.
-12. Run Phase 10 final scale confirmation before authorizing release-scale generation.
-13. Freeze scale policies only from semantic, structural, distributional, transfer, and economic evidence.
-14. After the governed CSD vertical slice, extract the domain-neutral microkernel and make CSD the first domain pack.
-15. Implement the minimal domain compiler and Reasoning ABI.
-16. Prove one second domain and one cross-domain composition.
-17. Implement a minimal governed exploration vertical slice.
+10. Implement the canonical Verified Cognition Episode and deterministic product compilers.
+11. Qualify the runtime decision gate and distribution-gap harvesting under production-like single-host fault conditions.
+12. After the governed CSD vertical slice and VCE boundary are stable, extract the domain-neutral microkernel and make CSD the first domain pack.
+13. Implement the minimal domain compiler and Reasoning ABI.
+14. Prove one second domain and one cross-domain composition.
+15. Implement a minimal governed exploration vertical slice.
 
-## 16. Explicit deferrals
+No item in this sequence authorizes model training.
 
-Do not implement prematurely:
+## 15. Explicit deferrals and prohibitions
 
+Do not implement or authorize prematurely:
+
+- E4 or any continuation of G1-v1 under a new experiment number without L0;
+- automatic learning probes after infrastructure stages;
+- model architecture, loss, representation, class-balance, anchor, or scale changes merely to rescue G1-v1;
+- target-scale training before L2/L3 evidence and explicit L4 authorization;
+- release-scale learning claims before L5;
 - replay pruning without a mechanically verified relevance certificate;
 - approximate cut sets without measurements;
 - release compilation on every tick;
@@ -768,24 +760,47 @@ Do not implement prematurely:
 - raw row expansion without executable semantic, structural, or behaviorally consequential distributional coverage;
 - a universal ontology or universal distributional taxonomy;
 - LLM judging presented as exact verification;
-- one scalar entropy score as sufficient assurance;
+- one scalar entropy or diversity score as sufficient assurance;
 - fixed universal human/synthetic ratios;
 - uncontrolled or non-replayable fault injection;
-- model architecture or loss changes before corpus, sampling, and evaluation causes are isolated;
 - unrestricted online weight adaptation from deployment interactions;
 - broad multi-domain expansion before the microkernel, pack, ABI, and assurance contracts are proven;
 - open-ended curriculum scaling before epistemic-promotion failures are mechanically detectable;
-- automatic full-control training studies after every implementation stage;
+- multi-host, multi-tenant, distributed-consensus, or general-purpose live-service expansion without a separate accepted architectural decision;
 - additional empirical governance layers without an observed failure, documented near-miss, or concrete unresolved decision.
+
+## 16. Strategic milestones
+
+The program now has four milestones rather than one learning-dependent linear chain.
+
+> **Milestone A — Complete governed CSD execution.**  
+> Close authority, registries, disposition, quarantine, and M-03/M-15 under I1-I3.
+
+> **Milestone B — Manufacture Verified Cognition Episodes.**  
+> Complete release, synthesis, structural and Distributional Assurance, VCEs, and measured infrastructure release policy under I4-I6.
+
+> **Milestone C — Deploy governed reasoning control and extract the platform.**  
+> Qualify runtime governance, then prove the microkernel/domain-pack/ABI boundary and a second domain under I7-I9.
+
+> **Milestone L — Demonstrate learning value if and only if a new empirical hypothesis earns it.**  
+> L0-L5 is independent of Milestones A-C. G1-v1 remains closed and does not become retroactively successful if a later hypothesis passes.
+
+This ordering preserves deterministic replay, semantic/disposition separation, auditable uncertainty, append-only correction, quarantine, Distributional Assurance, exact provenance, and a credible path to broad reasoning coverage while keeping empirical learning claims falsifiable and separately governed.
 
 ## 17. Strategic position
 
-The program has three successive milestones:
+Version 2.0 changes the dependency graph, not the constitutional architecture.
 
-> **Milestone A — Complete governed CSD execution.**
+The platform will first prove that it can manufacture and govern reasoning artifacts whose authority is executable, replayable, independently checkable, structurally isolated, distributionally bounded, and provenance-complete. The canonical product is the Verified Cognition Episode, not a rendered training row.
 
-> **Milestone B — Scale semantically valid, structurally assured, distributionally governed cognition-episode manufacturing and prove learning value.**
+Models may consume those products as proposers, verifiers, repair systems, policy learners, or training targets, but no model becomes semantic authority merely because it was trained on Foundry data.
 
-> **Milestone C — Extract the multi-domain, oracle-federated, distributionally assured, governed-exploration platform.**
+The project therefore asks two independent questions:
 
-This ordering protects deterministic replay, semantic/disposition separation, auditable uncertainty, append-only correction, distributional claim boundaries, exact provenance, and empirical feedback while preserving a credible path to broad reasoning coverage.
+> **Can we build an executable system that knows what a valid reasoning transition is relative to its declared doctrine, evidence, oracle, and policy?**
+
+and
+
+> **Given such a system, what model-consumable products, if any, transfer that structure into useful learned behavior?**
+
+Track I answers the first. Track L answers the second. The full Learning-Validated Reasoning Foundry requires both.
