@@ -1,0 +1,78 @@
+{
+  "checkpoint_4_inference": "omitted per E2 spec",
+  "claim_boundary": "This contract freezes the E2 Foundry-vs-control experiment: model, training recipe, inference ABI, protected evaluation identities, metrics, and the classification truth table. It does not predetermine the outcome, authorize merger, or establish general reasoning transfer.",
+  "classification_truth_table": {
+    "HARMFUL": "safety fails OR P_foundry < P_control",
+    "NO_OBSERVED_SIGNAL": "otherwise valid",
+    "PROMISING": "safety passes AND P_foundry > P_control AND P_foundry > P_base",
+    "TECHNICALLY_INVALID": "execution/measurement failure"
+  },
+  "clean_evaluation_path": "experiments/e2/protected_clean.jsonl",
+  "clean_evaluation_sha256": "bdcd6dbef79008eaa27b1b80b5e2279e651f60ee890b270450e1645d90eea5f2",
+  "clean_record_count": 10,
+  "codebook": {
+    "BOTH": "D",
+    "NEITHER": "A",
+    "NOT_APPLICABLE": "E",
+    "REMOVES_ONLY": "B",
+    "SURVIVES_ONLY": "C"
+  },
+  "context_length": 512,
+  "control_train_path": "data/e1/v6/control_train.jsonl",
+  "control_train_record_count": 19,
+  "control_train_sha256": "0e9362f6693f78e30a3f2f0f24d81885c1c76fa4aa9980ade51c83a8761b2f40",
+  "foundry_train_path": "data/e1/v6/foundry_train.jsonl",
+  "foundry_train_record_count": 19,
+  "foundry_train_sha256": "d6da0fb01a323060e03c0a3fa14504c0973d297f660ce7dc6e0317ec4853c385",
+  "gpu_minute_ceiling": 15,
+  "inference": {
+    "do_sample": false,
+    "max_new_tokens": 1,
+    "num_beams": 1
+  },
+  "malformed_definition": "Output is malformed if decoded suffix is not exactly A/B/C/D/E (no strip, no repair).",
+  "model_id": "gpt2",
+  "model_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+  "primary_evaluation_path": "experiments/e2/protected_primary.jsonl",
+  "primary_evaluation_sha256": "2d93d5182aa0c5843d77432579c7e1d714e6f88f067af0a9a7ffbc5694256438",
+  "primary_metric": {
+    "aggregation": "exact semantic-class correctness per primary family, accuracy within each family, arithmetic mean across the 20 primary families",
+    "identity": "e2-primary-family-macro-accuracy/1"
+  },
+  "primary_record_count": 20,
+  "protected_manifest_path": "experiments/e2/protected_manifest.json",
+  "release": "e2-foundry-vs-control/1",
+  "safety_metric": {
+    "counts": [
+      "clean_exact_error_count",
+      "spurious_basis_removal_count",
+      "valid_basis_rejection_count",
+      "clean_not_applicable_count",
+      "clean_malformed_count"
+    ],
+    "identity": "e2-clean-case-regression/1"
+  },
+  "schema_version": "e2-experiment-contract/1",
+  "token_id_codebook": {
+    "A": 32,
+    "B": 33,
+    "C": 34,
+    "D": 35,
+    "E": 36
+  },
+  "training_recipe": {
+    "effective_batch_size": 4,
+    "fp16": true,
+    "full_determinism": true,
+    "gradient_accumulation_steps": 4,
+    "learning_rate": 5e-05,
+    "loss": "response-token-only (all prompt tokens masked to -100)",
+    "max_grad_norm": 1.0,
+    "micro_batch_size": 1,
+    "optimizer": "adamw_torch",
+    "scheduler": "linear",
+    "seed": 1729,
+    "steps": 128,
+    "warmup_steps": 1
+  }
+}
