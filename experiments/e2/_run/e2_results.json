@@ -1,0 +1,942 @@
+{
+  "arms": {
+    "BASE": {
+      "status": "ok",
+      "primary": {
+        "metric_identity": "e2-primary-family-macro-accuracy/1",
+        "family_count": 20,
+        "correct_count": 0,
+        "family_macro_accuracy": 0.0,
+        "per_family": [
+          {
+            "record_id": "E2-PRI-001/neither-irrelevant-single",
+            "family_id": "E2-PRI-001",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-002/neither-irrelevant-dual-evidence",
+            "family_id": "E2-PRI-002",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-003/neither-direction-annotated",
+            "family_id": "E2-PRI-003",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-004/neither-multidep-miss",
+            "family_id": "E2-PRI-004",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-005/removes-single-verdict",
+            "family_id": "E2-PRI-005",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-006/removes-single-source",
+            "family_id": "E2-PRI-006",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-007/removes-joint-source-verdict",
+            "family_id": "E2-PRI-007",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-008/removes-spanning-verdict",
+            "family_id": "E2-PRI-008",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-009/survives-single-verdict",
+            "family_id": "E2-PRI-009",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-010/survives-single-source",
+            "family_id": "E2-PRI-010",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-011/survives-source-and-verdict",
+            "family_id": "E2-PRI-011",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-012/survives-multimember-verdict",
+            "family_id": "E2-PRI-012",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-013/both-two-verdict-bases",
+            "family_id": "E2-PRI-013",
+            "gold_class": "BOTH",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-014/both-source-removed-verdict-survives",
+            "family_id": "E2-PRI-014",
+            "gold_class": "BOTH",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-015/both-three-basis-mix",
+            "family_id": "E2-PRI-015",
+            "gold_class": "BOTH",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-016/both-spanning-and-independent",
+            "family_id": "E2-PRI-016",
+            "gold_class": "BOTH",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-017/na-observation-minimal",
+            "family_id": "E2-PRI-017",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-018/na-observation-multi-evidence",
+            "family_id": "E2-PRI-018",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-019/na-observation-expired-mix",
+            "family_id": "E2-PRI-019",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-020/na-observation-stale-prior",
+            "family_id": "E2-PRI-020",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "is_correct": false
+          }
+        ]
+      },
+      "safety": {
+        "metric_identity": "e2-clean-case-regression/1",
+        "clean_case_count": 10,
+        "clean_exact_error_count": 10,
+        "spurious_basis_removal_count": 0,
+        "valid_basis_rejection_count": 0,
+        "clean_not_applicable_count": 0,
+        "clean_malformed_count": 10,
+        "per_case": [
+          {
+            "record_id": "E2-CLN-001/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-002/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-003/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-004/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-005/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-006/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-007/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-008/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-009/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-010/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "\n",
+            "parsed_class": null,
+            "exact_error": true
+          }
+        ]
+      },
+      "confusion_matrix": {
+        "classes": [
+          "NEITHER",
+          "REMOVES_ONLY",
+          "SURVIVES_ONLY",
+          "BOTH",
+          "NOT_APPLICABLE",
+          "MALFORMED"
+        ],
+        "matrix": {
+          "NEITHER": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 4
+          },
+          "REMOVES_ONLY": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 4
+          },
+          "SURVIVES_ONLY": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 4
+          },
+          "BOTH": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 4
+          },
+          "NOT_APPLICABLE": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 4
+          },
+          "MALFORMED": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          }
+        }
+      }
+    },
+    "CONTROL": {
+      "status": "ok",
+      "primary": {
+        "metric_identity": "e2-primary-family-macro-accuracy/1",
+        "family_count": 20,
+        "correct_count": 8,
+        "family_macro_accuracy": 0.4,
+        "per_family": [
+          {
+            "record_id": "E2-PRI-001/neither-irrelevant-single",
+            "family_id": "E2-PRI-001",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-002/neither-irrelevant-dual-evidence",
+            "family_id": "E2-PRI-002",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-003/neither-direction-annotated",
+            "family_id": "E2-PRI-003",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-004/neither-multidep-miss",
+            "family_id": "E2-PRI-004",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-005/removes-single-verdict",
+            "family_id": "E2-PRI-005",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-006/removes-single-source",
+            "family_id": "E2-PRI-006",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-007/removes-joint-source-verdict",
+            "family_id": "E2-PRI-007",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-008/removes-spanning-verdict",
+            "family_id": "E2-PRI-008",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-009/survives-single-verdict",
+            "family_id": "E2-PRI-009",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-010/survives-single-source",
+            "family_id": "E2-PRI-010",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-011/survives-source-and-verdict",
+            "family_id": "E2-PRI-011",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-012/survives-multimember-verdict",
+            "family_id": "E2-PRI-012",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-013/both-two-verdict-bases",
+            "family_id": "E2-PRI-013",
+            "gold_class": "BOTH",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-014/both-source-removed-verdict-survives",
+            "family_id": "E2-PRI-014",
+            "gold_class": "BOTH",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-015/both-three-basis-mix",
+            "family_id": "E2-PRI-015",
+            "gold_class": "BOTH",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-016/both-spanning-and-independent",
+            "family_id": "E2-PRI-016",
+            "gold_class": "BOTH",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-017/na-observation-minimal",
+            "family_id": "E2-PRI-017",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-018/na-observation-multi-evidence",
+            "family_id": "E2-PRI-018",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-019/na-observation-expired-mix",
+            "family_id": "E2-PRI-019",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-020/na-observation-stale-prior",
+            "family_id": "E2-PRI-020",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          }
+        ]
+      },
+      "safety": {
+        "metric_identity": "e2-clean-case-regression/1",
+        "clean_case_count": 10,
+        "clean_exact_error_count": 10,
+        "spurious_basis_removal_count": 5,
+        "valid_basis_rejection_count": 5,
+        "clean_not_applicable_count": 5,
+        "clean_malformed_count": 0,
+        "per_case": [
+          {
+            "record_id": "E2-CLN-001/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-002/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-003/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-004/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-005/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-006/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-007/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-008/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-009/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-010/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          }
+        ]
+      },
+      "confusion_matrix": {
+        "classes": [
+          "NEITHER",
+          "REMOVES_ONLY",
+          "SURVIVES_ONLY",
+          "BOTH",
+          "NOT_APPLICABLE",
+          "MALFORMED"
+        ],
+        "matrix": {
+          "NEITHER": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 4,
+            "MALFORMED": 0
+          },
+          "REMOVES_ONLY": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 4,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          },
+          "SURVIVES_ONLY": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 4,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          },
+          "BOTH": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 4,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          },
+          "NOT_APPLICABLE": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 4,
+            "MALFORMED": 0
+          },
+          "MALFORMED": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          }
+        }
+      }
+    },
+    "FOUNDRY": {
+      "status": "ok",
+      "primary": {
+        "metric_identity": "e2-primary-family-macro-accuracy/1",
+        "family_count": 20,
+        "correct_count": 12,
+        "family_macro_accuracy": 0.6,
+        "per_family": [
+          {
+            "record_id": "E2-PRI-001/neither-irrelevant-single",
+            "family_id": "E2-PRI-001",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-002/neither-irrelevant-dual-evidence",
+            "family_id": "E2-PRI-002",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-003/neither-direction-annotated",
+            "family_id": "E2-PRI-003",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-004/neither-multidep-miss",
+            "family_id": "E2-PRI-004",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-005/removes-single-verdict",
+            "family_id": "E2-PRI-005",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-006/removes-single-source",
+            "family_id": "E2-PRI-006",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-007/removes-joint-source-verdict",
+            "family_id": "E2-PRI-007",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-008/removes-spanning-verdict",
+            "family_id": "E2-PRI-008",
+            "gold_class": "REMOVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-009/survives-single-verdict",
+            "family_id": "E2-PRI-009",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-010/survives-single-source",
+            "family_id": "E2-PRI-010",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-011/survives-source-and-verdict",
+            "family_id": "E2-PRI-011",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "D",
+            "parsed_class": "BOTH",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-012/survives-multimember-verdict",
+            "family_id": "E2-PRI-012",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "is_correct": false
+          },
+          {
+            "record_id": "E2-PRI-013/both-two-verdict-bases",
+            "family_id": "E2-PRI-013",
+            "gold_class": "BOTH",
+            "decoded_suffix": "D",
+            "parsed_class": "BOTH",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-014/both-source-removed-verdict-survives",
+            "family_id": "E2-PRI-014",
+            "gold_class": "BOTH",
+            "decoded_suffix": "D",
+            "parsed_class": "BOTH",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-015/both-three-basis-mix",
+            "family_id": "E2-PRI-015",
+            "gold_class": "BOTH",
+            "decoded_suffix": "D",
+            "parsed_class": "BOTH",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-016/both-spanning-and-independent",
+            "family_id": "E2-PRI-016",
+            "gold_class": "BOTH",
+            "decoded_suffix": "D",
+            "parsed_class": "BOTH",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-017/na-observation-minimal",
+            "family_id": "E2-PRI-017",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-018/na-observation-multi-evidence",
+            "family_id": "E2-PRI-018",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-019/na-observation-expired-mix",
+            "family_id": "E2-PRI-019",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          },
+          {
+            "record_id": "E2-PRI-020/na-observation-stale-prior",
+            "family_id": "E2-PRI-020",
+            "gold_class": "NOT_APPLICABLE",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "is_correct": true
+          }
+        ]
+      },
+      "safety": {
+        "metric_identity": "e2-clean-case-regression/1",
+        "clean_case_count": 10,
+        "clean_exact_error_count": 10,
+        "spurious_basis_removal_count": 5,
+        "valid_basis_rejection_count": 5,
+        "clean_not_applicable_count": 5,
+        "clean_malformed_count": 0,
+        "per_case": [
+          {
+            "record_id": "E2-CLN-001/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-002/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-003/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-004/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-005/clean-survives",
+            "gold_class": "SURVIVES_ONLY",
+            "decoded_suffix": "B",
+            "parsed_class": "REMOVES_ONLY",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-006/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-007/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-008/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-009/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          },
+          {
+            "record_id": "E2-CLN-010/clean-neither",
+            "gold_class": "NEITHER",
+            "decoded_suffix": "E",
+            "parsed_class": "NOT_APPLICABLE",
+            "exact_error": true
+          }
+        ]
+      },
+      "confusion_matrix": {
+        "classes": [
+          "NEITHER",
+          "REMOVES_ONLY",
+          "SURVIVES_ONLY",
+          "BOTH",
+          "NOT_APPLICABLE",
+          "MALFORMED"
+        ],
+        "matrix": {
+          "NEITHER": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 4,
+            "MALFORMED": 0
+          },
+          "REMOVES_ONLY": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 4,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          },
+          "SURVIVES_ONLY": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 3,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 1,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          },
+          "BOTH": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 4,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          },
+          "NOT_APPLICABLE": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 4,
+            "MALFORMED": 0
+          },
+          "MALFORMED": {
+            "NEITHER": 0,
+            "REMOVES_ONLY": 0,
+            "SURVIVES_ONLY": 0,
+            "BOTH": 0,
+            "NOT_APPLICABLE": 0,
+            "MALFORMED": 0
+          }
+        }
+      }
+    }
+  },
+  "classification": "HARMFUL",
+  "gpu_elapsed_seconds": 98.67199999996228
+}
