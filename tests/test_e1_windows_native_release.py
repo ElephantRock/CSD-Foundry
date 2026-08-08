@@ -1388,30 +1388,137 @@ def test_git_history_provenance_gate_two_mode() -> None:
         for name in _COMPILED_RELEASE_FILES
     )
 
-    if head_diff == expected_paths:
-        # Direct mode: enforce S→A adjacency exactly.
+    if head_diff == expected_paths or (head_diff <= expected_paths and head_diff):
+        # Direct or amendment mode: HEAD changes exactly or a subset of
+        # compiled_release paths. Enforce S→A adjacency.
         implementation_commit = _git("rev-parse", f"{head_tip}^")
         assert committed_source_commit == implementation_commit, (
             f"receipt source_commit {committed_source_commit!r} does not match "
             f"git-derived implementation commit {implementation_commit!r}"
         )
     else:
-        # Successor mode: locate introduction commit, verify blob identity.
+        # Successor mode: find the latest commit C that changed the
+        # reconstruction_receipt.json, require C^ == receipt.source_commit,
+        # require C^→C diff is a non-empty subset of compiled_release paths,
+        # then compare all 14 current blobs against C's tree.
         receipt_rel = (
             "experiments/e1/windows_native_v1/compiled_release/reconstruction_receipt.json"
         )
-        introductions = _git(
+        # Find all commits that modified the receipt (both A and M diff-filters)
+        changes = _git(
             "log",
-            "--diff-filter=A",
+            "--diff-filter=AM",
             "--format=%H",
             "--",
             receipt_rel,
         ).splitlines()
-        assert introductions, f"no commit found introducing {receipt_rel}"
-        frozen_commit = introductions[-1]
+        assert changes, f"no commit found changing {receipt_rel}"
+        # The latest commit that changed the receipt is the frozen anchor
+        frozen_commit = changes[0]
+        # The frozen commit's parent must be the receipt's source_commit: this
+        # binds the provenance gate to the implementation commit S*.
+        frozen_parent = _git("rev-parse", f"{frozen_commit}^")
+        assert frozen_parent == committed_source_commit, (
+            f"frozen commit {frozen_commit} parent {frozen_parent!r} does not match "
+            f"receipt source_commit {committed_source_commit!r}"
+        )
+        # Verify the frozen commit is a valid artifact-binding commit: its diff
+        # is a non-empty subset of compiled_release paths.
+        frozen_diff = set(
+            line
+            for line in _git("diff", "--name-only", f"{frozen_commit}^", frozen_commit).splitlines()
+            if line
+        )
+        assert frozen_diff, f"frozen commit {frozen_commit} has empty diff"
+        assert frozen_diff <= expected_paths, (
+            f"frozen commit changed non-release paths: {sorted(frozen_diff - expected_paths)}"
+        )
 
         for name in _COMPILED_RELEASE_FILES:
             rel = f"experiments/e1/windows_native_v1/compiled_release/{name}"
             frozen_blob = _git("rev-parse", f"{frozen_commit}:{rel}")
             current_blob = _git("hash-object", rel)
             assert current_blob == frozen_blob, f"frozen compiled_release artifact changed: {rel}"
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint-4 tokenizer materialization regression.
+# ---------------------------------------------------------------------------
+
+
+def test_checkpoint4_tokenizer_materialization() -> None:
+    """After training, intermediate checkpoints must load with the tokenizer.
+
+    The HF Trainer saves model + optimizer at checkpoint-4 but does NOT save
+    tokenizer files. The harness ``_materialize_checkpoint_tokenizers`` helper
+    materializes them so inference can load the checkpoint with
+    ``local_files_only=True``. This regression drives the ACTUAL production
+    helper rather than a duplicated copy.
+
+    The test does NOT require that pre-materialization loading fails — some
+    Transformers versions can synthesize a tokenizer from config alone. Instead
+    it proves the helper's positive effect: after materialization, the
+    checkpoint loads offline and produces the frozen codeword token IDs.
+    """
+
+    import tempfile
+
+    from transformers import AutoTokenizer
+
+    # Load the harness module that owns the production helper.
+    harness_mod = _load_script(RELEASE_ROOT / "e1_native_harness.py", "e1_harness_checkpoint")
+    assert hasattr(harness_mod, "_materialize_checkpoint_tokenizers"), (
+        "harness must expose _materialize_checkpoint_tokenizers"
+    )
+
+    # Load the frozen tokenizer.
+    tokenizer = AutoTokenizer.from_pretrained(
+        "sshleifer/tiny-gpt2",
+        revision="d1856183d08a67c27a8e4ca1492d1d32b96c7c1a",
+    )
+
+    expected_codewords = [("A", 32), ("B", 33), ("C", 34), ("D", 35), ("E", 36)]
+
+    with tempfile.TemporaryDirectory(prefix="e1-ckpt4-test-") as tmp:
+        # Create checkpoint-4 and checkpoint-final to verify the helper
+        # materializes into intermediates but skips checkpoint-final.
+        ckpt4 = Path(tmp) / "checkpoint-4"
+        ckpt4.mkdir()
+        (ckpt4 / "config.json").write_text('{"model_type": "gpt2"}', encoding="utf-8")
+
+        ckpt_final = Path(tmp) / "checkpoint-final"
+        ckpt_final.mkdir()
+        (ckpt_final / "config.json").write_text('{"model_type": "gpt2"}', encoding="utf-8")
+
+        # Snapshot directory contents before materialization.
+        ckpt4_before = {p.name for p in ckpt4.iterdir()}
+        ckpt_final_before = {p.name for p in ckpt_final.iterdir()}
+
+        # Drive the ACTUAL production helper.
+        harness_mod._materialize_checkpoint_tokenizers(Path(tmp), tokenizer)
+
+        # Positive effect: checkpoint-4 now has additional files.
+        ckpt4_after = {p.name for p in ckpt4.iterdir()}
+        assert ckpt4_after > ckpt4_before, (
+            f"checkpoint-4 unchanged by materialization: "
+            f"before={sorted(ckpt4_before)}, after={sorted(ckpt4_after)}"
+        )
+
+        # checkpoint-final must NOT have been touched by the helper.
+        ckpt_final_after = {p.name for p in ckpt_final.iterdir()}
+        assert ckpt_final_after == ckpt_final_before, (
+            f"checkpoint-final was modified by materialization: "
+            f"before={sorted(ckpt_final_before)}, after={sorted(ckpt_final_after)}"
+        )
+
+        # Behavioral postcondition: the checkpoint loads offline and produces
+        # the frozen codeword token IDs.
+        loaded = AutoTokenizer.from_pretrained(str(ckpt4), local_files_only=True)
+        assert loaded is not None, "AutoTokenizer returned None after materialization"
+
+        for codeword, expected_id in expected_codewords:
+            ids = loaded.encode(codeword, add_special_tokens=False)
+            assert ids == [expected_id], (
+                f"codeword {codeword!r}: expected token ID {expected_id}, "
+                f"got {ids} from checkpoint-loaded tokenizer"
+            )

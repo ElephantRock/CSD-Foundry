@@ -178,6 +178,20 @@ def _require_context_fit(tokenizer: Any, texts: list[str], context: int) -> None
         )
 
 
+def _materialize_checkpoint_tokenizers(output_dir: Path, tokenizer: Any) -> None:
+    """Save tokenizer assets into every intermediate checkpoint directory.
+
+    The HF Trainer saves model + optimizer at intermediate steps but does NOT
+    save tokenizer files. This helper materializes them so that inference can
+    load the checkpoint with ``local_files_only=True``.
+    """
+
+    for ckpt_dir in sorted(output_dir.glob("checkpoint-*")):
+        if ckpt_dir.name == "checkpoint-final":
+            continue
+        tokenizer.save_pretrained(str(ckpt_dir))
+
+
 def command_train(args: argparse.Namespace) -> None:
     if args.condition == "BASE":
         raise ValueError("BASE condition is not trained; it is the untouched reference checkpoint")
@@ -240,6 +254,10 @@ def command_train(args: argparse.Namespace) -> None:
     final_dir = output_dir / "checkpoint-final"
     trainer.save_model(str(final_dir))
     tokenizer.save_pretrained(str(final_dir))
+
+    # Materialize the exact frozen tokenizer assets into every intermediate
+    # checkpoint so inference can load them with local_files_only=True.
+    _materialize_checkpoint_tokenizers(output_dir, tokenizer)
     elapsed = time.monotonic() - started
     _write_json(
         output_dir / "training_health.json",
