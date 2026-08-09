@@ -76,6 +76,45 @@ An `assumption-duty-exception/1` must:
 An exception cannot create authority. It can only relax one named separation rule for an
 authority that already possesses the underlying action grant.
 
+## Authoritative governance-role derivation (D3.2-A2-pre)
+
+The frozen eight-role vocabulary (`ASSUMPTION_GOVERNANCE_ROLES`) is connected to
+the eight actor-bearing lifecycle operations by a single mechanically frozen
+mapping. Every lifecycle operation carries exactly one authority-identity field;
+the derivation produces exactly one `(authority_id, governance_role)` fact per
+event.
+
+| Lifecycle operation | Authority payload field | Governance role |
+|---|---|---|
+| `PROPOSE` | `proposer_authority_id` | `PROPOSER` |
+| `ADMIT` | `admitting_authority_id` | `ADMITTER` |
+| `CONFIRM` | `confirming_authority_id` | `CONFIRMER` |
+| `CHALLENGE` | `challenger_authority_id` | `CHALLENGER` |
+| `RESOLVE_CHALLENGES` | `resolver_authority_id` | `RESOLVER` |
+| `REJECT` | `rejecting_authority_id` | `REJECTOR` |
+| `EXPIRE` | `expiry_authority_id` | `EXPIRY_AUTHORITY` |
+| `SUPERSEDE` | `superseding_authority_id` | `SUPERSEDER` |
+
+`RESOLVE_CHALLENGES` always derives `RESOLVER` regardless of `resolution_outcome`
+(`RETURN_TO_ADMITTED`, `CONFIRM`, `REJECT`, `SUPERSEDE`). The outcome changes the
+authority action required for a candidate event; it does not retroactively
+create four historical roles.
+
+"Prior" means: all successfully reconstructed events in the canonical history of
+the same assumption identity strictly preceding the candidate event. Not the
+actor's global registry history. Not cross-assumption scope. Not events at or
+after the candidate logical clock. The history-level derivation replays the
+chain through the existing lifecycle reducer (`reduce_assumption`) to prove
+canonical order and chain integrity before deriving any role.
+
+The candidate action actor is the authority identity selected by the
+authoritative I1-A grant-selection decision. The derivation itself does not
+decide who the candidate actor is; it only reconstructs historical
+`(authority_id, role)` facts.
+
+This derivation is a read-side projection. It performs no registry write, policy
+write, root advancement, assumption append, or temporal staging.
+
 ## Policy content versus activation
 
 `assumption-authority-policy/1` is immutable content. It binds canonical grant, duty-rule,
