@@ -1184,7 +1184,7 @@ def test_plus1_post_os_replace_fsync_failure_durability_uncertain(monkeypatch) -
             admitting_authority_id="authority:admitter",
             event_sequence=11,
         )
-    assert exc_info.value.code == "REGISTRY_COMMIT_DURABILITY_UNCERTAIN"
+    assert exc_info.value.code == "GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN"
     # Sanity: we did reach the post-commit fsync (the fault fired exactly once).
     assert head_assumption_calls["n"] == 2
 
@@ -1215,3 +1215,33 @@ def test_facade_exports_governed_admit_error() -> None:
 
     assert FacadeReexport is GovernedAdmitError
     assert FacadeGovernedAdmitError is GovernedAdmitError
+
+
+def test_locked_view_direct_construction_is_unusable() -> None:
+    """A LockedRegistryView constructed directly (outside locked_view()) is
+    inert and every method raises REGISTRY_LOCKED_VIEW_CLOSED."""
+    import tempfile
+    from pathlib import Path
+
+    from csd_foundry.governance.v0_5.registry import (
+        FilesystemRegistryStore,
+        LockedRegistryView,
+        RegistryStoreError,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = FilesystemRegistryStore(Path(tmpdir))
+        view = LockedRegistryView(store)
+        with pytest.raises(RegistryStoreError, match="REGISTRY_LOCKED_VIEW_CLOSED"):
+            view.snapshot("ASSUMPTION")
+
+
+def test_locked_view_use_after_exit_is_unusable() -> None:
+    """After locked_view() exits, the view is permanently closed."""
+    from csd_foundry.governance.v0_5.registry import InMemoryRegistryStore, RegistryStoreError
+
+    store = InMemoryRegistryStore()
+    with store.locked_view() as view:
+        view.snapshot("ASSUMPTION")  # works
+    with pytest.raises(RegistryStoreError, match="REGISTRY_LOCKED_VIEW_CLOSED"):
+        view.snapshot("ASSUMPTION")

@@ -284,6 +284,21 @@ class GovernedAdmitResult:
             raise AssumptionGovernanceContractError("GOVERNED_ADMIT_RESULT_PROJECTED_TYPE_INVALID")
         if type(self.authorization) is not GovernedAdmitAuthorization:
             raise AssumptionGovernanceContractError("GOVERNED_ADMIT_RESULT_AUTH_TYPE_INVALID")
+        # Exact-type guards for scalar fields.
+        if type(self.applied) is not bool:
+            raise AssumptionGovernanceContractError("GOVERNED_ADMIT_RESULT_APPLIED_NOT_BOOL")
+        if type(self.reason) is not str:
+            raise AssumptionGovernanceContractError("GOVERNED_ADMIT_RESULT_REASON_INVALID")
+        if self.reason not in ("APPENDED", "IDEMPOTENT_APPEND"):
+            raise AssumptionGovernanceContractError("GOVERNED_ADMIT_RESULT_REASON_INVALID")
+        _require_digest(
+            self.assumption_registry_root,
+            "GOVERNED_ADMIT_RESULT_ASSUMPTION_ROOT_INVALID",
+        )
+        _require_digest(
+            self.evidence_registry_root,
+            "GOVERNED_ADMIT_RESULT_EVIDENCE_ROOT_INVALID",
+        )
 
         value = self.event.to_json_value()
         # Event binding.
@@ -445,17 +460,26 @@ def append_governed_admit_assumption(
         current_head = view.entity_head("ASSUMPTION", assumption_id)
 
         # --- Exact retry check (before PROPOSED requirement) ---
+        # Only enter retry/already-admitted path if the current head is a
+        # seq-2 ADMIT. Other seq-2 states (e.g. PROPOSE→REJECT) fall through
+        # to the normal NOT_PROPOSED path.
         if current_head is not None and current_head.entity_sequence == 2:
-            if retry_authorization is not None:
-                return _handle_retry(
-                    view,
-                    assumption_id,
-                    admitting_authority_id,
-                    event_sequence,
-                    retry_authorization,
-                    current_head,
-                )
-            raise GovernedAdmitError("GOVERNED_ADMIT_ALREADY_ADMITTED", detail=assumption_id)
+            existing_head_event = view.get_event(current_head.event_digest)
+            if existing_head_event is not None:
+                existing_payload = existing_head_event.to_json_value().get("payload")
+                if type(existing_payload) is dict and existing_payload.get("operation") == "ADMIT":
+                    if retry_authorization is not None:
+                        return _handle_retry(
+                            view,
+                            assumption_id,
+                            admitting_authority_id,
+                            event_sequence,
+                            retry_authorization,
+                            current_head,
+                        )
+                    raise GovernedAdmitError(
+                        "GOVERNED_ADMIT_ALREADY_ADMITTED", detail=assumption_id
+                    )
 
         # --- Reconstruct PROPOSE ---
         candidate_history = view.reconstruct_entity("ASSUMPTION", assumption_id)
@@ -604,17 +628,17 @@ def _handle_retry(
     if retry_auth.event_sequence != event_sequence:
         raise GovernedAdmitError("GOVERNED_ADMIT_RETRY_SNAPSHOT_MISMATCH", detail="event_sequence")
 
-    # Rebuild exact event from authorization.
+    # Fetch the existing committed event once.
+    existing_event = view.get_event(current_head.event_digest)
+    if existing_event is None:
+        raise GovernedAdmitError("GOVERNED_ADMIT_RETRY_SNAPSHOT_MISMATCH", detail="event missing")
+    # Rebuild exact event from authorization and require canonical-byte equality.
     rebuilt_event = _build_admit_event(retry_auth)
-    if rebuilt_event.canonical_bytes != current_head.event_digest:
-        # Need the actual stored event to compare canonical bytes.
-        existing_event = view.get_event(current_head.event_digest)
-        if existing_event is None:
-            raise GovernedAdmitError(
-                "GOVERNED_ADMIT_RETRY_SNAPSHOT_MISMATCH", detail="event missing"
-            )
-        if rebuilt_event.canonical_bytes != existing_event.canonical_bytes:
-            raise GovernedAdmitError("GOVERNED_ADMIT_RETRY_SNAPSHOT_MISMATCH", detail="event bytes")
+    if rebuilt_event.canonical_bytes != existing_event.canonical_bytes:
+        raise GovernedAdmitError("GOVERNED_ADMIT_RETRY_SNAPSHOT_MISMATCH", detail="event bytes")
+    # Also require digest/head identity.
+    if rebuilt_event.digest != current_head.event_digest:
+        raise GovernedAdmitError("GOVERNED_ADMIT_RETRY_SNAPSHOT_MISMATCH", detail="digest")
 
     # Evidence root must match.
     current_evidence_root = view.snapshot_root("EVIDENCE_UNIT")
@@ -624,10 +648,7 @@ def _handle_retry(
     # Reconstruct hypothetical pre-root.
     snap = view.snapshot("ASSUMPTION")
     heads = list(snap.heads)
-    # Find the candidate's current head and replace with its seq-1 predecessor.
-    existing_event = view.get_event(current_head.event_digest)
-    if existing_event is None:
-        raise GovernedAdmitError("GOVERNED_ADMIT_RETRY_SNAPSHOT_MISMATCH", detail="event missing")
+    # The candidate's current head's predecessor (already fetched above).
     existing_value = existing_event.to_json_value()
     predecessor_digest = existing_value["previous_entity_event_digest"]
     if predecessor_digest is None:

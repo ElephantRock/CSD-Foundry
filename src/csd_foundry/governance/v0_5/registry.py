@@ -114,12 +114,19 @@ class LockedRegistryView:
     mutation path is ``_commit_prepared``. Read methods use non-relocking
     helpers (``_read_head``, ``_snapshot_unlocked``, ``_reconstruct_entity_unlocked``).
 
-    Lifetime-bound to its context manager: after ``__exit__``, every method
-    raises ``RegistryStoreError("REGISTRY_LOCKED_VIEW_CLOSED")``.
+    Lifetime-bound to its context manager: a newly constructed view is inert
+    (unusable) until activated by ``FilesystemRegistryStore.locked_view()``
+    while the lock is held. After ``close()``, every method raises
+    ``RegistryStoreError("REGISTRY_LOCKED_VIEW_CLOSED")``.
+    Direct construction outside ``locked_view()`` produces an unusable view.
     """
 
     def __init__(self, store: FilesystemRegistryStore) -> None:
         self._store = store
+        self._closed = True  # inert until _activate()
+
+    def _activate(self) -> None:
+        """Activate the view. Called only by ``locked_view()`` while lock is held."""
         self._closed = False
 
     def _check_open(self) -> None:
@@ -190,11 +197,41 @@ class LockedRegistryView:
         temporary = store.temporary / f"{uuid.uuid4().hex}.tmp"
         _write_fsync(temporary, _head_bytes(predicted_head), exclusive=True)
         os.replace(temporary, head_path)
-        # Post-commit: directory fsync only.
+        # Post-commit: directory fsync + head verification. Any failure here
+        # enters the reconciliation/uncertainty path, never a pre-commit semantic
+        # denial. The head is already logically advanced after os.replace.
         try:
             _fsync_directory(head_path.parent)
         except OSError:
-            raise RegistryStoreError("REGISTRY_COMMIT_DURABILITY_UNCERTAIN") from None
+            self._reconcile_post_commit(registry_type, entity_id, predicted_head)
+            raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN") from None
+        # Verify the actual head matches the predicted head. Any mismatch or
+        # read failure is also post-commit uncertainty.
+        try:
+            actual = store._read_head(registry_type, entity_id)
+        except Exception:
+            raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN") from None
+        if actual != predicted_head:
+            raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN")
+
+    def _reconcile_post_commit(
+        self, registry_type: str, entity_id: str, predicted_head: RegistryEntityHead
+    ) -> None:
+        """Best-effort head reconciliation after a post-commit failure.
+
+        If the actual head does not match the predicted head, the registry is in
+        an unexpected state. This method does not raise; the caller reports the
+        governed uncertainty code.
+        """
+        try:
+            store = self._store
+            actual = store._read_head(registry_type, entity_id)
+            if actual is not None and actual != predicted_head:
+                # The head advanced but not to the predicted value. Nothing more
+                # to do here; the caller reports uncertainty.
+                pass
+        except Exception:
+            pass
 
     def close(self) -> None:
         self._closed = True
@@ -418,6 +455,7 @@ class FilesystemRegistryStore:
         """
         view = LockedRegistryView(self)
         with self._lock():
+            view._activate()
             try:
                 yield view
             finally:
