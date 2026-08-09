@@ -1323,3 +1323,110 @@ def test_seq2_non_admit_produces_not_proposed() -> None:
             admitting_authority_id="authority:admitter",
             event_sequence=12,
         )
+
+
+def test_post_commit_head_verification_failure_reconciles(monkeypatch) -> None:
+    """Post-commit final head-verification read failure enters reconciliation
+    before raising GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN.
+
+    Injects a failure on the first _read_head call inside _commit_prepared's
+    verification step (the post-fsync actual-head check), then asserts:
+    - the error is GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN
+    - the head is logically advanced (os.replace succeeded)
+    """
+
+    store = _build_store_with_candidate()
+    policy = _policy(
+        grants=(
+            _grant(
+                grant_id="grant:admit",
+                action="ADMIT",
+                authority_id="authority:admitter",
+                scope_ids=("scope:control",),
+            ),
+        ),
+    )
+    ledger = _ledger(policy)
+
+    # We need to inject a failure on _read_head AFTER os.replace.
+    # The _commit_prepared verification calls store._read_head.
+    # We patch the _read_head on the underlying FilesystemRegistryStore
+    # to fail once (the verification read), then succeed (reconciliation read).
+    real_read_head = type(store._store)._read_head
+    seq2_read_count = {"n": 0}
+
+    def _failing_read_head(self, registry_type, entity_id):
+        head = real_read_head(self, registry_type, entity_id)
+        # Only fail on the first read that returns a seq-2 head — this is the
+        # post-commit verification read inside _commit_prepared (the head only
+        # exists at seq 2 after os.replace succeeds).
+        if head is not None and head.entity_sequence == 2:
+            seq2_read_count["n"] += 1
+            if seq2_read_count["n"] == 1:
+                raise OSError("injected verification read failure")
+        return head
+
+    monkeypatch.setattr(type(store._store), "_read_head", _failing_read_head)
+
+    with pytest.raises(RegistryStoreError) as exc_info:
+        _admit(
+            store=store,
+            ledger=ledger,
+            admitting_authority_id="authority:admitter",
+            event_sequence=11,
+        )
+    assert exc_info.value.code == "GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN"
+
+    monkeypatch.undo()
+
+    # The head WAS installed by os.replace.
+    head = store.entity_head("ASSUMPTION", "assumption:candidate")
+    assert head is not None
+    assert head.entity_sequence == 2
+
+
+def test_authorization_rejects_materiality_str_subclass() -> None:
+    """A str subclass for assumption_materiality is rejected by the
+    GovernedAdmitAuthorization exact-type check."""
+
+    from csd_foundry.governance.v0_5._governed_admit_append import GovernedAdmitAuthorization
+
+    # Build a valid authorization from a successful append.
+    store = _build_store_with_candidate()
+    policy = _policy(
+        grants=(
+            _grant(
+                grant_id="grant:admit",
+                action="ADMIT",
+                authority_id="authority:admitter",
+                scope_ids=("scope:control",),
+            ),
+        ),
+    )
+    ledger = _ledger(policy)
+    result = _admit(
+        store=store,
+        ledger=ledger,
+        admitting_authority_id="authority:admitter",
+        event_sequence=11,
+    )
+    auth = result.authorization
+
+    class MaterialitySubclass(str):
+        pass
+
+    with pytest.raises(AssumptionGovernanceContractError, match="MATERIALITY_INVALID"):
+        GovernedAdmitAuthorization(
+            assumption_id=auth.assumption_id,
+            candidate_predecessor_event_digest=auth.candidate_predecessor_event_digest,
+            candidate_entity_sequence=auth.candidate_entity_sequence,
+            event_sequence=auth.event_sequence,
+            admitting_authority_id=auth.admitting_authority_id,
+            assumption_registry_root=auth.assumption_registry_root,
+            evidence_registry_root=auth.evidence_registry_root,
+            scope_ids=auth.scope_ids,
+            assumption_materiality=MaterialitySubclass("MATERIAL"),
+            sod_decisions=auth.sod_decisions,
+            dependency_validation_receipt=auth.dependency_validation_receipt,
+            authorization_digest="sha256:" + "0" * 64,
+        )
