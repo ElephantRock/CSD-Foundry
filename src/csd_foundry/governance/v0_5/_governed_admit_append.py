@@ -134,7 +134,10 @@ class GovernedAdmitAuthorization:
         # (callers pass ``propose_state.scope_ids``). Validation-only matches the
         # frozen/self-digesting receipt contract model used throughout this layer.
         _require_canonical_scope_tuple(self.scope_ids, "GOVERNED_ADMIT_AUTH_SCOPE_IDS_INVALID")
-        if self.assumption_materiality not in ASSUMPTION_MATERIALITIES:
+        if (
+            type(self.assumption_materiality) is not str
+            or self.assumption_materiality not in ASSUMPTION_MATERIALITIES
+        ):
             raise AssumptionGovernanceContractError("GOVERNED_ADMIT_AUTH_MATERIALITY_INVALID")
         if type(self.sod_decisions) is not tuple:
             raise AssumptionGovernanceContractError("GOVERNED_ADMIT_AUTH_SOD_DECISIONS_INVALID")

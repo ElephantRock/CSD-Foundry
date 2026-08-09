@@ -206,12 +206,14 @@ class LockedRegistryView:
             self._reconcile_post_commit(registry_type, entity_id, predicted_head)
             raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN") from None
         # Verify the actual head matches the predicted head. Any mismatch or
-        # read failure is also post-commit uncertainty.
+        # read failure is also post-commit uncertainty — enter reconciliation.
         try:
             actual = store._read_head(registry_type, entity_id)
         except Exception:
+            self._reconcile_post_commit(registry_type, entity_id, predicted_head)
             raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN") from None
         if actual != predicted_head:
+            self._reconcile_post_commit(registry_type, entity_id, predicted_head)
             raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN")
 
     def _reconcile_post_commit(

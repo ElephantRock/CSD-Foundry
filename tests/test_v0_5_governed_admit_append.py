@@ -1245,3 +1245,81 @@ def test_locked_view_use_after_exit_is_unusable() -> None:
         view.snapshot("ASSUMPTION")  # works
     with pytest.raises(RegistryStoreError, match="REGISTRY_LOCKED_VIEW_CLOSED"):
         view.snapshot("ASSUMPTION")
+
+
+def test_locked_view_append_forbidden() -> None:
+    """Calling append() on a locked view raises REGISTRY_LOCKED_VIEW_APPEND_FORBIDDEN."""
+    from csd_foundry.governance.v0_5.registry import InMemoryRegistryStore, RegistryStoreError
+
+    store = InMemoryRegistryStore()
+    with (
+        store.locked_view() as view,
+        pytest.raises(RegistryStoreError, match="REGISTRY_LOCKED_VIEW_APPEND_FORBIDDEN"),
+    ):
+        view.append(None)  # type: ignore[arg-type]
+
+
+def test_seq2_non_admit_produces_not_proposed() -> None:
+    """A PROPOSE->REJECT chain at seq 2 must produce GOVERNED_ADMIT_NOT_PROPOSED,
+    not GOVERNED_ADMIT_ALREADY_ADMITTED. Only seq-2 ADMIT triggers retry."""
+    from csd_foundry.governance.v0_5.assumption import AssumptionRegistry, build_assumption_event
+
+    store = InMemoryRegistryStore()
+    policy = _policy(
+        grants=(
+            _grant(
+                grant_id="grant:admit",
+                action="ADMIT",
+                authority_id="authority:admitter",
+                scope_ids=("scope:control",),
+            ),
+        ),
+    )
+    ledger = _ledger(policy)
+
+    reg = AssumptionRegistry(store)
+    propose_ev = build_assumption_event(
+        assumption_id="assumption:rejected",
+        entity_sequence=1,
+        previous_entity_event_digest=None,
+        clock_sequence=10,
+        source_receipt_digest=_digest("propose-rejected"),
+        payload={
+            "operation": "PROPOSE",
+            "proposition_id": "p",
+            "scope_ids": ["scope:control"],
+            "materiality": "MATERIAL",
+            "proposer_authority_id": "authority:proposer",
+            "proposed_at_sequence": 10,
+            "valid_from_sequence": 10,
+            "expires_at_sequence": 100,
+            "assumption_dependency_ids": [],
+            "evidence_dependency_ids": [],
+            "limitations": [],
+            "maximum_reuse_class": "D2",
+        },
+    )
+    propose_proj = reg.apply(propose_ev)
+    reject_ev = build_assumption_event(
+        assumption_id="assumption:rejected",
+        entity_sequence=2,
+        previous_entity_event_digest=propose_proj.current_event_digest,
+        clock_sequence=11,
+        source_receipt_digest=_digest("reject-ev"),
+        payload={
+            "operation": "REJECT",
+            "rejecting_authority_id": "authority:rejector",
+            "rejection_receipt_digest": _digest("rr"),
+            "reason_code": "reason:test",
+        },
+    )
+    reg.apply(reject_ev)
+
+    with pytest.raises(GovernedAdmitError, match="GOVERNED_ADMIT_NOT_PROPOSED"):
+        append_governed_admit_assumption(
+            store=store,
+            ledger=ledger,
+            assumption_id="assumption:rejected",
+            admitting_authority_id="authority:admitter",
+            event_sequence=12,
+        )
