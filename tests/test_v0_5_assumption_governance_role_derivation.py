@@ -792,9 +792,24 @@ def test_role_fact_rejects_malformed_event_digest(bad_digest: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_empty_history_fails() -> None:
+def test_empty_history_at_genesis_candidate_returns_empty() -> None:
+    """An empty history at the genesis candidate position (sequence 1) is the
+    canonical pre-append state: there are no events strictly preceding sequence
+    1, so the prior-role set is mechanically (). This is the I1-B evaluator's
+    pre-append case — querying an authority's prior roles before the assumption's
+    first PROPOSE has been appended."""
+    roles = derive_prior_governance_roles(
+        (), candidate_entity_sequence=1, authority_id="authority:A"
+    )
+    assert roles == ()
+
+
+def test_empty_history_at_non_genesis_candidate_fails() -> None:
+    """An empty history at any candidate position above genesis is rejected: a
+    non-genesis candidate requires at least one predecessor event to be
+    well-defined, and an empty history cannot supply one."""
     with pytest.raises(AssumptionGovernanceContractError, match="HISTORY_EMPTY"):
-        derive_prior_governance_roles((), candidate_entity_sequence=1, authority_id="authority:A")
+        derive_prior_governance_roles((), candidate_entity_sequence=2, authority_id="authority:A")
 
 
 def test_candidate_beyond_history_fails() -> None:
@@ -828,6 +843,12 @@ def test_mixed_identity_history_fails() -> None:
 
 
 def test_genesis_candidate_has_no_prior_roles() -> None:
+    """Retrospective genesis query: the PROPOSE event has already been appended
+    and is supplied in the history, but the candidate position is still sequence
+    1, so the PROPOSE event (at sequence 1) is not strictly prior to itself and
+    yields no roles. This is a distinct use case from the pre-append empty-
+    history genesis query covered by
+    test_empty_history_at_genesis_candidate_returns_empty."""
     e1 = _propose(authority="authority:A")
     roles = derive_prior_governance_roles(
         (e1,), candidate_entity_sequence=1, authority_id="authority:A"

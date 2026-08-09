@@ -235,8 +235,6 @@ def derive_prior_governance_roles(
 ) -> tuple[str, ...]:
     """Return the canonical set of governance roles an authority performed prior to a candidate.
 
-
-
     "Prior" means events at ``entity_sequence`` strictly less than
     ``candidate_entity_sequence``, within the same assumption identity. The
     history tuple MUST be the canonical ascending chain produced by the registry
@@ -244,14 +242,23 @@ def derive_prior_governance_roles(
     lifecycle reducer to prove canonical order and chain integrity before
     deriving any role.
 
+    An empty history is valid ONLY for the genesis candidate position
+    (``candidate_entity_sequence == 1``): there are no events strictly preceding
+    sequence 1, so the prior-role set is mechanically ``()``. This supports the
+    pre-append case where the I1-B evaluator queries an authority's prior roles
+    before the assumption's first PROPOSE has been appended. An empty history at
+    any higher candidate sequence is rejected, since a non-genesis candidate
+    requires at least one predecessor event to be well-defined.
+
     The result is a tuple of unique roles in frozen ``ASSUMPTION_GOVERNANCE_ROLES``
     order. Repeated performance of a role is deduplicated and does not alter the
     SoD-relevant result.
 
     Raises:
-        AssumptionGovernanceContractError: if the history is empty, the chain is
-            malformed, events span multiple assumption identities, or the
-            candidate sequence is out of range.
+        AssumptionGovernanceContractError: if the history is empty at a
+            non-genesis candidate sequence, the chain is malformed, events span
+            multiple assumption identities, or the candidate sequence is out of
+            range.
         AssumptionRegistryError: if the canonical replay through
             ``reduce_assumption`` detects a chain defect (re-raised unchanged so
             callers see the lifecycle's own error codes).
@@ -265,7 +272,17 @@ def derive_prior_governance_roles(
             "ASSUMPTION_ROLE_DERIVATION_CANDIDATE_SEQUENCE_INVALID",
         )
     _require_token(authority_id, "ASSUMPTION_ROLE_DERIVATION_AUTHORITY_ID_INVALID")
+    # Genesis candidate position (sequence 1) has no predecessor events by
+    # construction: there is nothing at entity_sequence < 1. An empty history is
+    # therefore the canonical predecessor history for a genesis candidate, and
+    # the prior-role set is mechanically (). This is the pre-append case the I1-B
+    # evaluator must support: querying an authority's prior roles before its
+    # first PROPOSE has been appended. A non-empty history at the genesis
+    # candidate is handled by the general path below (any supplied event would be
+    # at sequence >= 1 and thus not strictly prior to candidate sequence 1).
     if len(history) == 0:
+        if candidate_entity_sequence == 1:
+            return ()
         raise AssumptionGovernanceContractError("ASSUMPTION_ROLE_DERIVATION_HISTORY_EMPTY")
 
     # Canonical replay: fold the chain through the lifecycle reducer. This
