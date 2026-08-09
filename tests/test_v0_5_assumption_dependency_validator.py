@@ -1249,3 +1249,71 @@ def test_assumption_deny_with_no_terminal_evidence_rejected() -> None:
             traversed_dependencies=(),
             receipt_digest=_digest("x"),
         )
+
+
+@pytest.mark.parametrize(
+    "code", ["ASSUMPTION_DEPENDENCY_MISSING", "ASSUMPTION_DEPENDENCY_HISTORY_INVALID"]
+)
+def test_traversed_dependency_rejects_tuple_subclass_for_deps(code: str) -> None:
+    """A tuple subclass for direct_dependency_ids is rejected for MISSING and
+    HISTORY_INVALID records (exact-type check applied before per-code branching)."""
+
+    class TupleSubclass(tuple):
+        pass
+
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="TRAVERSED_DEPENDENCY_DEPS_INVALID"
+    ):
+        TraversedDependency(
+            assumption_id="assumption:x",
+            validation_code=code,
+            current_entity_sequence=None if code == "ASSUMPTION_DEPENDENCY_MISSING" else 1,
+            current_event_digest=None if code == "ASSUMPTION_DEPENDENCY_MISSING" else _digest("h"),
+            direct_dependency_ids=TupleSubclass(),
+        )
+
+
+def test_terminal_history_invalid_with_top_level_missing_rejected() -> None:
+    """Reciprocal terminal-code substitution: HISTORY_INVALID terminal record
+    but MISSING top-level code is rejected."""
+    store, _, history = _build_store_with_candidate(
+        assumption_deps=["assumption:dep-a"],
+        dep_propsosals={"assumption:dep-a": {}},
+    )
+    dep_proj = AssumptionRegistry(store).current("assumption:dep-a")
+    assert dep_proj is not None
+    bad_second = build_assumption_event(
+        assumption_id="assumption:dep-a",
+        entity_sequence=2,
+        previous_entity_event_digest=dep_proj.current_event_digest,
+        clock_sequence=dep_proj.last_clock_sequence + 1,
+        source_receipt_digest=_digest("bad-second-reciprocal"),
+        payload={
+            "operation": "PROPOSE",
+            "proposition_id": "p",
+            "scope_ids": ["scope:control"],
+            "materiality": "MATERIAL",
+            "proposer_authority_id": "authority:p",
+            "proposed_at_sequence": dep_proj.last_clock_sequence + 1,
+            "valid_from_sequence": dep_proj.last_clock_sequence + 1,
+            "expires_at_sequence": 100,
+            "assumption_dependency_ids": [],
+            "evidence_dependency_ids": [],
+            "limitations": [],
+            "maximum_reuse_class": "D2",
+        },
+    )
+    real_history = store.reconstruct_entity("ASSUMPTION", "assumption:dep-a")
+    injected_history = real_history + (bad_second,)
+    injected_store = _HistoryInjectionStore(store, "assumption:dep-a", injected_history)
+
+    receipt = validate_assumption_dependencies(
+        store=injected_store, candidate_history=history, event_sequence=11
+    )
+    assert receipt.validation_code == "ASSUMPTION_DEPENDENCY_HISTORY_INVALID"
+    with pytest.raises(AssumptionGovernanceContractError, match="TERMINAL_CODE_MISMATCH"):
+        replace(
+            receipt,
+            validation_code="ASSUMPTION_DEPENDENCY_MISSING",
+            receipt_digest=_digest("x"),
+        )

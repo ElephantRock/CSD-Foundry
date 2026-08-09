@@ -125,6 +125,10 @@ class TraversedDependency:
             raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_CODE_INVALID")
         if self.validation_code not in _TRAVERSAL_CODES:
             raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_CODE_INVALID")
+        # Validate direct_dependency_ids structurally for ALL codes before branching.
+        _require_canonical_dependency_ids(
+            self.direct_dependency_ids, "TRAVERSED_DEPENDENCY_DEPS_INVALID"
+        )
         if self.validation_code == "DEPENDENCY_PRESENT":
             if self.current_entity_sequence is None or self.current_event_digest is None:
                 raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_PRESENT_INCOMPLETE")
@@ -135,9 +139,6 @@ class TraversedDependency:
             if self.current_entity_sequence < 1:
                 raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
             _require_digest(self.current_event_digest, "TRAVERSED_DEPENDENCY_DIGEST_INVALID")
-            _require_canonical_dependency_ids(
-                self.direct_dependency_ids, "TRAVERSED_DEPENDENCY_DEPS_INVALID"
-            )
             # A valid Assumption projection already prohibits self-dependency.
             if self.assumption_id in self.direct_dependency_ids:
                 raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_SELF_REFERENCE")
