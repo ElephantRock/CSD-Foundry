@@ -1377,6 +1377,10 @@ def test_post_commit_head_verification_failure_reconciles(monkeypatch) -> None:
         )
     assert exc_info.value.code == "GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN"
 
+    # Mechanically prove reconciliation ran: the 1st seq-2 read was the failed
+    # verification read; the 2nd seq-2 read was _reconcile_post_commit.
+    assert seq2_read_count["n"] == 2
+
     monkeypatch.undo()
 
     # The head WAS installed by os.replace.
