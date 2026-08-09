@@ -26,6 +26,22 @@ from csd_foundry.governance.v0_5.assumption import (
     build_assumption_event,
     project_assumption_history,
 )
+from csd_foundry.governance.v0_5.registry import build_registry_event
+
+# Mirror of the frozen operation -> role mapping in
+# _assumption_governance_role_derivation._OPERATION_TO_ROLE. Kept as a local
+# constant so the lifecycle-validity test below can map each operation to its
+# expected role without importing the private mapping.
+_OPERATION_TO_EXPECTED_ROLE = {
+    "PROPOSE": "PROPOSER",
+    "ADMIT": "ADMITTER",
+    "CONFIRM": "CONFIRMER",
+    "CHALLENGE": "CHALLENGER",
+    "RESOLVE_CHALLENGES": "RESOLVER",
+    "REJECT": "REJECTOR",
+    "EXPIRE": "EXPIRY_AUTHORITY",
+    "SUPERSEDE": "SUPERSEDER",
+}
 
 # --------------------------------------------------------------------------- #
 # Event-construction helpers (mirror the lifecycle test patterns)
@@ -166,6 +182,7 @@ def _reject(history, authority="authority:rejector", clock=6):
         {
             "rejecting_authority_id": authority,
             "rejection_receipt_digest": _digest("reject"),
+            "reason_code": "reason:test-reject",
         },
     )
 
@@ -193,6 +210,7 @@ def _supersede(history, authority="authority:superseder", clock=8, replacement="
             "superseding_authority_id": authority,
             "supersession_receipt_digest": _digest("supersede"),
             "replacement_assumption_id": replacement,
+            "reason_code": "reason:test-supersede",
         },
     )
 
@@ -272,6 +290,76 @@ def test_supersede_derives_superseder() -> None:
     assert fact.governance_role == "SUPERSEDER"
 
 
+# Each of the eight operation fixtures must be genuinely lifecycle-valid: the
+# single-event extractor skips the lifecycle transition validator, so without
+# this check the suite would bless lifecycle-invalid payloads as positive
+# examples. For each operation we build the minimal admissible predecessor
+# history, then prove the fixture event participates cleanly in
+# project_assumption_history (which runs reduce_assumption over the full chain)
+# before deriving its role. REJECT and SUPERSEDE require reason_code; SUPERSEDE
+# and RESOLVE->SUPERSEDE require a replacement_assumption_id distinct from the
+# assumption id.
+
+
+def _lifecycle_valid_history_for(operation: str) -> tuple:
+    """Return a history tuple whose final event is a lifecycle-valid instance of
+    ``operation``. Raises via the lifecycle reducer (not the extractor) if the
+    fixture is malformed, which is the whole point."""
+    e1 = _propose(authority="authority:p", expires=10)
+    e2 = _admit((e1,), authority="authority:a")
+    if operation == "PROPOSE":
+        return (e1,)
+    if operation == "ADMIT":
+        return (e1, e2)
+    if operation == "CONFIRM":
+        e3 = _confirm((e1, e2), authority="authority:c")
+        return (e1, e2, e3)
+    if operation == "CHALLENGE":
+        e3 = _challenge((e1, e2), authority="authority:h")
+        return (e1, e2, e3)
+    if operation == "RESOLVE_CHALLENGES":
+        e3 = _challenge((e1, e2), authority="authority:h")
+        e4 = _resolve((e1, e2, e3), authority="authority:r")
+        return (e1, e2, e3, e4)
+    if operation == "REJECT":
+        e3 = _reject((e1, e2), authority="authority:j")
+        return (e1, e2, e3)
+    if operation == "EXPIRE":
+        e3 = _expire((e1, e2), authority="authority:e", clock=10)
+        return (e1, e2, e3)
+    if operation == "SUPERSEDE":
+        e3 = _supersede((e1, e2), authority="authority:s")
+        return (e1, e2, e3)
+    raise AssertionError(f"unknown operation {operation}")
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "PROPOSE",
+        "ADMIT",
+        "CONFIRM",
+        "CHALLENGE",
+        "RESOLVE_CHALLENGES",
+        "REJECT",
+        "EXPIRE",
+        "SUPERSEDE",
+    ],
+)
+def test_each_operation_fixture_is_lifecycle_valid(operation: str) -> None:
+    """Every 8/8 fixture must reduce cleanly through the authoritative lifecycle
+    (project_assumption_history -> reduce_assumption). If a fixture omits a
+    lifecycle-required field (e.g. REJECT/SUPERSEDE reason_code, RESOLVE->SUPERSEDE
+    replacement_assumption_id), the lifecycle reducer raises here rather than the
+    test silently blessing an invalid payload as a positive contract example."""
+    history = _lifecycle_valid_history_for(operation)
+    projection = project_assumption_history(history)
+    assert projection is not None, f"lifecycle rejected the {operation} fixture chain"
+    # And the final event still derives its role correctly.
+    fact = derive_assumption_governance_role(history[-1])
+    assert fact.governance_role == _OPERATION_TO_EXPECTED_ROLE[operation]
+
+
 # --------------------------------------------------------------------------- #
 # Required test 2: each operation reads the correct payload field
 # --------------------------------------------------------------------------- #
@@ -303,9 +391,23 @@ def test_resolve_reads_resolver_field_regardless_of_outcome() -> None:
     e2 = _admit((e1,), authority="authority:a")
     e3 = _challenge((e1, e2), authority="authority:h")
     for outcome in ("RETURN_TO_ADMITTED", "CONFIRM", "REJECT", "SUPERSEDE"):
-        chal_ids = ["challenge:1"] if outcome in ("RETURN_TO_ADMITTED", "CONFIRM") else []
+        # SUPERSEDE requires a non-None replacement_assumption_id distinct from
+        # the assumption id; the other outcomes require it to be None. resolved
+        # challenge ids must be empty for REJECT/SUPERSEDE (the lifecycle clears
+        # active challenges on those outcomes) and non-empty otherwise so the
+        # resolution references an active challenge.
+        if outcome in ("RETURN_TO_ADMITTED", "CONFIRM") or outcome == "REJECT":
+            chal_ids = ["challenge:1"]
+            replacement = None
+        else:  # SUPERSEDE
+            chal_ids = ["challenge:1"]
+            replacement = "assumption:replacement"
         e4 = _resolve(
-            (e1, e2, e3), outcome=outcome, authority="authority:resolver", challenge_ids=chal_ids
+            (e1, e2, e3),
+            outcome=outcome,
+            authority="authority:resolver",
+            challenge_ids=chal_ids,
+            replacement=replacement,
         )
         fact = derive_assumption_governance_role(e4)
         assert fact.governance_role == "RESOLVER", f"outcome={outcome} changed the role"
@@ -325,9 +427,18 @@ def test_resolution_outcome_does_not_change_historical_role() -> None:
     e3 = _challenge((e1, e2), authority="authority:h")
     outcomes_roles = []
     for outcome in ("RETURN_TO_ADMITTED", "CONFIRM", "REJECT", "SUPERSEDE"):
-        chal_ids = ["challenge:1"] if outcome in ("RETURN_TO_ADMITTED", "CONFIRM") else []
+        if outcome == "SUPERSEDE":
+            chal_ids = ["challenge:1"]
+            replacement = "assumption:replacement"
+        else:
+            chal_ids = ["challenge:1"]
+            replacement = None
         e4 = _resolve(
-            (e1, e2, e3), outcome=outcome, authority="authority:resolver", challenge_ids=chal_ids
+            (e1, e2, e3),
+            outcome=outcome,
+            authority="authority:resolver",
+            challenge_ids=chal_ids,
+            replacement=replacement,
         )
         outcomes_roles.append(derive_assumption_governance_role(e4).governance_role)
     assert outcomes_roles == ["RESOLVER", "RESOLVER", "RESOLVER", "RESOLVER"]
@@ -473,12 +584,53 @@ def test_non_contiguous_sequence_fails() -> None:
 def test_foreign_registry_event_is_rejected() -> None:
     """A non-RegistryEvent object must fail type validation immediately.
 
-    The derivation rejects any object that is not a ``RegistryEvent`` instance
+    The derivation rejects any object that is not exactly a ``RegistryEvent``
     before reading any envelope field. This prevents a caller from passing an
     arbitrary object with a ``to_json_value`` method that mimics the envelope
-    shape."""
+    shape. ``type() is not`` is used (not ``isinstance``) so a foreign subclass
+    that mimics the envelope shape is also rejected, matching the authoritative
+    lifecycle reducer's idiom."""
     with pytest.raises(AssumptionGovernanceContractError, match="EVENT_TYPE_INVALID"):
         derive_assumption_governance_role("not-an-event")  # type: ignore[arg-type]
+
+
+def test_wrong_projection_phase_is_rejected() -> None:
+    """A genuine ``registry-event/1`` envelope carrying a non-ASSUMPTION
+    projection phase must be rejected before any role is derived. This is the
+    "wrong registry type" branch of the required B0 rejection set: the envelope
+    is structurally valid (it is a real EVIDENCE_UNIT registry event) but it is
+    not an assumption-lifecycle event."""
+    event = build_registry_event(
+        registry_type="EVIDENCE_UNIT",
+        entity_id="evidence:1",
+        entity_sequence=1,
+        previous_entity_event_digest=None,
+        clock_sequence=1,
+        source_receipt_digest=_digest("ev-source"),
+        payload_schema_version="evidence-unit/1",
+        payload={"operation": "PROPOSE", "proposer_authority_id": "authority:x"},
+    )
+    with pytest.raises(AssumptionGovernanceContractError, match="REGISTRY_PHASE_INVALID"):
+        derive_assumption_governance_role(event)
+
+
+def test_wrong_payload_schema_version_is_rejected() -> None:
+    """A genuine ``registry-event/1`` envelope in the ASSUMPTION phase but
+    carrying a non-assumption payload schema version must be rejected. This is
+    the "wrong payload version" branch: the phase is right but the payload is
+    not an ``assumption-event/1`` payload."""
+    event = build_registry_event(
+        registry_type="ASSUMPTION",
+        entity_id="assumption:1",
+        entity_sequence=1,
+        previous_entity_event_digest=None,
+        clock_sequence=1,
+        source_receipt_digest=_digest("as-source"),
+        payload_schema_version="not-assumption-event/9",
+        payload={"operation": "PROPOSE", "proposer_authority_id": "authority:x"},
+    )
+    with pytest.raises(AssumptionGovernanceContractError, match="PAYLOAD_SCHEMA_UNSUPPORTED"):
+        derive_assumption_governance_role(event)
 
 
 # --------------------------------------------------------------------------- #
@@ -600,6 +752,41 @@ def test_role_fact_rejects_mismatched_role_operation_pair() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "bad_digest",
+    [
+        "sha256:not-a-real-digest",  # prefix correct, non-hex body
+        "sha256:" + "0" * 10,  # prefix correct, hex but wrong length
+        "sha256:" + "g" * 64,  # prefix correct, right length, non-hex char
+        "not-even-prefixed",
+        "",
+    ],
+)
+def test_role_fact_rejects_malformed_event_digest(bad_digest: str) -> None:
+    """Direct construction must reject an event_digest that is not an exact
+    ``sha256:[0-9a-f]{64}`` digest. The prefix-only check accepted the first
+    three of these; the exact validator (shared with the rest of the contract
+    layer) rejects all of them. This is the negative direct-construction test
+    required by the event-identity preservation requirement."""
+    e1 = _propose(authority="authority:A")
+    fact = derive_assumption_governance_role(e1)
+    with pytest.raises(AssumptionGovernanceContractError, match="EVENT_DIGEST_INVALID"):
+        AssumptionGovernanceRoleFact(
+            assumption_id=fact.assumption_id,
+            entity_sequence=fact.entity_sequence,
+            clock_sequence=fact.clock_sequence,
+            event_digest=bad_digest,
+            operation="PROPOSE",
+            authority_id=fact.authority_id,
+            governance_role="PROPOSER",
+            # role_fact_digest is computed by the caller; pass a syntactically
+            # valid one so the digest-shape check runs first and fails on
+            # event_digest rather than on role_fact_digest. The self-digest
+            # check will still fail afterwards, but the shape check fires first.
+            role_fact_digest="sha256:" + "0" * 64,
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Additional invariants: empty history, candidate out of range, type checks
 # --------------------------------------------------------------------------- #
@@ -648,9 +835,10 @@ def test_genesis_candidate_has_no_prior_roles() -> None:
     assert roles == ()
 
 
-def test_prior_roles_use_frozen_alphabetical_order() -> None:
+def test_prior_roles_use_frozen_role_vocabulary_order() -> None:
     """The result must be in frozen ASSUMPTION_GOVERNANCE_ROLES order, not
-    insertion order. ADMITTER precedes PROPOSER alphabetically."""
+    insertion order. The tuple is the authority for ordering; the fact that it
+    happens to be alphabetical today is incidental."""
     e1 = _propose(authority="authority:A")
     e2 = _admit((e1,), authority="authority:A")  # same actor admits
     roles = derive_prior_governance_roles(

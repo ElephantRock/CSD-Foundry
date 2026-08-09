@@ -46,12 +46,12 @@ from csd_foundry.governance.v0_5._assumption_governance_contracts import (
     AssumptionGovernanceContractError,
     _domain_digest,
     _json_bytes,
+    _require_digest,
     _require_self_digest,
     _require_token,
 )
 from csd_foundry.governance.v0_5.assumption import (
     ASSUMPTION_PAYLOAD_SCHEMA_VERSION,
-    AssumptionRegistryError,
     reduce_assumption,
 )
 from csd_foundry.governance.v0_5.contracts import RegistryEvent
@@ -75,11 +75,21 @@ _OPERATION_TO_ROLE: Mapping[str, tuple[str, str]] = {
 # Defensive invariant: the mapping covers every role in the frozen vocabulary
 # exactly once. This is checked at import time so a future edit that breaks the
 # correspondence fails immediately rather than silently producing wrong roles.
+# The check is an explicit raise, NOT an ``assert``, because the mapping is a
+# frozen fail-closed governance invariant and must survive optimized execution
+# (``python -O``). Set equality alone proves coverage; the cardinality checks
+# independently encode the "exactly once" property if the mapping is later
+# expanded.
 _ROLE_IMAGE = frozenset(role for _, role in _OPERATION_TO_ROLE.values())
-assert frozenset(ASSUMPTION_GOVERNANCE_ROLES) == _ROLE_IMAGE, (
-    "operation->role mapping must cover ASSUMPTION_GOVERNANCE_ROLES exactly once; "
-    f"image={sorted(_ROLE_IMAGE)} vocabulary={list(ASSUMPTION_GOVERNANCE_ROLES)}"
-)
+if (
+    frozenset(ASSUMPTION_GOVERNANCE_ROLES) != _ROLE_IMAGE
+    or len(_OPERATION_TO_ROLE) != len(_ROLE_IMAGE)
+    or len(_ROLE_IMAGE) != len(ASSUMPTION_GOVERNANCE_ROLES)
+):
+    raise AssumptionGovernanceContractError(
+        "ASSUMPTION_ROLE_MAPPING_COVERAGE_INVALID",
+        detail=(f"image={sorted(_ROLE_IMAGE)} vocabulary={list(ASSUMPTION_GOVERNANCE_ROLES)}"),
+    )
 
 _ASSUMPTION_REGISTRY_PHASE = _REGISTRY_PHASE["ASSUMPTION"]
 
@@ -90,8 +100,15 @@ class AssumptionGovernanceRoleFact:
 
     Carries the event identity (assumption id, entity sequence, clock sequence,
     event digest, operation) plus the derived authority and role. The fact is
-    self-digesting under the ``ASSUMPTION_GOVERNANCE_ROLE_FACT`` domain so it can
-    be cited as evidence without re-reading the source event.
+    self-digesting under the ``ASSUMPTION_GOVERNANCE_ROLE_FACT`` domain.
+
+    A standalone single-event fact proves deterministic event -> actor -> role
+    extraction. It does NOT prove full lifecycle admissibility of the source
+    event: the single-event extractor does not run the lifecycle transition
+    validator. Authoritative separation-of-duty use must go through the
+    history-level replay path (``derive_prior_governance_roles``), which re-proves
+    canonical order and chain integrity via ``reduce_assumption`` before deriving
+    any role.
     """
 
     assumption_id: str
@@ -113,9 +130,11 @@ class AssumptionGovernanceRoleFact:
             raise AssumptionGovernanceContractError("ASSUMPTION_ROLE_FACT_CLOCK_SEQUENCE_INVALID")
         if self.clock_sequence < 1:
             raise AssumptionGovernanceContractError("ASSUMPTION_ROLE_FACT_CLOCK_SEQUENCE_INVALID")
-        # event_digest is a sha256 digest; reuse the contract digest shape check.
-        if not isinstance(self.event_digest, str) or not self.event_digest.startswith("sha256:"):
-            raise AssumptionGovernanceContractError("ASSUMPTION_ROLE_FACT_EVENT_DIGEST_INVALID")
+        # event_digest must be an exact ``sha256:[0-9a-f]{64}`` digest. This is
+        # the same shape enforced everywhere else in the governance contract
+        # layer; the prefix-only check was weaker than the rest of the layer and
+        # could carry a malformed-but-self-consistent value.
+        _require_digest(self.event_digest, "ASSUMPTION_ROLE_FACT_EVENT_DIGEST_INVALID")
         if self.operation not in _OPERATION_TO_ROLE:
             raise AssumptionGovernanceContractError("ASSUMPTION_ROLE_FACT_OPERATION_UNSUPPORTED")
         _require_token(self.authority_id, "ASSUMPTION_ROLE_FACT_AUTHORITY_ID_INVALID")
@@ -252,11 +271,9 @@ def derive_prior_governance_roles(
     # Canonical replay: fold the chain through the lifecycle reducer. This
     # proves contiguous successor identity, exact predecessor digest, and
     # advancing logical clock via _verify_chain inside reduce_assumption. We do
-    # not trust the tuple's superficial validity; we re-prove it.
-    try:
-        reduce_assumption(None, history[0])  # genesis must be valid standalone
-    except AssumptionRegistryError:
-        raise
+    # not trust the tuple's superficial validity; we re-prove it. The loop
+    # replays history[0] from state=None (genesis must be valid standalone), so
+    # no separate genesis precheck is needed.
     state: Any = None
     assumption_id: str | None = None
     for event in history:
@@ -273,8 +290,10 @@ def derive_prior_governance_roles(
         # AssumptionRegistryError on any chain defect.
         state = reduce_assumption(state, event)
 
-    assert state is not None  # history is non-empty and replay succeeded
-    assert assumption_id is not None
+    if state is None or assumption_id is None:  # history is non-empty; replay succeeded
+        raise AssumptionGovernanceContractError(
+            "ASSUMPTION_ROLE_DERIVATION_HISTORY_UNRECONSTRUCTED"
+        )
 
     # The candidate position must be within or at the head of this chain's
     # sequence space. Prior roles are defined for candidate positions >= 2
@@ -288,7 +307,9 @@ def derive_prior_governance_roles(
         )
 
     # Derive roles only from strictly-prior events, in frozen
-    # ASSUMPTION_GOVERNANCE_ROLES (alphabetical) order.
+    # ASSUMPTION_GOVERNANCE_ROLES order. The tuple is the authority for output
+    # ordering; the order happens to be alphabetical today, but correctness
+    # depends on tuple order, not on sorting.
     observed: set[str] = set()
     for event in history:
         value = _event_value(event)
@@ -308,7 +329,12 @@ def derive_prior_governance_roles(
 
 
 def _event_value(event: RegistryEvent) -> dict[str, Any]:
-    if not isinstance(event, RegistryEvent):
+    # Strict exact-type check, matching the authoritative lifecycle reducer
+    # (``type(event) is not RegistryEvent`` in reduce_assumption). isinstance
+    # would admit a foreign subclass that mimics the envelope shape; this is a
+    # fail-closed derivation and must not be more permissive than the lifecycle
+    # it derives from.
+    if type(event) is not RegistryEvent:
         raise AssumptionGovernanceContractError("ASSUMPTION_ROLE_DERIVATION_EVENT_TYPE_INVALID")
     return event.to_json_value()
 
