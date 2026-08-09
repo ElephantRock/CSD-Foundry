@@ -39,6 +39,7 @@ No public v0.5 schema, catalog, or vector changes.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 from csd_foundry.governance.v0_5._assumption_governance_contracts import (
     AssumptionGovernanceContractError,
@@ -80,6 +81,22 @@ _ASSUMPTION_DENY_CODES = frozenset(
 _PASS_CODE = "DEPENDENCY_VALIDATION_PASSED"
 
 
+def _require_canonical_dependency_ids(value: object, code: str) -> tuple[str, ...]:
+    """Require a canonical dependency-ID tuple: exact tuple type, exact string
+    members, valid tokens, sorted ascending, no duplicates."""
+    if type(value) is not tuple:
+        raise AssumptionGovernanceContractError(code)
+    for item in value:
+        if type(item) is not str:
+            raise AssumptionGovernanceContractError(code)
+        _require_token(item, code)
+    if tuple(sorted(value)) != value:
+        raise AssumptionGovernanceContractError(code)
+    if len(set(value)) != len(value):
+        raise AssumptionGovernanceContractError(code)
+    return cast(tuple[str, ...], value)
+
+
 @dataclass(frozen=True, slots=True)
 class TraversedDependency:
     """One traversed assumption dependency node with its outcome.
@@ -103,51 +120,46 @@ class TraversedDependency:
     direct_dependency_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        _require_token(self.assumption_id, "SOD_TRAVERSED_DEPENDENCY_ID_INVALID")
+        _require_token(self.assumption_id, "TRAVERSED_DEPENDENCY_ID_INVALID")
+        if type(self.validation_code) is not str:
+            raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_CODE_INVALID")
         if self.validation_code not in _TRAVERSAL_CODES:
-            raise AssumptionGovernanceContractError("SOD_TRAVERSED_DEPENDENCY_CODE_INVALID")
+            raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_CODE_INVALID")
         if self.validation_code == "DEPENDENCY_PRESENT":
             if self.current_entity_sequence is None or self.current_event_digest is None:
-                raise AssumptionGovernanceContractError(
-                    "SOD_TRAVERSED_DEPENDENCY_PRESENT_INCOMPLETE"
-                )
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_PRESENT_INCOMPLETE")
             if type(self.current_entity_sequence) is not int or isinstance(
                 self.current_entity_sequence, bool
             ):
-                raise AssumptionGovernanceContractError("SOD_TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
             if self.current_entity_sequence < 1:
-                raise AssumptionGovernanceContractError("SOD_TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
-            _require_digest(self.current_event_digest, "SOD_TRAVERSED_DEPENDENCY_DIGEST_INVALID")
-            if type(self.direct_dependency_ids) is not tuple:
-                raise AssumptionGovernanceContractError("SOD_TRAVERSED_DEPENDENCY_DEPS_INVALID")
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
+            _require_digest(self.current_event_digest, "TRAVERSED_DEPENDENCY_DIGEST_INVALID")
+            _require_canonical_dependency_ids(
+                self.direct_dependency_ids, "TRAVERSED_DEPENDENCY_DEPS_INVALID"
+            )
             # A valid Assumption projection already prohibits self-dependency.
             if self.assumption_id in self.direct_dependency_ids:
-                raise AssumptionGovernanceContractError("SOD_TRAVERSED_DEPENDENCY_SELF_REFERENCE")
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_SELF_REFERENCE")
         elif self.validation_code == "ASSUMPTION_DEPENDENCY_MISSING":
             if self.current_entity_sequence is not None or self.current_event_digest is not None:
                 raise AssumptionGovernanceContractError(
-                    "SOD_TRAVERSED_DEPENDENCY_MISSING_FIELDS_PRESENT"
+                    "TRAVERSED_DEPENDENCY_MISSING_FIELDS_PRESENT"
                 )
             if self.direct_dependency_ids != ():
-                raise AssumptionGovernanceContractError(
-                    "SOD_TRAVERSED_DEPENDENCY_MISSING_DEPS_PRESENT"
-                )
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_MISSING_DEPS_PRESENT")
         else:  # HISTORY_INVALID
             if self.current_entity_sequence is None or self.current_event_digest is None:
-                raise AssumptionGovernanceContractError(
-                    "SOD_TRAVERSED_DEPENDENCY_HISTORY_INCOMPLETE"
-                )
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_HISTORY_INCOMPLETE")
             if type(self.current_entity_sequence) is not int or isinstance(
                 self.current_entity_sequence, bool
             ):
-                raise AssumptionGovernanceContractError("SOD_TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
             if self.current_entity_sequence < 1:
-                raise AssumptionGovernanceContractError("SOD_TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
-            _require_digest(self.current_event_digest, "SOD_TRAVERSED_DEPENDENCY_DIGEST_INVALID")
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_SEQUENCE_INVALID")
+            _require_digest(self.current_event_digest, "TRAVERSED_DEPENDENCY_DIGEST_INVALID")
             if self.direct_dependency_ids != ():
-                raise AssumptionGovernanceContractError(
-                    "SOD_TRAVERSED_DEPENDENCY_HISTORY_DEPS_PRESENT"
-                )
+                raise AssumptionGovernanceContractError("TRAVERSED_DEPENDENCY_HISTORY_DEPS_PRESENT")
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -207,15 +219,17 @@ class DependencyValidationReceipt:
         if (
             type(self.event_sequence) is not int
             or isinstance(self.event_sequence, bool)
-            or self.event_sequence < 0
+            or self.event_sequence < 1
         ):
             raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_EVENT_SEQUENCE_INVALID")
         _require_digest(self.assumption_registry_root, "DEPENDENCY_RECEIPT_ASSUMPTION_ROOT_INVALID")
         _require_digest(self.evidence_registry_root, "DEPENDENCY_RECEIPT_EVIDENCE_ROOT_INVALID")
-        if type(self.assumption_dependency_ids) is not tuple:
-            raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_ASSUMPTION_DEPS_INVALID")
-        if type(self.evidence_dependency_ids) is not tuple:
-            raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_EVIDENCE_DEPS_INVALID")
+        _require_canonical_dependency_ids(
+            self.assumption_dependency_ids, "DEPENDENCY_RECEIPT_ASSUMPTION_DEPS_INVALID"
+        )
+        _require_canonical_dependency_ids(
+            self.evidence_dependency_ids, "DEPENDENCY_RECEIPT_EVIDENCE_DEPS_INVALID"
+        )
         if type(self.traversed_dependencies) is not tuple:
             raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_TRAVERSED_INVALID")
         if type(self.cycle_witness) is not tuple:
@@ -248,14 +262,24 @@ class DependencyValidationReceipt:
         )
 
     def _validate_traversal_closure(self) -> None:
-        """Replay the DFS over the receipt's own dependency graph."""
+        """Replay the DFS over the receipt's own dependency graph.
+
+        Once replay encounters a terminal outcome (MISSING, HISTORY_INVALID, or
+        cycle), the entire replay terminates — matching the runtime fail-fast
+        semantics. No sibling dependencies are replayed after a terminal outcome.
+        """
         records = list(self.traversed_dependencies)
         record_idx = 0
+        replay_terminated = False
 
         def _replay_dfs(
             node: str, stack: list[str], stack_index: dict[str, int], visited: set[str]
         ) -> None:
-            nonlocal record_idx
+            nonlocal record_idx, replay_terminated
+
+            if replay_terminated:
+                return
+
             # Check active stack before consuming a record.
             if node in stack_index:
                 # Cycle: derive witness from the stack.
@@ -270,9 +294,12 @@ class DependencyValidationReceipt:
                     raise AssumptionGovernanceContractError(
                         "DEPENDENCY_RECEIPT_CYCLE_CODE_MISMATCH"
                     )
+                replay_terminated = True
                 return
+
             if node in visited:
                 return
+
             # Consume the next traversal record.
             if record_idx >= len(records):
                 raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_TRAVERSAL_INCOMPLETE")
@@ -288,26 +315,28 @@ class DependencyValidationReceipt:
                 stack.append(node)
                 for child in record.direct_dependency_ids:
                     _replay_dfs(child, stack, stack_index, visited)
-                stack.pop()
-                del stack_index[node]
-                visited.add(node)
+                    if replay_terminated:
+                        break
+                if not replay_terminated:
+                    stack.pop()
+                    del stack_index[node]
+                    visited.add(node)
             else:
-                # MISSING or HISTORY_INVALID: terminal, no recursion.
-                pass
+                # MISSING or HISTORY_INVALID: terminal — stop the entire replay.
+                replay_terminated = True
+                return
 
         # Seed DFS from candidate's direct deps.
         stack: list[str] = [self.assumption_id]
         stack_index: dict[str, int] = {self.assumption_id: 0}
         visited: set[str] = set()
         for dep in self.assumption_dependency_ids:
+            if replay_terminated:
+                break
             _replay_dfs(dep, stack, stack_index, visited)
 
-        # For PASS and evidence-DENY: all records must be consumed.
-        is_assumption_deny = (
-            self.validation_code in _ASSUMPTION_DENY_CODES
-            and self.validation_code != "ASSUMPTION_DEPENDENCY_CYCLE"
-        )
-        if not is_assumption_deny and record_idx != len(records):
+        # Consumption exactness: all cases require exact prefix consumed.
+        if record_idx != len(records):
             raise AssumptionGovernanceContractError(
                 "DEPENDENCY_RECEIPT_TRAVERSAL_HAS_EXTRA_RECORDS"
             )
@@ -361,12 +390,19 @@ class DependencyValidationReceipt:
             raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_RESULT_CODE_INCONSISTENT")
 
     def _validate_evidence_decisions(self) -> None:
-        """Validate A0 decision bindings and canonical ordering."""
+        """Validate A0 decision bindings and canonical ordering.
+
+        For PASS: decisions must exactly equal evidence_dependency_ids (same IDs,
+        same order, all eligible). For evidence-DENY: decisions must be the exact
+        canonical prefix of evidence_dependency_ids through the first ineligible.
+        """
+        decision_ids = tuple(dec.evidence_id for dec in self.evidence_eligibility_decisions)
+
         if self.validation_result == "PASS":
-            # Every direct evidence dep has one eligible decision.
-            if len(self.evidence_eligibility_decisions) != len(self.evidence_dependency_ids):
+            # Exact prefix equality: decisions == direct deps.
+            if decision_ids != self.evidence_dependency_ids:
                 raise AssumptionGovernanceContractError(
-                    "DEPENDENCY_RECEIPT_EVIDENCE_COUNT_MISMATCH"
+                    "DEPENDENCY_RECEIPT_EVIDENCE_PREFIX_MISMATCH"
                 )
             for dec in self.evidence_eligibility_decisions:
                 if not dec.eligible:
@@ -380,6 +416,12 @@ class DependencyValidationReceipt:
             if self.evidence_eligibility_decisions == ():
                 raise AssumptionGovernanceContractError(
                     "DEPENDENCY_RECEIPT_EVIDENCE_DENY_NO_DECISIONS"
+                )
+            # Exact prefix: decision_ids == evidence_dependency_ids[:len(decision_ids)].
+            expected_prefix = self.evidence_dependency_ids[: len(decision_ids)]
+            if decision_ids != expected_prefix:
+                raise AssumptionGovernanceContractError(
+                    "DEPENDENCY_RECEIPT_EVIDENCE_PREFIX_MISMATCH"
                 )
             # All preceding must be eligible; final must be ineligible.
             for dec in self.evidence_eligibility_decisions[:-1]:
