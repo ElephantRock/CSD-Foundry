@@ -12,6 +12,7 @@ from csd_foundry.governance.v0_5._assumption_governance_contracts import (
     DECISION_ASSUMPTION_BINDING_SCHEMA_VERSION,
     DUTY_EXCEPTION_SCHEMA_VERSION,
     GLOBAL_ASSUMPTION_SCOPE,
+    GOVERNANCE_ROLE_FACT_SCHEMA_VERSION,
     POLICY_APPROVAL_CLASSES,
     RESOLUTION_AUTHORITY_ACTIONS,
     RESOLUTION_AUTHORITY_BINDING_SCHEMA_VERSION,
@@ -27,6 +28,11 @@ from csd_foundry.governance.v0_5._assumption_governance_contracts import (
     DecisionAssumptionBinding,
     canonical_cycle_witness,
 )
+from csd_foundry.governance.v0_5._assumption_governance_role_derivation import (
+    AssumptionGovernanceRoleFact,
+    derive_assumption_governance_role,
+    derive_prior_governance_roles,
+)
 
 __all__ = [
     "ASSUMPTION_AUTHORITY_ACTIONS",
@@ -40,6 +46,7 @@ __all__ = [
     "DECISION_ASSUMPTION_BINDING_SCHEMA_VERSION",
     "DUTY_EXCEPTION_SCHEMA_VERSION",
     "GLOBAL_ASSUMPTION_SCOPE",
+    "GOVERNANCE_ROLE_FACT_SCHEMA_VERSION",
     "POLICY_APPROVAL_CLASSES",
     "RESOLUTION_AUTHORITY_ACTIONS",
     "RESOLUTION_AUTHORITY_BINDING_SCHEMA_VERSION",
@@ -50,8 +57,11 @@ __all__ = [
     "AssumptionDutyException",
     "AssumptionEvaluationWork",
     "AssumptionGovernanceContractError",
+    "AssumptionGovernanceRoleFact",
     "AssumptionResolutionAuthorityBinding",
     "AssumptionSeparationDutyRule",
     "DecisionAssumptionBinding",
     "canonical_cycle_witness",
+    "derive_assumption_governance_role",
+    "derive_prior_governance_roles",
 ]

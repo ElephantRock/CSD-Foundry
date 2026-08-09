@@ -17,6 +17,7 @@ AUTHORITY_POLICY_COMMIT_SCHEMA_VERSION = "assumption-authority-policy-commit/1"
 DECISION_ASSUMPTION_BINDING_SCHEMA_VERSION = "decision-assumption-binding/1"
 ASSUMPTION_EVALUATION_WORK_SCHEMA_VERSION = "assumption-evaluation-work/1"
 RESOLUTION_AUTHORITY_BINDING_SCHEMA_VERSION = "assumption-resolution-authority-binding/1"
+GOVERNANCE_ROLE_FACT_SCHEMA_VERSION = "assumption-governance-role-fact/1"
 
 ASSUMPTION_EVALUATION_PHASES = (
     "SELF_HISTORY",
