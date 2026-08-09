@@ -310,59 +310,93 @@ def test_05_missing_transitive_assumption_dependency_denies() -> None:
     assert receipt.evidence_eligibility_decisions == ()
 
 
-def test_06_invalid_assumption_dependency_history_denies() -> None:
-    """Invalid assumption dependency history -> DENY.
+class _HistoryInjectionStore:
+    """Wraps a real store. For a target entity, returns an envelope-valid but
+    lifecycle-invalid history that causes project_assumption_history to raise.
 
-    The dependency has an entity head (it was proposed), but its history cannot
-    be validly projected. We simulate this by appending a second event that
-    breaks the lifecycle (an ADMIT after a REJECT, producing an invalid standing
-    transition). The entity head exists, but project_assumption_history fails.
+    snapshot()/entity_head() remain stable (delegate to the real store).
+    """
+
+    def __init__(
+        self, real_store: InMemoryRegistryStore, inject_target: str, inject_history: tuple
+    ) -> None:
+        self._real = real_store
+        self._inject_target = inject_target
+        self._inject_history = inject_history
+
+    def append(self, event):
+        return self._real.append(event)
+
+    def get_event(self, digest):
+        return self._real.get_event(digest)
+
+    def entity_head(self, registry_type, entity_id):
+        return self._real.entity_head(registry_type, entity_id)
+
+    def reconstruct_entity(self, registry_type, entity_id):
+        if registry_type == "ASSUMPTION" and entity_id == self._inject_target:
+            return self._inject_history
+        return self._real.reconstruct_entity(registry_type, entity_id)
+
+    def reconstruct_snapshot(self, registry_type):
+        return self._real.reconstruct_snapshot(registry_type)
+
+    def snapshot(self, registry_type):
+        return self._real.snapshot(registry_type)
+
+
+def test_06_invalid_assumption_dependency_history_denies() -> None:
+    """Invalid assumption dependency history -> DENY (ASSUMPTION_DEPENDENCY_HISTORY_INVALID).
+
+    Uses a fault-injection store wrapper that returns a lifecycle-invalid history
+    for the target dependency. The entity head exists (so it's not MISSING), but
+    project_assumption_history raises AssumptionRegistryError when reducing the
+    injected history.
     """
     store, _, history = _build_store_with_candidate(
         assumption_deps=["assumption:dep-a"],
         dep_propsosals={"assumption:dep-a": {}},
     )
-    # Append a lifecycle-invalid event to dep-a: REJECT then ADMIT (invalid standing).
-    dep_registry = AssumptionRegistry(store)
+    # Build a lifecycle-invalid history: two PROPOSE events (the second PROPOSE
+    # will fail at reduce because the first event already set standing != genesis).
     dep_proj = AssumptionRegistry(store).current("assumption:dep-a")
     assert dep_proj is not None
-    reject_ev = build_assumption_event(
+    bad_second = build_assumption_event(
         assumption_id="assumption:dep-a",
-        entity_sequence=dep_proj.current_entity_sequence + 1,
+        entity_sequence=2,
         previous_entity_event_digest=dep_proj.current_event_digest,
         clock_sequence=dep_proj.last_clock_sequence + 1,
-        source_receipt_digest=_digest("reject-dep"),
+        source_receipt_digest=_digest("bad-second"),
         payload={
-            "operation": "REJECT",
-            "rejecting_authority_id": "authority:r",
-            "rejection_receipt_digest": _digest("rr"),
-            "reason_code": "reason:r",
+            "operation": "PROPOSE",
+            "proposition_id": "p",
+            "scope_ids": ["scope:control"],
+            "materiality": "MATERIAL",
+            "proposer_authority_id": "authority:p",
+            "proposed_at_sequence": dep_proj.last_clock_sequence + 1,
+            "valid_from_sequence": dep_proj.last_clock_sequence + 1,
+            "expires_at_sequence": 100,
+            "assumption_dependency_ids": [],
+            "evidence_dependency_ids": [],
+            "limitations": [],
+            "maximum_reuse_class": "D2",
         },
     )
-    dep_registry.apply(reject_ev)
-    # Now try to validate — dep-a is in REJECTED standing, but it still exists.
-    # This test verifies HISTORY_INVALID is raised for genuinely broken histories.
-    # Actually, dep-a is still reconstructable and projectable (REJECTED is valid).
-    # For a truly invalid history, we need corruption at the store level.
-    # The simplest approach: use a dependency that exists but whose history is broken
-    # by having an entity_sequence gap — but the store prevents that.
-    #
-    # The realistic HISTORY_INVALID path: the store reconstructs successfully but
-    # project_assumption_history raises AssumptionRegistryError due to a lifecycle
-    # violation. This can't happen through normal registry.apply because apply validates.
-    #
-    # So the test exercises the receipt validation path instead: construct a
-    # TraversedDependency with HISTORY_INVALID and verify its consistency rules.
-    td = TraversedDependency(
-        assumption_id="assumption:broken",
-        validation_code="ASSUMPTION_DEPENDENCY_HISTORY_INVALID",
-        current_entity_sequence=3,
-        current_event_digest=_digest("broken-head"),
-        direct_dependency_ids=(),
+    real_history = store.reconstruct_entity("ASSUMPTION", "assumption:dep-a")
+    injected_history = real_history + (bad_second,)
+    injected_store = _HistoryInjectionStore(store, "assumption:dep-a", injected_history)
+
+    receipt = validate_assumption_dependencies(
+        store=injected_store, candidate_history=history, event_sequence=11
     )
+    assert receipt.validation_result == "DENY"
+    assert receipt.validation_code == "ASSUMPTION_DEPENDENCY_HISTORY_INVALID"
+    assert receipt.evidence_eligibility_decisions == ()
+    # The head binding is preserved on the HISTORY_INVALID record.
+    assert len(receipt.traversed_dependencies) == 1
+    td = receipt.traversed_dependencies[0]
     assert td.validation_code == "ASSUMPTION_DEPENDENCY_HISTORY_INVALID"
-    assert td.current_entity_sequence == 3
-    assert td.current_event_digest == _digest("broken-head")
+    assert td.current_event_digest is not None  # head bound
 
 
 def test_07_indirect_cycle_with_canonical_witness_denies() -> None:
@@ -680,37 +714,81 @@ def test_16_not_yet_valid_evidence_denies() -> None:
 # --------------------------------------------------------------------------- #
 
 
+class _EvidenceHistoryInjectionStore:
+    """Wraps a real store. For a target evidence entity, returns a lifecycle-
+    invalid history that causes project_evidence_history to raise."""
+
+    def __init__(
+        self, real_store: InMemoryRegistryStore, inject_target: str, inject_history: tuple
+    ) -> None:
+        self._real = real_store
+        self._inject_target = inject_target
+        self._inject_history = inject_history
+
+    def append(self, event):
+        return self._real.append(event)
+
+    def get_event(self, digest):
+        return self._real.get_event(digest)
+
+    def entity_head(self, registry_type, entity_id):
+        return self._real.entity_head(registry_type, entity_id)
+
+    def reconstruct_entity(self, registry_type, entity_id):
+        if registry_type == "EVIDENCE_UNIT" and entity_id == self._inject_target:
+            return self._inject_history
+        return self._real.reconstruct_entity(registry_type, entity_id)
+
+    def reconstruct_snapshot(self, registry_type):
+        return self._real.reconstruct_snapshot(registry_type)
+
+    def snapshot(self, registry_type):
+        return self._real.snapshot(registry_type)
+
+
 def test_17_invalid_evidence_history_denies() -> None:
-    """Evidence that exists in the registry but whose history is lifecycle-invalid
-    (registry-chain-valid but evidence-lifecycle-invalid) -> DENY.
+    """Evidence with lifecycle-invalid history -> DENY (ASSUMPTION_EVIDENCE_HISTORY_INVALID).
 
-    A0's reconstruct_entity succeeds, but project_evidence_history raises or returns
-    None because the evidence lifecycle is broken. We simulate this by registering
-    evidence then appending a lifecycle-invalid event (REGISTER → REGISTER again,
-    which would fail at the store or lifecycle level). Since normal registry.apply
-    prevents this, we verify the A0 gate returns ASSUMPTION_EVIDENCE_HISTORY_INVALID
-    for a registered-but-not-verified evidence evaluated at a clock where the evidence
-    lifecycle is in a non-standard state.
-
-    The simplest reproducible case: evidence that has status REGISTERED is already
-    rejected by A0 as ASSUMPTION_EVIDENCE_NOT_VERIFIED (test_12 covers that). For
-    HISTORY_INVALID, we need a projected status that A0 doesn't recognize — but the
-    evidence lifecycle only produces known statuses. So this test verifies the A0 code
-    path is exercised through the dependency validator, confirming the receipt binds
-    the A0 decision correctly.
+    Uses a fault-injection store wrapper that returns a lifecycle-invalid evidence
+    history. A0's reconstruct_entity succeeds, but project_evidence_history raises
+    because the second event is an invalid transition (REGISTER → REGISTER).
     """
     store, _, history = _build_store_with_candidate(evidence_deps=["evidence:test"])
     ev_registry = EvidenceRegistry(store)
     ev_registry.apply(_register_evidence("evidence:test"))
-    receipt = validate_assumption_dependencies(
-        store=store, candidate_history=history, event_sequence=11
+
+    # Build a lifecycle-invalid second event: REGISTER after REGISTER.
+    ev_proj = ev_registry.current("evidence:test")
+    assert ev_proj is not None
+    bad_second = build_evidence_event(
+        evidence_id="evidence:test",
+        entity_sequence=ev_proj.current_entity_sequence + 1,
+        previous_entity_event_digest=ev_proj.current_event_digest,
+        clock_sequence=ev_proj.last_clock_sequence + 1,
+        source_receipt_digest=_digest("bad-ev-second"),
+        payload={
+            "operation": "REGISTER",
+            "proposition_id": "p",
+            "scope_ids": ["scope:control"],
+            "source_id": "s",
+            "issuer_authority_id": "authority:i",
+            "issued_at_sequence": ev_proj.last_clock_sequence + 1,
+            "valid_from_sequence": 1,
+            "expires_at_sequence": 100,
+            "dependency_ids": [],
+            "limitations": [],
+            "maximum_reuse_class": "D2",
+        },
     )
-    # REGISTERED-only evidence is NOT_VERIFIED, which is the closest reproducible
-    # non-eligible state. HISTORY_INVALID specifically requires a broken lifecycle
-    # that normal store operations prevent.
+    real_ev_history = store.reconstruct_entity("EVIDENCE_UNIT", "evidence:test")
+    injected_ev_history = real_ev_history + (bad_second,)
+    injected_store = _EvidenceHistoryInjectionStore(store, "evidence:test", injected_ev_history)
+
+    receipt = validate_assumption_dependencies(
+        store=injected_store, candidate_history=history, event_sequence=11
+    )
     assert receipt.validation_result == "DENY"
-    assert receipt.validation_code == "ASSUMPTION_EVIDENCE_NOT_VERIFIED"
-    assert receipt.evidence_eligibility_decisions[-1].code == "ASSUMPTION_EVIDENCE_NOT_VERIFIED"
+    assert receipt.validation_code == "ASSUMPTION_EVIDENCE_HISTORY_INVALID"
 
 
 # --------------------------------------------------------------------------- #
@@ -1111,3 +1189,63 @@ def test_evidence_prefix_skipped_id_rejected() -> None:
                 evidence_eligibility_decisions=tampered_decisions,
                 receipt_digest=_digest("x"),
             )
+
+
+def test_evidence_duplicate_id_substitution_rejected() -> None:
+    """A forged PASS receipt with duplicate evidence decision IDs is rejected."""
+    store, _, history = _build_store_with_candidate(
+        evidence_deps=["evidence:a", "evidence:b"],
+    )
+    _add_verified_evidence(store, "evidence:a", expires_at_sequence=100)
+    _add_verified_evidence(store, "evidence:b", expires_at_sequence=100)
+    receipt = validate_assumption_dependencies(
+        store=store, candidate_history=history, event_sequence=11
+    )
+    assert receipt.validation_result == "PASS"
+    # Tamper: replace the second decision with a duplicate of the first.
+    tampered_decisions = (
+        receipt.evidence_eligibility_decisions[0],
+        receipt.evidence_eligibility_decisions[0],
+    )
+    with pytest.raises(AssumptionGovernanceContractError):
+        replace(
+            receipt,
+            evidence_eligibility_decisions=tampered_decisions,
+            receipt_digest=_digest("x"),
+        )
+
+
+def test_terminal_missing_with_top_level_history_invalid_rejected() -> None:
+    """A receipt with MISSING terminal but HISTORY_INVALID top-level code is rejected."""
+    store, _, history = _build_store_with_candidate(
+        assumption_deps=["assumption:missing"],
+    )
+    receipt = validate_assumption_dependencies(
+        store=store, candidate_history=history, event_sequence=11
+    )
+    assert receipt.validation_code == "ASSUMPTION_DEPENDENCY_MISSING"
+    # Tamper: change top-level code to HISTORY_INVALID.
+    with pytest.raises(AssumptionGovernanceContractError, match="TERMINAL_CODE_MISMATCH"):
+        replace(
+            receipt,
+            validation_code="ASSUMPTION_DEPENDENCY_HISTORY_INVALID",
+            receipt_digest=_digest("x"),
+        )
+
+
+def test_assumption_deny_with_no_terminal_evidence_rejected() -> None:
+    """A receipt claiming assumption DENY with no terminal traversal evidence is rejected."""
+    store, _, history = _build_store_with_candidate()
+    receipt = validate_assumption_dependencies(
+        store=store, candidate_history=history, event_sequence=11
+    )
+    assert receipt.validation_result == "PASS"
+    # Tamper: claim DENY with MISSING but no traversal records.
+    with pytest.raises(AssumptionGovernanceContractError):
+        replace(
+            receipt,
+            validation_result="DENY",
+            validation_code="ASSUMPTION_DEPENDENCY_MISSING",
+            traversed_dependencies=(),
+            receipt_digest=_digest("x"),
+        )

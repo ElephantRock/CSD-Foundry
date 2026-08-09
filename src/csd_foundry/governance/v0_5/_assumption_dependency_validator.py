@@ -241,14 +241,36 @@ class DependencyValidationReceipt:
                 raise AssumptionGovernanceContractError(
                     "DEPENDENCY_RECEIPT_EVIDENCE_DECISION_TYPE_INVALID"
                 )
+        for td in self.traversed_dependencies:
+            if type(td) is not TraversedDependency:
+                raise AssumptionGovernanceContractError(
+                    "DEPENDENCY_RECEIPT_TRAVERSED_MEMBER_TYPE_INVALID"
+                )
+        if type(self.validation_code) is not str:
+            raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_VALIDATION_CODE_INVALID")
         if self.validation_result not in ("PASS", "DENY"):
             raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_RESULT_INVALID")
 
         # --- DFS closure replay (mechanical traversal validation) ---
-        self._validate_traversal_closure()
+        replay_terminal_code, replay_had_cycle = self._validate_traversal_closure()
 
         # --- Phase/result consistency ---
         self._validate_phase_result_consistency()
+
+        # --- Terminal-code binding: replay terminal must match top-level for assumption DENY ---
+        is_assumption_deny = self.validation_code in _ASSUMPTION_DENY_CODES
+        if is_assumption_deny:
+            if replay_terminal_code is None:
+                raise AssumptionGovernanceContractError(
+                    "DEPENDENCY_RECEIPT_ASSUMPTION_DENY_NO_TERMINAL_EVIDENCE"
+                )
+            if replay_terminal_code != self.validation_code:
+                raise AssumptionGovernanceContractError("DEPENDENCY_RECEIPT_TERMINAL_CODE_MISMATCH")
+        else:
+            if replay_terminal_code is not None:
+                raise AssumptionGovernanceContractError(
+                    "DEPENDENCY_RECEIPT_UNEXPECTED_TERMINAL_EVIDENCE"
+                )
 
         # --- A0 decision binding ---
         self._validate_evidence_decisions()
@@ -261,21 +283,29 @@ class DependencyValidationReceipt:
             "DEPENDENCY_RECEIPT_DIGEST_MISMATCH",
         )
 
-    def _validate_traversal_closure(self) -> None:
+    def _validate_traversal_closure(self) -> tuple[str | None, bool]:
         """Replay the DFS over the receipt's own dependency graph.
 
         Once replay encounters a terminal outcome (MISSING, HISTORY_INVALID, or
         cycle), the entire replay terminates — matching the runtime fail-fast
         semantics. No sibling dependencies are replayed after a terminal outcome.
+
+        Returns ``(replay_terminal_code, replay_had_cycle)``:
+        - ``replay_terminal_code`` is the terminal record's ``validation_code``
+          (or ``"ASSUMPTION_DEPENDENCY_CYCLE"`` for cycle), or ``None`` if the
+          graph was fully traversed without a terminal outcome.
+        - ``replay_had_cycle`` is True iff replay terminated via cycle detection.
         """
         records = list(self.traversed_dependencies)
         record_idx = 0
         replay_terminated = False
+        replay_terminal_code: str | None = None
+        replay_had_cycle = False
 
         def _replay_dfs(
             node: str, stack: list[str], stack_index: dict[str, int], visited: set[str]
         ) -> None:
-            nonlocal record_idx, replay_terminated
+            nonlocal record_idx, replay_terminated, replay_terminal_code, replay_had_cycle
 
             if replay_terminated:
                 return
@@ -295,6 +325,8 @@ class DependencyValidationReceipt:
                         "DEPENDENCY_RECEIPT_CYCLE_CODE_MISMATCH"
                     )
                 replay_terminated = True
+                replay_terminal_code = "ASSUMPTION_DEPENDENCY_CYCLE"
+                replay_had_cycle = True
                 return
 
             if node in visited:
@@ -324,6 +356,7 @@ class DependencyValidationReceipt:
             else:
                 # MISSING or HISTORY_INVALID: terminal — stop the entire replay.
                 replay_terminated = True
+                replay_terminal_code = record.validation_code
                 return
 
         # Seed DFS from candidate's direct deps.
@@ -340,6 +373,8 @@ class DependencyValidationReceipt:
             raise AssumptionGovernanceContractError(
                 "DEPENDENCY_RECEIPT_TRAVERSAL_HAS_EXTRA_RECORDS"
             )
+
+        return replay_terminal_code, replay_had_cycle
 
     def _validate_phase_result_consistency(self) -> None:
         is_pass = self.validation_result == "PASS"
