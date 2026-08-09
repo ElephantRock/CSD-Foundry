@@ -1169,6 +1169,42 @@ def test_noncanonical_rule_evidence_rejected() -> None:
         )
 
 
+def test_role_tuple_unhashable_member_rejected() -> None:
+    """A role tuple containing an unhashable/non-string member must fail through
+    the stable governance error boundary, not escape as a native TypeError."""
+    from csd_foundry.governance.v0_5._assumption_separation_duty_evaluator import (
+        _require_role_tuple,
+    )
+
+    with pytest.raises(AssumptionGovernanceContractError):
+        _require_role_tuple((["PROPOSER"],), "TEST_CODE")  # type: ignore[arg-type]
+
+
+def test_role_tuple_unknown_string_role_rejected() -> None:
+    """A role tuple containing an unknown string role is rejected."""
+    from csd_foundry.governance.v0_5._assumption_separation_duty_evaluator import (
+        _require_role_tuple,
+    )
+
+    with pytest.raises(AssumptionGovernanceContractError):
+        _require_role_tuple(("BOGUS_ROLE",), "TEST_CODE")
+
+
+def test_role_tuple_subclass_rejected() -> None:
+    """A tuple subclass is rejected (exact-type check, consistent with the
+    surrounding contract layer)."""
+
+    from csd_foundry.governance.v0_5._assumption_separation_duty_evaluator import (
+        _require_role_tuple,
+    )
+
+    class SubTuple(tuple):
+        pass
+
+    with pytest.raises(AssumptionGovernanceContractError):
+        _require_role_tuple(SubTuple(("PROPOSER",)), "TEST_CODE")
+
+
 def test_selected_no_remaining_denied_rejected() -> None:
     """SELECTED + no remaining conflicts + DENY is internally inconsistent."""
     rule = AssumptionSeparationDutyRule.build(

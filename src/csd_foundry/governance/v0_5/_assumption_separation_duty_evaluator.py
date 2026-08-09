@@ -88,12 +88,20 @@ def _scope_covers_request(scope_id: str, scopes: tuple[str, ...]) -> bool:
 
 
 def _require_role_tuple(value: object, code: str) -> tuple[str, ...]:
-    """Require a tuple of roles in canonical ``ASSUMPTION_GOVERNANCE_ROLES`` order."""
-    if not isinstance(value, tuple):
+    """Require a tuple of roles in canonical ``ASSUMPTION_GOVERNANCE_ROLES`` order.
+
+    Validates structure (exact tuple type, exact string members) before any
+    set/canonical operation, so malformed input fails through the stable
+    governance error boundary rather than escaping as a native ``TypeError``.
+    """
+    if type(value) is not tuple:
         raise AssumptionGovernanceContractError(code)
-    items = list(value)
-    canonical = [role for role in ASSUMPTION_GOVERNANCE_ROLES if role in set(items)]
-    if items != canonical:
+    if not all(type(item) is str for item in value):
+        raise AssumptionGovernanceContractError(code)
+    if not set(value).issubset(ASSUMPTION_GOVERNANCE_ROLES):
+        raise AssumptionGovernanceContractError(code)
+    canonical = tuple(role for role in ASSUMPTION_GOVERNANCE_ROLES if role in value)
+    if value != canonical:
         raise AssumptionGovernanceContractError(code)
     return cast(tuple[str, ...], value)
 
@@ -134,12 +142,12 @@ class SeparationOfDutyRuleEvaluation:
         if set(self.remaining_conflicts) != expected_remaining:
             raise AssumptionGovernanceContractError("SOD_RULE_EVALUATION_REMAINING_MISMATCH")
         # waiving_exceptions: canonical unique exception_id order, each a (id, digest) pair.
-        if not isinstance(self.waiving_exceptions, tuple):
+        if type(self.waiving_exceptions) is not tuple:
             raise AssumptionGovernanceContractError("SOD_RULE_EVALUATION_WAIVING_INVALID")
         seen: set[str] = set()
         prev: str | None = None
         for pair in self.waiving_exceptions:
-            if not isinstance(pair, tuple) or len(pair) != 2:
+            if type(pair) is not tuple or len(pair) != 2:
                 raise AssumptionGovernanceContractError("SOD_RULE_EVALUATION_WAIVING_INVALID")
             eid, edigest = pair
             _require_token(eid, "SOD_RULE_EVALUATION_WAIVING_ID_INVALID")
@@ -279,7 +287,7 @@ class SeparationOfDutyDecision:
             _require_digest(self.grant_digest, "SOD_DECISION_SELECTED_GRANT_DIGEST_INVALID")
 
         # --- rule_evaluations integrity ---
-        if not isinstance(self.rule_evaluations, tuple):
+        if type(self.rule_evaluations) is not tuple:
             raise AssumptionGovernanceContractError("SOD_DECISION_RULE_EVALUATIONS_INVALID")
         eval_rule_ids: list[str] = []
         for re_ in self.rule_evaluations:
