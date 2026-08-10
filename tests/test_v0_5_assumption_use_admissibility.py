@@ -1736,12 +1736,31 @@ def test_mut_04_wrong_cycle_witness_rejected() -> None:
 
 
 def test_mut_05_dependency_record_with_altered_state_rejected() -> None:
-    """Fix #3: a gate-failed dependency record that illegally carries its own
-    assumption_dependency_ids is rejected (its edges were never traversed)."""
+    """Fix #2 + Fix #4: a gate-failed dependency record RETAINS its own
+    assumption_dependency_ids (part of the authoritative projected state), and
+    a gate-failed node whose recorded standing disagrees with its code is
+    rejected by the decision-level code/state consistency check."""
     store = InMemoryRegistryStore()
     registry = AssumptionRegistry(store)
-    # dep is ADMITTED then EXPIRED -> TERMINAL (gate-failed, retains projected state).
-    registry.apply(_propose_event(assumption_id="assumption:dep", clock=5, expires=20))
+    # dep is ADMITTED then EXPIRED -> TERMINAL (gate-failed, retains projected
+    # state). dep itself declares an assumption dependency (assumption:grandchild)
+    # which is part of its projected state and must be retained even though the
+    # DFS never traversed it (the DFS terminated at dep).
+    registry.apply(
+        _propose_event(
+            assumption_id="assumption:grandchild",
+            clock=3,
+        )
+    )
+    registry.apply(_admit(registry, "assumption:grandchild", clock=4))
+    registry.apply(
+        _propose_event(
+            assumption_id="assumption:dep",
+            clock=5,
+            expires=20,
+            assumption_deps=["assumption:grandchild"],
+        )
+    )
     registry.apply(_admit(registry, "assumption:dep", clock=6))
     registry.apply(_expire(registry, "assumption:dep", clock=20))
     _admitted_candidate(store, assumption_deps=["assumption:dep"])
@@ -1758,17 +1777,22 @@ def test_mut_05_dependency_record_with_altered_state_rejected() -> None:
     # Gate-failed node retains full projected state...
     assert failed_dep.standing == "EXPIRED"
     assert failed_dep.current_event_digest is not None
-    # ...and has NO outgoing edges (they were never traversed).
-    assert failed_dep.assumption_dependency_ids == ()
+    # ...AND retains its own assumption_dependency_ids from the projected state
+    # (Fix #2): these edges were declared on the assumption but never traversed
+    # by the DFS, which terminated at this node.
+    assert failed_dep.assumption_dependency_ids == ("assumption:grandchild",)
 
-    # Re-attach a fake dep edge to the gate-failed record. Validation fires at
-    # the UseTimeTraversedAssumption's own __post_init__ (gate-failed nodes must
-    # carry no outgoing edges since those edges were never traversed).
+    # Fix #4: a gate-failed node whose recorded standing disagrees with its
+    # TERMINAL code is rejected at the decision-level code/state check. Flip the
+    # standing to ADMITTED while keeping the TERMINAL code; the rebuild via
+    # dataclasses.replace re-runs the decision's __post_init__.
+    tampered_dep = replace(failed_dep, standing="ADMITTED")
+    tampered_ev = replace(ev, traversed_dependencies=(tampered_dep,))
     with pytest.raises(
         AssumptionGovernanceContractError,
-        match="USE_TRAVERSED_GATE_FAILED_HAS_ASSUMPTION_DEPS",
+        match="USE_NODE_CODE_STATE_TERMINAL_MISMATCH",
     ):
-        replace(failed_dep, assumption_dependency_ids=("assumption:never-traversed",))
+        replace(decision, evaluated_assumptions=(tampered_ev,))
 
 
 def test_mut_06_fail_fast_edge_count_root_denies_first_child() -> None:
@@ -1836,3 +1860,151 @@ def test_mut_07_d2_receipt_with_tampered_digest_rejected() -> None:
         AssumptionGovernanceContractError, match="USE_EVIDENCE_EVAL_REQUEST_MISMATCH"
     ):
         replace(ee, receipt=tampered_receipt)
+
+
+# --------------------------------------------------------------------------- #
+# Tests for the receipt-validation defect fixes (Fix #1 - Fix #4).
+# --------------------------------------------------------------------------- #
+
+
+def test_transitive_evidence_deny_completes_dfs_and_records_d2_code() -> None:
+    """Fix #1: a dependency whose DFS completes but whose evidence is
+    inadmissible yields a valid receipt with result=DENY, a D2 evidence
+    validation_code, and NON-EMPTY traversed_dependencies (the DFS completed).
+
+    Previously the receipt-construction replay raised USE_EVAL_DENY_TRAVERSAL_
+    NOT_TERMINATED because it inferred DFS termination from the overall DENY
+    result rather than from the validation_code."""
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    # dep is ADMITTED and clean: the DFS over assumption deps will complete.
+    # dep declares an inadmissible evidence dependency.
+    registry.apply(
+        _propose_event(
+            assumption_id="assumption:dep",
+            clock=5,
+            evidence_deps=["evidence:bad"],
+        )
+    )
+    registry.apply(_admit(registry, "assumption:dep", clock=6))
+    # candidate depends on dep (DFS will traverse and complete at dep).
+    _admitted_candidate(store, assumption_deps=["assumption:dep"])
+    # evidence:bad is INVALIDATED -> inadmissible at use time.
+    _add_invalidated_evidence(store, "evidence:bad")
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    # The decision constructs without raising (Fix #1) and is a DENY driven by
+    # the D2 evidence code.
+    assert decision.admissible is False
+    ev = decision.evaluated_assumptions[0]
+    assert ev.result == "DENY"
+    assert ev.validation_code.startswith("EVIDENCE_")
+    # The DFS completed before the evidence phase ran, so the traversed
+    # dependency record for assumption:dep is present.
+    assert len(ev.traversed_dependencies) == 1
+    assert ev.traversed_dependencies[0].assumption_id == "assumption:dep"
+    assert ev.traversed_dependencies[0].validation_code == "ASSUMPTION_USE_NODE_PRESENT"
+    assert ev.cycle_witness == ()
+
+
+def test_d2_receipt_field_tamper_without_request_digest_change_rejected() -> None:
+    """Fix #3: tampering a D2 receipt field (code or evidence_event_digest)
+    WITHOUT changing request_digest is rejected because the rebuilt receipt no
+    longer equals the supplied receipt (its receipt_digest is now stale)."""
+    store = InMemoryRegistryStore()
+    _admitted_candidate(store, evidence_deps=["evidence:e1"])
+    _add_verified_evidence(store, "evidence:e1")
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    ee = ev.evidence_evaluations[0]
+    assert ee.receipt.allowed
+
+    # Tamper the receipt's code while leaving request_digest untouched. The
+    # receipt's stored receipt_digest is now stale relative to its content.
+    tampered_code = replace(ee.receipt, code="EVIDENCE_TAMPERED")
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVIDENCE_EVAL_RECEIPT_REBUILD_MISMATCH"
+    ):
+        replace(ee, receipt=tampered_code)
+
+    # Tamper the receipt's evidence_event_digest while leaving request_digest
+    # untouched. Same detection path.
+    tampered_event = replace(ee.receipt, evidence_event_digest=_digest("tampered-event"))
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVIDENCE_EVAL_RECEIPT_REBUILD_MISMATCH"
+    ):
+        replace(ee, receipt=tampered_event)
+
+
+def test_gate_failed_node_retains_assumption_dependency_ids() -> None:
+    """Fix #2: a gate-failed UseTimeTraversedAssumption may carry non-empty
+    assumption_dependency_ids (part of the authoritative projected state) and is
+    accepted by UseTimeTraversedAssumption.__post_init__."""
+    from csd_foundry.governance.v0_5._assumption_use_admissibility import (
+        UseTimeTraversedAssumption,
+    )
+
+    # A TERMINAL node (standing=EXPIRED) that retains its own declared
+    # assumption dependency. This is legal post-Fix #2.
+    node = UseTimeTraversedAssumption(
+        assumption_id="assumption:dep",
+        validation_code="ASSUMPTION_USE_TERMINAL",
+        current_event_digest=_digest("dep-event"),
+        current_entity_sequence=3,
+        history_event_count=3,
+        proposition_id="proposition:1",
+        scope_ids=("scope:control",),
+        materiality="MATERIAL",
+        standing="EXPIRED",
+        active_challenge_ids=(),
+        valid_from_sequence=5,
+        expires_at_sequence=20,
+        assumption_dependency_ids=("assumption:grandchild",),
+        evidence_dependency_ids=("evidence:dep-of-dep",),
+        limitations=(),
+        maximum_reuse_class="D2",
+    )
+    assert node.validation_code == "ASSUMPTION_USE_TERMINAL"
+    assert node.assumption_dependency_ids == ("assumption:grandchild",)
+    assert node.evidence_dependency_ids == ("evidence:dep-of-dep",)
+
+
+def test_node_code_state_mismatch_terminal_with_admitted_standing_rejected() -> None:
+    """Fix #4: a node carrying ASSUMPTION_USE_TERMINAL but a non-terminal
+    standing (ADMITTED) is rejected by _validate_node_code_against_state."""
+    from csd_foundry.governance.v0_5._assumption_use_admissibility import (
+        UseTimeTraversedAssumption,
+        _validate_node_code_against_state,
+    )
+
+    node = UseTimeTraversedAssumption(
+        assumption_id="assumption:dep",
+        validation_code="ASSUMPTION_USE_TERMINAL",
+        current_event_digest=_digest("dep-event"),
+        current_entity_sequence=2,
+        history_event_count=2,
+        proposition_id="proposition:1",
+        scope_ids=("scope:control",),
+        materiality="MATERIAL",
+        standing="ADMITTED",  # disagrees with TERMINAL code
+        active_challenge_ids=(),
+        valid_from_sequence=5,
+        expires_at_sequence=None,
+        assumption_dependency_ids=(),
+        evidence_dependency_ids=(),
+        limitations=(),
+        maximum_reuse_class="D2",
+    )
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_NODE_CODE_STATE_TERMINAL_MISMATCH"
+    ):
+        _validate_node_code_against_state(node, clock=15)
