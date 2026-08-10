@@ -498,6 +498,9 @@ class EvidenceUseRequest:
             "scope_ids": list(self.scope_ids),
         }
 
+    def to_json_value(self) -> dict[str, object]:
+        return self._unsigned_value()
+
 
 @dataclass(frozen=True, slots=True)
 class EvidenceAdmissibilityReceipt:
