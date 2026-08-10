@@ -192,6 +192,50 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
     ),
     # ROOT (1)
     ("AM-ROOT-001", "ROOT", "AV-A02", "CORRUPT_EXPECTED_ROOT", "ACCEPTED_ERROR", {}),
+    # A0 (1): tamper an A0 evidence admission decision's clock, leaving the
+    # decision_digest stale. Detected at ADMIT time by the evidence-binding check.
+    (
+        "AM-A0-001",
+        "A0",
+        "AV-A11",
+        "CORRUPT_A0_DECISION",
+        "ACCEPTED_ERROR",
+        {"evidence_id": "evidence:a11e"},
+    ),
+    # CHALLENGE_MATERIALITY (1): swap the challenge reason_code so it classifies
+    # to a different materiality, breaking the resolution grant binding.
+    # Baseline AV-A18: REASON_CRITICAL (CRITICAL) -> swap to REASON_ADVISORY
+    # (ADVISORY). The resolver holds RESOLVE_TO_ADMITTED for all three
+    # materialities, so the grant is still selected; the ADMIT-rebuild changes
+    # the event digest, breaking the chain.
+    (
+        "AM-CHALLENGE-MAT-001",
+        "CHALLENGE_MATERIALITY",
+        "AV-A18",
+        "SUBSTITUTE_CHALLENGE_MATERIALITY",
+        "ACCEPTED_ERROR",
+        {"new_reason_code": "REASON_ADVISORY"},
+    ),
+    # GOVERNED_ADMIT (1): tamper the ADMIT event's source_receipt_digest (must
+    # bind the DependencyValidationReceipt).
+    (
+        "AM-GOVERNED-ADMIT-001",
+        "GOVERNED_ADMIT",
+        "AV-A02",
+        "CORRUPT_GOVERNED_ADMIT_BINDING",
+        "ACCEPTED_ERROR",
+        {"field": "source_receipt_digest"},
+    ),
+    # POST_DFS_EVIDENCE (1): reorder a two-evidence binding's requests so the
+    # owner-binding check fails.
+    (
+        "AM-POST-DFS-EVIDENCE-001",
+        "POST_DFS_EVIDENCE",
+        "AV-A14",
+        "REORDER_POST_DFS_EVIDENCE",
+        "ACCEPTED_ERROR",
+        {},
+    ),
 ]
 
 

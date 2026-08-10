@@ -8,14 +8,14 @@ def test_assumption_mutation_campaign_kills_every_declared_mutation() -> None:
     report = evaluate_assumption_mutations()
 
     assert report.success
-    assert len(report.results) == 18
-    assert report.killed_count == 18
+    assert len(report.results) == 22
+    assert report.killed_count == 22
     assert report.survived_count == 0
     assert report.equivalent_count == 0
     assert report.invalid_mutation_count == 0
     assert report.unexplained_escape_count == 0
     assert report.mutation_catalog_digest == (
-        "sha256:7fa46fc41cca806c7544c9a0c5a3fb3a1f918e79fae6118e3f5cdf09b012ab8f"
+        "sha256:7602dc2da430343f56a074c2fc815d3f7fbbc6bdf61371855ec5b239b1a890eb"
     )
     assert all(item.observed_classification == "KILLED" for item in report.results)
     assert all(item.observed_detector == item.expected_detector for item in report.results)
@@ -54,4 +54,4 @@ def test_assumption_mutation_resources_are_defensive_copies() -> None:
     second = assumption_mutation_manifest()
     second_mutations = second["mutations"]
     assert isinstance(second_mutations, list)
-    assert len(second_mutations) == 18
+    assert len(second_mutations) == 22

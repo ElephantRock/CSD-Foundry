@@ -47,13 +47,13 @@ def test_committed_assumption_vectors_validate_independently() -> None:
     report = validate_assumption_registry()
 
     assert report.success
-    assert report.accepted_vector_count == 16
+    assert report.accepted_vector_count == 18
     assert report.rejected_vector_count == 12
-    assert len(report.accepted_registry_roots) == 16
-    assert len(report.accepted_decision_digests) == 16
+    assert len(report.accepted_registry_roots) == 18
+    assert len(report.accepted_decision_digests) == 18
     assert len(report.rejected_failure_codes) == 12
     assert report.vector_catalog_digest == (
-        "sha256:ad22998c668f73221c691bbc1d6d54b6dbfae57c2e8619d15fdc40f827fb3124"
+        "sha256:6fffd127749eab421f01f6ff6092ce65ce32107ddc8d309917b1d1110412c360"
     )
     # Import boundary: the validator must not import any production governance
     # module other than canonicalization, contracts, and resources. The check

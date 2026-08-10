@@ -516,6 +516,60 @@ def _mutate_catalog(
         ev_receipt["evidence_event_digest"] = _ZERO_DIGEST
     elif operator == "CORRUPT_EXPECTED_ROOT":
         mutated["expected_registry_root"] = _ZERO_DIGEST
+    elif operator == "CORRUPT_A0_DECISION":
+        # Defect canary: tamper an A0 evidence admission decision field
+        # (evaluated_at_sequence) in the serialized policy context's evidence
+        # registry, leaving the decision_digest stale. The admission gate
+        # re-derives the decision digest and rejects with
+        # ASSUMPTION_EVIDENCE_RECEIPT_DIGEST_MISMATCH, OR the clock-binding
+        # check rejects with ASSUMPTION_ADMISSION_EVIDENCE_CLOCK_MISMATCH.
+        evidence_id = _required_string(parameters, "evidence_id")
+        policy = _object(catalog, "authority_policy")
+        ev_reg = _object(policy, "evidence_registry")
+        receipts = _object(ev_reg, "receipts")
+        decision = _object(receipts, evidence_id)
+        decision["evaluated_at_sequence"] = cast(int, decision["evaluated_at_sequence"]) + 999
+    elif operator == "SUBSTITUTE_CHALLENGE_MATERIALITY":
+        # Defect #4 canary: swap the challenge's reason_code so it classifies to
+        # a DIFFERENT materiality. The resolution grant binds to the challenge's
+        # classified materiality; swapping the reason_code selects the wrong
+        # grant (or no grant), and the ADMIT-then-RESOLVE sequence is denied at
+        # the resolution authority gate.
+        challenge_event = _find_event(mutated, operation="CHALLENGE")
+        new_reason = _required_string(parameters, "new_reason_code")
+        _object(challenge_event, "payload")["challenge_reason_code"] = new_reason
+        _rebuild_events(mutated)
+    elif operator == "CORRUPT_GOVERNED_ADMIT_BINDING":
+        # Defect #1 canary: tamper the ADMIT event's source_receipt_digest (which
+        # must bind the DependencyValidationReceipt) or admission_receipt_digest
+        # (which must bind the GovernedAdmitAuthorization). The validator
+        # independently reconstructs both and rejects the tampered binding.
+        field = _required_string(parameters, "field")
+        admit_event = _find_event(mutated, operation="ADMIT")
+        if field == "source_receipt_digest":
+            admit_event["source_receipt_digest"] = _ZERO_DIGEST
+        elif field == "admission_receipt_digest":
+            _object(admit_event, "payload")["admission_receipt_digest"] = _ZERO_DIGEST
+        else:
+            raise AssumptionMutationError("ASSUMPTION_MUTATION_PARAMETER_INVALID", f"field={field}")
+        _rebuild_single_event(admit_event)
+    elif operator == "REORDER_POST_DFS_EVIDENCE":
+        # Defect #3 canary: reorder a multi-evidence binding's evidence_requests
+        # map so the serialized request digests no longer match the owner's
+        # first-discovery-order evaluation. The validator rebuilds each request
+        # digest from its owner and rejects the swap.
+        binding = _object(mutated, "use_binding")
+        evidence_requests = _object(binding, "evidence_requests")
+        keys = list(evidence_requests.keys())
+        if len(keys) < 2:
+            raise AssumptionMutationError(
+                "ASSUMPTION_MUTATION_PARAMETER_INVALID", "need >=2 evidence requests"
+            )
+        # Swap two evidence entries' request digests.
+        evidence_requests[keys[0]]["request"], evidence_requests[keys[1]]["request"] = (
+            evidence_requests[keys[1]]["request"],
+            evidence_requests[keys[0]]["request"],
+        )
     else:
         raise AssumptionMutationError("ASSUMPTION_MUTATION_OPERATOR_UNSUPPORTED", operator)
 
