@@ -2222,3 +2222,102 @@ def test_fix3_dfs_failure_with_wrong_terminal_code_rejected() -> None:
         AssumptionGovernanceContractError, match="USE_EVAL_DFS_TERMINAL_CODE_MISMATCH"
     ):
         replace(ev, validation_code="ASSUMPTION_USE_NOT_YET_VALID")
+
+
+def test_repeated_node_state_mismatch_across_evaluations_rejected() -> None:
+    """Two top-level assumptions both depending on a shared dep. Tampering
+    the second copy's current_event_digest is rejected by decision-wide
+    node consistency validation."""
+    store = InMemoryRegistryStore()
+    # Build shared dep.
+    _admitted_candidate(store, candidate_id="assumption:shared", propose_clock=5, admit_clock=6)
+    # Build A depending on shared.
+    _admitted_candidate(
+        store,
+        candidate_id="assumption:a",
+        propose_clock=7,
+        admit_clock=8,
+        assumption_deps=["assumption:shared"],
+    )
+    # Build B depending on shared.
+    _admitted_candidate(
+        store,
+        candidate_id="assumption:b",
+        propose_clock=9,
+        admit_clock=10,
+        assumption_deps=["assumption:shared"],
+    )
+    binding = _build_binding(
+        store,
+        required_assumption_ids=("assumption:a", "assumption:b"),
+    )
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    assert decision.admissible is True
+
+    # Tamper: change the shared node's current_event_digest in evaluation B.
+    ev_b = decision.evaluated_assumptions[1]
+    assert ev_b.assumption_id == "assumption:b"
+    tampered_deps = list(ev_b.traversed_dependencies)
+    for i, td in enumerate(tampered_deps):
+        if td.assumption_id == "assumption:shared":
+            tampered_deps[i] = replace(td, current_event_digest=_digest("tampered"))
+            break
+    tampered_ev = replace(ev_b, traversed_dependencies=tuple(tampered_deps))
+    tampered_evals = (decision.evaluated_assumptions[0], tampered_ev)
+
+    with pytest.raises(AssumptionGovernanceContractError, match="NODE_CONSISTENCY_MISMATCH"):
+        replace(
+            decision,
+            evaluated_assumptions=tampered_evals,
+            decision_digest=_digest("tampered"),
+        )
+
+
+def test_toplevel_dependency_missing_role_code_rejected() -> None:
+    """A top-level self_state using ASSUMPTION_USE_DEPENDENCY_MISSING (instead
+    of ASSUMPTION_USE_MISSING) is rejected by the role check."""
+    store = InMemoryRegistryStore()
+    _admitted_candidate(store)
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+
+    # Tamper: change self_state to DEPENDENCY_MISSING (wrong role).
+    from csd_foundry.governance.v0_5._assumption_use_admissibility import (
+        UseTimeTraversedAssumption,
+    )
+
+    ev = decision.evaluated_assumptions[0]
+    tampered_self = UseTimeTraversedAssumption(
+        assumption_id=ev.self_state.assumption_id,
+        validation_code="ASSUMPTION_USE_DEPENDENCY_MISSING",
+        current_event_digest=None,
+        current_entity_sequence=None,
+        history_event_count=0,
+        proposition_id=None,
+        scope_ids=(),
+        materiality=None,
+        standing=None,
+        active_challenge_ids=(),
+        valid_from_sequence=None,
+        expires_at_sequence=None,
+        assumption_dependency_ids=(),
+        evidence_dependency_ids=(),
+        limitations=(),
+        maximum_reuse_class=None,
+    )
+    # The rejection happens at AssumptionUseEvaluation construction (frozen dataclass),
+    # because self_state.validation_code == DEPENDENCY_MISSING is checked there.
+    with pytest.raises(AssumptionGovernanceContractError, match="TOPLEVEL_DEPENDENCY_MISSING"):
+        replace(
+            ev,
+            self_state=tampered_self,
+            validation_code="ASSUMPTION_USE_DEPENDENCY_MISSING",
+        )

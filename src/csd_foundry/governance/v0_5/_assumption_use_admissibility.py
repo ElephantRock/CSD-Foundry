@@ -601,6 +601,11 @@ class AssumptionUseEvaluation:
         if self.self_state.assumption_id != self.assumption_id:
             raise AssumptionGovernanceContractError("USE_EVAL_SELF_STATE_ID_MISMATCH")
 
+        # Top-level self_state must use MISSING, not DEPENDENCY_MISSING.
+        # DEPENDENCY_MISSING is reserved for traversed dependency records.
+        if self.self_state.validation_code == "ASSUMPTION_USE_DEPENDENCY_MISSING":
+            raise AssumptionGovernanceContractError("USE_EVAL_TOPLEVEL_DEPENDENCY_MISSING")
+
         # Result/code consistency.
         if self.result == "ALLOW":
             if self.validation_code != "ASSUMPTION_USE_ALLOWED":
@@ -844,6 +849,11 @@ class AssumptionUseAdmissibilityDecision:
         # Recompute work counters from children.
         self._validate_work_counters()
 
+        # Decision-wide repeated-node state consistency: for every occurrence
+        # of an assumption ID across all self_state and traversed_dependencies,
+        # require authoritative state fields to equal the first occurrence.
+        self._validate_node_consistency()
+
         # Self-digest.
         _require_self_digest(
             _DECISION_DOMAIN,
@@ -956,6 +966,49 @@ class AssumptionUseAdmissibilityDecision:
             raise AssumptionGovernanceContractError("USE_WORK_CHALLENGES_MISMATCH")
         if w.separation_duty_rules_evaluated != 0:
             raise AssumptionGovernanceContractError("USE_WORK_SOD_NONZERO")
+
+    def _validate_node_consistency(self) -> None:
+        """Require that repeated assumption IDs carry identical authoritative state.
+
+        Across all self_state and traversed_dependencies in every evaluation,
+        the first occurrence of each assumption ID establishes the canonical
+        authoritative state. Later occurrences must match on all authoritative
+        fields (current_event_digest, entity_sequence, history_event_count,
+        proposition_id, scope_ids, materiality, standing, challenges, temporal,
+        dependency/evidence IDs, limitations, reuse class).
+
+        validation_code is NOT compared because MISSING vs DEPENDENCY_MISSING
+        depends on role (top-level vs dependency), not on the assumption itself.
+        """
+        canonical: dict[str, UseTimeTraversedAssumption] = {}
+        for ev in self.evaluated_assumptions:
+            for node in (ev.self_state, *ev.traversed_dependencies):
+                existing = canonical.get(node.assumption_id)
+                if existing is None:
+                    canonical[node.assumption_id] = node
+                    continue
+                # Compare authoritative state fields (exclude validation_code).
+                for field_name in (
+                    "current_event_digest",
+                    "current_entity_sequence",
+                    "history_event_count",
+                    "proposition_id",
+                    "scope_ids",
+                    "materiality",
+                    "standing",
+                    "active_challenge_ids",
+                    "valid_from_sequence",
+                    "expires_at_sequence",
+                    "assumption_dependency_ids",
+                    "evidence_dependency_ids",
+                    "limitations",
+                    "maximum_reuse_class",
+                ):
+                    if getattr(node, field_name) != getattr(existing, field_name):
+                        raise AssumptionGovernanceContractError(
+                            "USE_DECISION_NODE_CONSISTENCY_MISMATCH",
+                            detail=f"{node.assumption_id}.{field_name}",
+                        )
 
     def _unsigned_value(self) -> dict[str, object]:
         return {
