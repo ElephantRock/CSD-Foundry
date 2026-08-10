@@ -105,63 +105,108 @@ _DFS_FAILURE_EVAL_CODES = frozenset(
     }
 )
 
+# Validation codes that, when they appear on an AssumptionUseEvaluation, mean
+# the root (self_state) failed a self-gate BEFORE any dependency edge was
+# examined: the producer never started the DFS, so there are no traversed
+# records, no cycle witness, and no evidence evaluations. The evaluation's
+# validation_code equals self_state.validation_code for these codes.
+# (DEPENDENCY_MISSING here is the top-level variant: a top-level required
+# assumption that was never proposed.)
+_SELF_GATE_FAILURE_EVAL_CODES = frozenset(
+    {
+        "ASSUMPTION_USE_MISSING",
+        "ASSUMPTION_USE_HISTORY_INVALID",
+        "ASSUMPTION_USE_TERMINAL",
+        "ASSUMPTION_USE_NOT_ADMITTED",
+        "ASSUMPTION_USE_CHALLENGED",
+        "ASSUMPTION_USE_NOT_YET_VALID",
+        "ASSUMPTION_USE_EXPIRED",
+    }
+)
+
+
+# Codes whose value is determined by reconstruction availability rather than
+# by gate precedence: they cannot be re-derived from projected state (the
+# projected state is absent for these nodes) and are passed through unchanged.
+_STRUCTURAL_NODE_CODES = frozenset(
+    {
+        "ASSUMPTION_USE_MISSING",
+        "ASSUMPTION_USE_DEPENDENCY_MISSING",
+        "ASSUMPTION_USE_HISTORY_INVALID",
+    }
+)
+
+
+def _derive_node_code(node: UseTimeTraversedAssumption, clock: int) -> str:
+    """Compute the exact expected validation_code for a node from its recorded
+    projected state, by evaluating the gates in frozen precedence order.
+
+    This is the inverse of the producer's gate cascade: TERMINAL > NOT_ADMITTED
+    > CHALLENGED > NOT_YET_VALID > EXPIRED > NODE_PRESENT. A node whose recorded
+    standing is terminal AND which carries active challenges must derive
+    TERMINAL (terminal standing wins over the challenge gate).
+
+    Structural codes (MISSING / DEPENDENCY_MISSING / HISTORY_INVALID) carry no
+    projected state and are returned unchanged; they cannot be re-derived.
+    """
+    if node.validation_code in _STRUCTURAL_NODE_CODES:
+        return node.validation_code  # structural; can't re-derive
+    if node.standing in _TERMINAL_STANDINGS:
+        return "ASSUMPTION_USE_TERMINAL"
+    if node.standing not in _ACTIVE_STANDINGS:
+        return "ASSUMPTION_USE_NOT_ADMITTED"
+    if len(node.active_challenge_ids) > 0:
+        return "ASSUMPTION_USE_CHALLENGED"
+    if clock < cast(int, node.valid_from_sequence):
+        return "ASSUMPTION_USE_NOT_YET_VALID"
+    if node.expires_at_sequence is not None and clock >= node.expires_at_sequence:
+        return "ASSUMPTION_USE_EXPIRED"
+    return "ASSUMPTION_USE_NODE_PRESENT"
+
 
 def _validate_node_code_against_state(node: UseTimeTraversedAssumption, clock: int) -> None:
     """Validate a node's validation_code against its recorded projected state.
 
-    For a NODE_PRESENT or gate-failed node, the recorded standing / active
-    challenges / temporal interval must agree with the code: a TERMINAL node
-    must have a terminal standing; a NOT_ADMITTED node must be PROPOSED; a
-    CHALLENGED node must carry active challenges; a NOT_YET_VALID / EXPIRED
-    node must be temporally out of bounds at ``clock``; a NODE_PRESENT node must
-    be standing-active, unchallenged, and temporally valid.
-
-    Structurally-unavailable nodes (MISSING / DEPENDENCY_MISSING /
-    HISTORY_INVALID) carry no projected state and are not checkable here.
+    Derives the exact expected code via frozen gate precedence
+    (:func:`_derive_node_code`) and requires the recorded code to equal it.
+    This enforces precedence: a REJECTED assumption with active challenges must
+    be TERMINAL, not CHALLENGED.
 
     Raises AssumptionGovernanceContractError on any mismatch. This is a
     receipt-level integrity check: it proves the recorded code is the code the
     producer would have produced from the recorded state.
     """
-    code = node.validation_code
-    if code in (
-        "ASSUMPTION_USE_MISSING",
-        "ASSUMPTION_USE_DEPENDENCY_MISSING",
-        "ASSUMPTION_USE_HISTORY_INVALID",
-    ):
-        # No projected state to validate against.
+    expected = _derive_node_code(node, clock)
+    if node.validation_code == expected:
         return
 
-    standing = node.standing
-    active_challenges = node.active_challenge_ids
-    valid_from = node.valid_from_sequence
-    expires_at = node.expires_at_sequence
-
-    if code == "ASSUMPTION_USE_TERMINAL":
-        if standing not in _TERMINAL_STANDINGS:
+    # Map the specific mismatch to a stable, human-readable error code for the
+    # common cases; fall back to a generic code otherwise.
+    if expected == "ASSUMPTION_USE_TERMINAL":
+        raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_TERMINAL_MISMATCH")
+    if expected == "ASSUMPTION_USE_NOT_ADMITTED":
+        raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_NOT_ADMITTED_MISMATCH")
+    if expected == "ASSUMPTION_USE_CHALLENGED":
+        raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_CHALLENGED_MISMATCH")
+    if expected == "ASSUMPTION_USE_NOT_YET_VALID":
+        raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_NOT_YET_VALID_MISMATCH")
+    if expected == "ASSUMPTION_USE_EXPIRED":
+        raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_EXPIRED_MISMATCH")
+    if expected == "ASSUMPTION_USE_NODE_PRESENT":
+        # The recorded code is a gate-failure code, but the projected state
+        # passes every gate.
+        if node.validation_code == "ASSUMPTION_USE_TERMINAL":
             raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_TERMINAL_MISMATCH")
-    elif code == "ASSUMPTION_USE_NOT_ADMITTED":
-        # PROPOSED is the only non-active, non-terminal standing.
-        if standing in _ACTIVE_STANDINGS or standing in _TERMINAL_STANDINGS:
+        if node.validation_code == "ASSUMPTION_USE_NOT_ADMITTED":
             raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_NOT_ADMITTED_MISMATCH")
-    elif code == "ASSUMPTION_USE_CHALLENGED":
-        if len(active_challenges) == 0:
+        if node.validation_code == "ASSUMPTION_USE_CHALLENGED":
             raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_CHALLENGED_MISMATCH")
-    elif code == "ASSUMPTION_USE_NOT_YET_VALID":
-        if valid_from is None or clock >= valid_from:
+        if node.validation_code == "ASSUMPTION_USE_NOT_YET_VALID":
             raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_NOT_YET_VALID_MISMATCH")
-    elif code == "ASSUMPTION_USE_EXPIRED":
-        if expires_at is None or clock < expires_at:
+        if node.validation_code == "ASSUMPTION_USE_EXPIRED":
             raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_EXPIRED_MISMATCH")
-    elif code == "ASSUMPTION_USE_NODE_PRESENT":
-        if standing not in _ACTIVE_STANDINGS:
-            raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_PRESENT_STANDING_INVALID")
-        if len(active_challenges) > 0:
-            raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_PRESENT_CHALLENGED")
-        if valid_from is not None and clock < valid_from:
-            raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_PRESENT_NOT_YET_VALID")
-        if expires_at is not None and clock >= expires_at:
-            raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_PRESENT_EXPIRED")
+        raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_PRESENT_MISMATCH")
+    raise AssumptionGovernanceContractError("USE_NODE_CODE_STATE_MISMATCH")
 
 
 def _replay_dfs_closure(
@@ -169,14 +214,18 @@ def _replay_dfs_closure(
     traversed: tuple[UseTimeTraversedAssumption, ...],
     cycle_witness: tuple[str, ...],
     validation_code: str,
-) -> int:
+) -> tuple[int, str | None]:
     """Mechanically replay the DFS closure from the traversal records.
 
     Reconstructs the depth-first traversal that produced ``traversed`` starting
     from ``self_state.assumption_dependency_ids``, consuming records in order.
-    Returns the exact number of assumption-dependency edges that were actually
-    followed (i.e. traversed across) before the DFS terminated. Raises on any
-    inconsistency between the records and the mechanical replay.
+    Returns ``(edges_followed, terminal_code)`` where ``edges_followed`` is the
+    exact number of assumption-dependency edges that were actually followed
+    (i.e. traversed across) before the DFS terminated, and ``terminal_code`` is
+    the ``validation_code`` of the record at which the DFS terminated (or
+    ``"ASSUMPTION_USE_DEPENDENCY_CYCLE"`` for a cycle), or ``None`` if the DFS
+    completed without terminating. Raises on any inconsistency between the
+    records and the mechanical replay.
 
     The replay mirrors the producer's DFS exactly:
       * records are consumed strictly left-to-right, depth-first;
@@ -202,6 +251,12 @@ def _replay_dfs_closure(
     record_idx = 0
     replay_terminated = False
     detected_cycle_witness: tuple[str, ...] = ()
+
+    # The validation_code of the terminal record (the inherited denial code the
+    # producer propagated up to the evaluation), or ASSUMPTION_USE_DEPENDENCY_CYCLE
+    # for cycles, or None if the DFS completed. Captured at termination time so
+    # callers can bind the evaluation's validation_code to it.
+    terminal_code: str | None = None
 
     # A node may appear at most once in a well-formed traversal (DFS
     # first-discovery), so any duplicate id is an immediate structural error.
@@ -229,7 +284,7 @@ def _replay_dfs_closure(
         return rec
 
     def _dfs(node_id: str) -> None:
-        nonlocal replay_terminated, edges_followed, detected_cycle_witness
+        nonlocal replay_terminated, edges_followed, detected_cycle_witness, terminal_code
 
         if replay_terminated:
             return
@@ -239,6 +294,7 @@ def _replay_dfs_closure(
             raw_cycle = tuple(stack[stack.index(node_id) :] + [node_id])
             detected_cycle_witness = canonical_cycle_witness(raw_cycle)
             replay_terminated = True
+            terminal_code = "ASSUMPTION_USE_DEPENDENCY_CYCLE"
             return
 
         if node_id in visited:
@@ -262,8 +318,10 @@ def _replay_dfs_closure(
                 stack.pop()
                 visited.add(node_id)
         else:
-            # Terminal record: DFS stops here.
+            # Terminal record: DFS stops here. Capture the terminal node's code
+            # as the inherited denial propagated up to the evaluation.
             replay_terminated = True
+            terminal_code = rec.validation_code
 
     # Drive the DFS from the root's declared assumption-dependency edges. The
     # root itself is never consumed as a record (it is self_state); only its
@@ -308,7 +366,7 @@ def _replay_dfs_closure(
         if cycle_witness != ():
             raise AssumptionGovernanceContractError("USE_EVAL_ALLOW_CYCLE_PRESENT")
 
-    return edges_followed
+    return edges_followed, terminal_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -573,12 +631,32 @@ class AssumptionUseEvaluation:
         # before any dependency was examined) yields self_state with a non-PRESENT
         # code and no traversed records, so there is nothing to replay.
         if self.self_state.validation_code == "ASSUMPTION_USE_NODE_PRESENT":
-            _replay_dfs_closure(
+            _edges, terminal_code = _replay_dfs_closure(
                 self.self_state,
                 self.traversed_dependencies,
                 self.cycle_witness,
                 self.validation_code,
             )
+            # Fix #3: bind the DFS terminal outcome to the evaluation's own
+            # inherited denial code. If the DFS terminated at a dependency
+            # failure, the evaluation's validation_code MUST equal the terminal
+            # node's validation_code (the inherited denial). If the DFS
+            # completed, the evaluation's code must be ALLOW or an evidence D2
+            # code (the evidence phase runs only after a completed DFS).
+            if terminal_code is not None:
+                if self.validation_code != terminal_code:
+                    raise AssumptionGovernanceContractError("USE_EVAL_DFS_TERMINAL_CODE_MISMATCH")
+            else:
+                # DFS completed: the evaluation's code must be ALLOW or an
+                # evidence-phase D2 code (a code beginning with "EVIDENCE_").
+                dfs_completed_ok = (
+                    self.validation_code == "ASSUMPTION_USE_ALLOWED"
+                    or self.validation_code.startswith("EVIDENCE_")
+                )
+                if not dfs_completed_ok:
+                    raise AssumptionGovernanceContractError(
+                        "USE_EVAL_DFS_COMPLETED_NON_ALLOW_NON_EVIDENCE_CODE"
+                    )
         else:
             # Root did not pass SELF_HISTORY (or failed a self-gate): no DFS ran,
             # so there must be no traversed records and no cycle witness.
@@ -586,6 +664,109 @@ class AssumptionUseEvaluation:
                 raise AssumptionGovernanceContractError("USE_EVAL_SELF_FAILED_HAS_TRAVERSED")
             if self.cycle_witness != ():
                 raise AssumptionGovernanceContractError("USE_EVAL_SELF_FAILED_HAS_CYCLE")
+            # Fix #3: when self failed a gate (no DFS ran), the evaluation's
+            # validation_code must be the self-gate code carried on self_state.
+            if self.validation_code != self.self_state.validation_code:
+                raise AssumptionGovernanceContractError("USE_EVAL_SELF_GATE_CODE_MISMATCH")
+
+    def _validate_evidence_closure(self, clock: int) -> None:
+        """Mechanically replay evidence dependency coverage/order/fail-fast.
+
+        Builds the expected evidence reference sequence from self_state +
+        traversed_dependencies (the nodes the DFS actually reached in
+        first-discovery order, self first), enumerating each NODE_PRESENT
+        node's ``evidence_dependency_ids`` in canonical order. Each produces an
+        expected ``(owner_assumption_id, evidence_id)`` pair.
+
+        Then compares against the actual ``evidence_evaluations``:
+
+        * If ``validation_code`` is a self-gate failure or a DFS failure:
+          ``evidence_evaluations`` must be empty ().
+        * If ``validation_code`` is ALLOW: ``evidence_evaluations`` must exactly
+          equal the complete expected sequence; every ``receipt.allowed`` must
+          be True; every owner / evidence_id must match.
+        * If ``validation_code`` is an evidence D2 code: ``evidence_evaluations``
+          must be the exact prefix of the expected sequence through the first
+          denying receipt; the last ``receipt.allowed`` must be False; the last
+          ``receipt.code`` must equal ``validation_code``; no evaluations may
+          follow the denial.
+
+        Requires ``clock`` (the binding's logical clock) from the parent
+        decision; this method is invoked from
+        ``AssumptionUseAdmissibilityDecision.__post_init__``.
+        """
+        # Build the expected evidence reference sequence in the producer's order:
+        # self first, then traversed_dependencies in DFS first-discovery order.
+        # Only NODE_PRESENT nodes carry evidence_dependency_ids that the
+        # evidence phase evaluates; gate-failed nodes terminate the DFS and
+        # never reach the evidence phase.
+        expected_pairs: list[tuple[str, str]] = []
+        node_sequence: list[UseTimeTraversedAssumption] = []
+        if self.self_state.validation_code == "ASSUMPTION_USE_NODE_PRESENT":
+            node_sequence.append(self.self_state)
+            for td in self.traversed_dependencies:
+                if td.validation_code == "ASSUMPTION_USE_NODE_PRESENT":
+                    node_sequence.append(td)
+        for node in node_sequence:
+            for evidence_id in node.evidence_dependency_ids:
+                expected_pairs.append((node.assumption_id, evidence_id))
+        expected = tuple(expected_pairs)
+
+        actual = tuple(
+            (ee.owner_assumption_id, ee.receipt.evidence_id) for ee in self.evidence_evaluations
+        )
+
+        code = self.validation_code
+
+        if code in _SELF_GATE_FAILURE_EVAL_CODES or code in _DFS_FAILURE_EVAL_CODES:
+            # Self-gate or DFS failure: the evidence phase never ran.
+            if self.evidence_evaluations != ():
+                raise AssumptionGovernanceContractError("USE_EVAL_FAILURE_HAS_EVIDENCE_EVALUATIONS")
+            return
+
+        if code == "ASSUMPTION_USE_ALLOWED":
+            # ALLOW: every declared evidence dependency must have been evaluated,
+            # in the exact expected order, and every receipt must be allowed.
+            if actual != expected:
+                raise AssumptionGovernanceContractError("USE_EVAL_ALLOW_EVIDENCE_SEQUENCE_MISMATCH")
+            for ee in self.evidence_evaluations:
+                if not ee.receipt.allowed:
+                    raise AssumptionGovernanceContractError(
+                        "USE_EVAL_ALLOW_EVIDENCE_RECEIPT_DENIED"
+                    )
+            return
+
+        if code.startswith("EVIDENCE_"):
+            # Evidence D2 DENY: evaluations must be the exact prefix of the
+            # expected sequence through (and including) the first denying
+            # receipt. The last receipt must be denied; its code must equal the
+            # evaluation's validation_code; nothing may follow the denial.
+            if len(self.evidence_evaluations) == 0:
+                raise AssumptionGovernanceContractError("USE_EVAL_EVIDENCE_DENY_NO_EVALUATIONS")
+            last_ee = self.evidence_evaluations[-1]
+            if last_ee.receipt.allowed:
+                raise AssumptionGovernanceContractError(
+                    "USE_EVAL_EVIDENCE_DENY_LAST_RECEIPT_ALLOWED"
+                )
+            if last_ee.receipt.code != code:
+                raise AssumptionGovernanceContractError("USE_EVAL_EVIDENCE_DENY_CODE_MISMATCH")
+            # The prefix must match the expected sequence exactly (coverage +
+            # ordering). The prefix length equals the number of evaluations
+            # actually performed (all allowed, then the final denial).
+            prefix_len = len(self.evidence_evaluations)
+            if prefix_len > len(expected):
+                raise AssumptionGovernanceContractError("USE_EVAL_EVIDENCE_DENY_PREFIX_TOO_LONG")
+            if actual != expected[:prefix_len]:
+                raise AssumptionGovernanceContractError("USE_EVAL_EVIDENCE_DENY_SEQUENCE_MISMATCH")
+            # Every receipt before the last (denying) one must be allowed.
+            for ee in self.evidence_evaluations[:-1]:
+                if not ee.receipt.allowed:
+                    raise AssumptionGovernanceContractError("USE_EVAL_EVIDENCE_DENY_EARLY_DENIAL")
+            return
+
+        # Any other code here is structurally impossible (the __post_init__
+        # DFS-binding check above should have caught it), but defend in depth.
+        raise AssumptionGovernanceContractError("USE_EVAL_EVIDENCE_CLOSURE_UNKNOWN_CODE")
 
     def to_json_value(self) -> dict[str, object]:
         return {
@@ -645,12 +826,20 @@ class AssumptionUseAdmissibilityDecision:
         # projected state and the binding's logical clock. This catches a
         # node whose code disagrees with its own recorded standing / challenge
         # set / temporal interval (e.g. ASSUMPTION_USE_TERMINAL with a
-        # standing of ADMITTED).
+        # standing of ADMITTED), and enforces the exact frozen gate precedence
+        # (a REJECTED node with active challenges must be TERMINAL, not CHALLENGED).
         clock = self.binding.logical_clock_sequence
         for ev in self.evaluated_assumptions:
             _validate_node_code_against_state(ev.self_state, clock)
             for td in ev.traversed_dependencies:
                 _validate_node_code_against_state(td, clock)
+
+        # Fix #1: mechanically replay evidence dependency coverage/order/
+        # fail-fast for each evaluation. Requires the binding's clock to
+        # re-derive each node's gate state. The clock is needed because the
+        # evaluation itself is clock-agnostic (it has no binding).
+        for ev in self.evaluated_assumptions:
+            ev._validate_evidence_closure(clock)
 
         # Recompute work counters from children.
         self._validate_work_counters()
@@ -740,9 +929,10 @@ class AssumptionUseAdmissibilityDecision:
             # Edge count: replay the DFS closure to count edges actually followed.
             # A self-gate failure (root not NODE_PRESENT) ran no DFS -> 0 edges.
             if root.validation_code == "ASSUMPTION_USE_NODE_PRESENT":
-                total_dep_edges += _replay_dfs_closure(
+                edges_followed, _terminal_code = _replay_dfs_closure(
                     root, ev.traversed_dependencies, ev.cycle_witness, ev.validation_code
                 )
+                total_dep_edges += edges_followed
             # Evidence references.
             total_evidence_refs += len(ev.evidence_evaluations)
 
@@ -858,9 +1048,10 @@ def evaluate_assumption_use_admissibility(
         # Edge count matches the receipt-derivable replay: count only the edges
         # the DFS actually followed before termination.
         if root.validation_code == "ASSUMPTION_USE_NODE_PRESENT":
-            total_dep_edges += _replay_dfs_closure(
+            edges_followed, _terminal_code = _replay_dfs_closure(
                 root, ev.traversed_dependencies, ev.cycle_witness, ev.validation_code
             )
+            total_dep_edges += edges_followed
         total_evidence_refs += len(ev.evidence_evaluations)
 
     evaluation_work = AssumptionEvaluationWork.build(

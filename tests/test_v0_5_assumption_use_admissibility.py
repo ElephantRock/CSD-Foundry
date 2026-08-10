@@ -2008,3 +2008,217 @@ def test_node_code_state_mismatch_terminal_with_admitted_standing_rejected() -> 
         AssumptionGovernanceContractError, match="USE_NODE_CODE_STATE_TERMINAL_MISMATCH"
     ):
         _validate_node_code_against_state(node, clock=15)
+
+
+# --------------------------------------------------------------------------- #
+# Mutation tests for the three receipt-validation defect fixes (Fix #1, Fix #2
+# precedence, Fix #3 DFS terminal binding). Each builds a valid receipt via the
+# evaluator, then mutates one field with dataclasses.replace and asserts the
+# tamper is rejected at the appropriate boundary.
+# --------------------------------------------------------------------------- #
+
+
+def test_fix1_allow_with_omitted_evidence_evaluation_rejected() -> None:
+    """Fix #1: an ALLOW evaluation that omits a required evidence evaluation is
+    rejected by the evidence-closure coverage check.
+
+    Builds an ALLOW decision whose candidate declares one evidence dependency
+    (verified -> admissible), then drops the single evidence evaluation. The
+    evidence-closure replay discovers the missing (owner, evidence_id) pair and
+    rejects at the decision's __post_init__."""
+    store = InMemoryRegistryStore()
+    _admitted_candidate(store, evidence_deps=["evidence:e1"])
+    _add_verified_evidence(store, "evidence:e1")
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.result == "ALLOW"
+    assert len(ev.evidence_evaluations) == 1
+
+    # Drop the only evidence evaluation: the candidate still declares the dep,
+    # but no evaluation exists for it.
+    tampered_ev = replace(ev, evidence_evaluations=())
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVAL_ALLOW_EVIDENCE_SEQUENCE_MISMATCH"
+    ):
+        replace(decision, evaluated_assumptions=(tampered_ev,))
+
+
+def test_fix1_allow_with_reordered_evidence_evaluations_rejected() -> None:
+    """Fix #1: an ALLOW evaluation whose evidence evaluations are out of the
+    canonical (first-discovery node order x evidence_dependency_ids order) is
+    rejected by the evidence-closure ordering check.
+
+    Builds an ALLOW decision whose candidate declares two evidence deps
+    (evidence:e1 then evidence:e2), both admissible, then swaps the two
+    evaluations. The expected sequence is [(candidate, e1), (candidate, e2)];
+    the swapped sequence mismatches."""
+    store = InMemoryRegistryStore()
+    _admitted_candidate(store, evidence_deps=["evidence:e1", "evidence:e2"])
+    _add_verified_evidence(store, "evidence:e1")
+    _add_verified_evidence(store, "evidence:e2")
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.result == "ALLOW"
+    assert len(ev.evidence_evaluations) == 2
+    order = [ee.receipt.evidence_id for ee in ev.evidence_evaluations]
+    assert order == ["evidence:e1", "evidence:e2"]
+
+    # Swap the two evaluations: the producer's order is violated.
+    swapped = (ev.evidence_evaluations[1], ev.evidence_evaluations[0])
+    tampered_ev = replace(ev, evidence_evaluations=swapped)
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVAL_ALLOW_EVIDENCE_SEQUENCE_MISMATCH"
+    ):
+        replace(decision, evaluated_assumptions=(tampered_ev,))
+
+
+def test_fix1_evidence_deny_with_evaluations_after_denial_rejected() -> None:
+    """Fix #1: an evidence-DENY evaluation that carries evaluations AFTER the
+    denying receipt is rejected by the evidence-closure fail-fast check.
+
+    Builds an evidence DENY (candidate declares evidence:e1 admissible then
+    evidence:e2 inadmissible), then appends a spurious extra evaluation after
+    the denying one. The producer fail-stops at the first denial, so any
+    trailing evaluation is illegal."""
+    store = InMemoryRegistryStore()
+    # Candidate declares e1 (admissible) then e2 (inadmissible).
+    _admitted_candidate(store, evidence_deps=["evidence:e1", "evidence:e2"])
+    _add_verified_evidence(store, "evidence:e1")
+    _add_invalidated_evidence(store, "evidence:e2")
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.result == "DENY"
+    assert ev.validation_code.startswith("EVIDENCE_")
+    # Two evaluations: e1 (allowed) then e2 (denied, fail-fast).
+    assert len(ev.evidence_evaluations) == 2
+    assert ev.evidence_evaluations[-1].receipt.allowed is False
+
+    # Append the allowed e1 evaluation again after the denial: the producer
+    # would have fail-stopped at e2, so any trailing evaluation is illegal.
+    # The fail-fast check catches this as the last receipt now being allowed.
+    allowed_e1 = ev.evidence_evaluations[0]
+    trailing = ev.evidence_evaluations + (allowed_e1,)
+    tampered_ev = replace(ev, evidence_evaluations=trailing)
+    with pytest.raises(
+        AssumptionGovernanceContractError,
+        match="USE_EVAL_EVIDENCE_DENY_(PREFIX_TOO_LONG|SEQUENCE_MISMATCH|LAST_RECEIPT_ALLOWED)",
+    ):
+        replace(decision, evaluated_assumptions=(tampered_ev,))
+
+
+def test_fix2_rejected_node_with_challenges_must_be_terminal_not_challenged() -> None:
+    """Fix #2: a node whose recorded standing is REJECTED (terminal) but whose
+    code is CHALLENGED is rejected: frozen precedence derives TERMINAL.
+
+    Builds a decision with a dependency that is REJECTED (inherited TERMINAL),
+    then mutates BOTH the dependency's code AND the evaluation's validation_code
+    to CHALLENGED (keeping them consistent so the DFS terminal-code binding of
+    Fix #3 passes), and adds an active challenge so CHALLENGED would be locally
+    self-consistent under the OLD per-code validator. Frozen precedence derives
+    TERMINAL from the REJECTED standing regardless of the active challenge, so
+    the mismatch is detected at the decision's node-code check."""
+    from csd_foundry.governance.v0_5._assumption_use_admissibility import (
+        UseTimeTraversedAssumption,
+    )
+
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    registry.apply(_propose_event(assumption_id="assumption:dep", clock=5))
+    registry.apply(_admit(registry, "assumption:dep", clock=6))
+    registry.apply(_reject(registry, "assumption:dep", clock=7))
+    _admitted_candidate(store, assumption_deps=["assumption:dep"])
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.validation_code == "ASSUMPTION_USE_TERMINAL"
+    failed_dep = ev.traversed_dependencies[0]
+    assert failed_dep.standing == "REJECTED"
+
+    # Mutate the dep: claim CHALLENGED with an active challenge present, keeping
+    # the REJECTED (terminal) standing. Under frozen precedence the terminal
+    # standing still wins -> TERMINAL, not CHALLENGED.
+    tampered_dep = UseTimeTraversedAssumption(
+        assumption_id=failed_dep.assumption_id,
+        validation_code="ASSUMPTION_USE_CHALLENGED",  # wrong: must be TERMINAL
+        current_event_digest=failed_dep.current_event_digest,
+        current_entity_sequence=failed_dep.current_entity_sequence,
+        history_event_count=failed_dep.history_event_count,
+        proposition_id=failed_dep.proposition_id,
+        scope_ids=failed_dep.scope_ids,
+        materiality=failed_dep.materiality,
+        standing="REJECTED",  # terminal standing wins over challenge gate
+        active_challenge_ids=("challenge:fake",),  # so CHALLENGED is locally plausible
+        valid_from_sequence=failed_dep.valid_from_sequence,
+        expires_at_sequence=failed_dep.expires_at_sequence,
+        assumption_dependency_ids=failed_dep.assumption_dependency_ids,
+        evidence_dependency_ids=failed_dep.evidence_dependency_ids,
+        limitations=failed_dep.limitations,
+        maximum_reuse_class=failed_dep.maximum_reuse_class,
+    )
+    # Keep the evaluation's validation_code consistent with the (mutated)
+    # terminal node's code so Fix #3's DFS-terminal-code binding passes; the
+    # precedence mismatch then surfaces at the decision's node-code check.
+    tampered_ev = replace(
+        ev,
+        validation_code="ASSUMPTION_USE_CHALLENGED",
+        traversed_dependencies=(tampered_dep,),
+    )
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_NODE_CODE_STATE_TERMINAL_MISMATCH"
+    ):
+        replace(decision, evaluated_assumptions=(tampered_ev,))
+
+
+def test_fix3_dfs_failure_with_wrong_terminal_code_rejected() -> None:
+    """Fix #3: a DFS-failure evaluation whose validation_code disagrees with the
+    terminal node's inherited denial code is rejected.
+
+    Builds a DFS failure (dependency REJECTED -> inherited TERMINAL), then
+    mutates the evaluation's validation_code to NOT_YET_VALID (also a valid
+    DFS-failure code) while the terminal node still carries TERMINAL. The DFS
+    replay exposes terminal_code=TERMINAL, which must equal the evaluation's
+    own validation_code; the mismatch is detected at the evaluation's own
+    __post_init__."""
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    registry.apply(_propose_event(assumption_id="assumption:dep", clock=5))
+    registry.apply(_admit(registry, "assumption:dep", clock=6))
+    registry.apply(_reject(registry, "assumption:dep", clock=7))
+    _admitted_candidate(store, assumption_deps=["assumption:dep"])
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.validation_code == "ASSUMPTION_USE_TERMINAL"
+    # The terminal traversed node carries the inherited TERMINAL code.
+    assert ev.traversed_dependencies[0].validation_code == "ASSUMPTION_USE_TERMINAL"
+
+    # Mutate the evaluation's validation_code to a DIFFERENT DFS-failure code.
+    # The DFS replay still terminates at the same terminal record (code=TERMINAL),
+    # so terminal_code=TERMINAL, but now validation_code=NOT_YET_VALID mismatches.
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVAL_DFS_TERMINAL_CODE_MISMATCH"
+    ):
+        replace(ev, validation_code="ASSUMPTION_USE_NOT_YET_VALID")
