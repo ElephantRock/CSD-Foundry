@@ -105,6 +105,32 @@ def evidence_mutation_manifest() -> dict[str, Any]:
     return load_json("data/canary/v0.5/evidence-mutations-v1/manifest.json")
 
 
+def assumption_vectors() -> dict[str, Any]:
+    """Assemble the committed assumption vector catalog from its manifest and canaries."""
+
+    base = "data/canary/v0.5/assumption-v1"
+    manifest = load_json(f"{base}/manifest.json")
+    if manifest.get("schema_version") != "assumption-conformance-manifest/0.5":
+        raise GovernanceContractError("ASSUMPTION_VECTOR_MANIFEST_SCHEMA_INVALID")
+    accepted_files = _assumption_manifest_files(manifest, "accepted_files")
+    rejected_files = _assumption_manifest_files(manifest, "rejected_files")
+    return {
+        "schema_version": manifest.get("vector_schema_version"),
+        "vector_version": manifest.get("vector_version"),
+        "authority_policy": deepcopy(manifest.get("authority_policy")),
+        "accepted_vectors": [load_json(f"{base}/{name}") for name in accepted_files],
+        "rejected_vectors": [load_json(f"{base}/{name}") for name in rejected_files],
+        "claim_boundary": manifest.get("claim_boundary"),
+        "catalog_digest": manifest.get("catalog_digest"),
+    }
+
+
+def assumption_mutation_manifest() -> dict[str, Any]:
+    """Return a defensive copy of the committed v0.5 assumption mutation campaign."""
+
+    return load_json("data/canary/v0.5/assumption-mutations-v1/manifest.json")
+
+
 def _manifest_files(manifest: dict[str, Any], field: str) -> tuple[str, ...]:
     value = manifest.get(field)
     if type(value) is not list or any(type(item) is not str for item in value):
@@ -115,4 +141,17 @@ def _manifest_files(manifest: dict[str, Any], field: str) -> tuple[str, ...]:
     for name in names:
         if not name.endswith(".json") or "/" in name or "\\" in name or name in {".", ".."}:
             raise GovernanceContractError("EVIDENCE_VECTOR_MANIFEST_FILE_INVALID", name)
+    return names
+
+
+def _assumption_manifest_files(manifest: dict[str, Any], field: str) -> tuple[str, ...]:
+    value = manifest.get(field)
+    if type(value) is not list or any(type(item) is not str for item in value):
+        raise GovernanceContractError("ASSUMPTION_VECTOR_MANIFEST_FILES_INVALID", field)
+    names = tuple(cast(list[str], value))
+    if not names or len(set(names)) != len(names):
+        raise GovernanceContractError("ASSUMPTION_VECTOR_MANIFEST_FILES_INVALID", field)
+    for name in names:
+        if not name.endswith(".json") or "/" in name or "\\" in name or name in {".", ".."}:
+            raise GovernanceContractError("ASSUMPTION_VECTOR_MANIFEST_FILE_INVALID", name)
     return names
