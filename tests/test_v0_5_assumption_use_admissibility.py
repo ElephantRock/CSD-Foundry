@@ -1565,3 +1565,274 @@ def test_traversed_dependency_rejects_unknown_code() -> None:
             limitations=(),
             maximum_reuse_class=None,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Mutation tests: prove the four receipt-validation fixes catch tampering.
+# Each test builds a valid receipt/evaluation, then mutates one field with
+# dataclasses.replace and asserts AssumptionGovernanceContractError.
+# --------------------------------------------------------------------------- #
+
+
+def _mut_propose(
+    *,
+    assumption_id: str,
+    clock: int,
+    proposition_id: str = "proposition:1",
+    scope_ids: tuple[str, ...] = ("scope:control",),
+    assumption_deps: tuple[str, ...] = (),
+    evidence_deps: tuple[str, ...] = (),
+    expires: int | None = 100,
+    maximum_reuse_class: str = "D2",
+) -> object:
+    """Custom PROPOSE event with configurable proposition/scope (for mutation tests)."""
+    return build_assumption_event(
+        assumption_id=assumption_id,
+        entity_sequence=1,
+        previous_entity_event_digest=None,
+        clock_sequence=clock,
+        source_receipt_digest=_digest(f"propose:{assumption_id}"),
+        payload={
+            "operation": "PROPOSE",
+            "proposition_id": proposition_id,
+            "scope_ids": list(scope_ids),
+            "materiality": "MATERIAL",
+            "proposer_authority_id": "authority:proposer",
+            "proposed_at_sequence": clock,
+            "valid_from_sequence": clock,
+            "expires_at_sequence": expires,
+            "assumption_dependency_ids": list(assumption_deps),
+            "evidence_dependency_ids": list(evidence_deps),
+            "limitations": [],
+            "maximum_reuse_class": maximum_reuse_class,
+        },
+    )
+
+
+def test_mut_01_d2_request_transplanted_to_incompatible_owner_rejected() -> None:
+    """Fix #1: a D2 evidence request transplanted onto an owner with a different
+    proposition/scope is rejected because the rebuilt request_digest mismatches."""
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    # dep has a DIFFERENT proposition + scope than the candidate.
+    registry.apply(
+        _mut_propose(
+            assumption_id="assumption:dep",
+            clock=5,
+            proposition_id="proposition:other",
+            scope_ids=("scope:other",),
+        )
+    )
+    registry.apply(_admit(registry, "assumption:dep", clock=6))
+    _admitted_candidate(store, assumption_deps=["assumption:dep"], evidence_deps=["evidence:e1"])
+    _add_verified_evidence(store, "evidence:e1")
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert len(ev.evidence_evaluations) == 1
+    ee = ev.evidence_evaluations[0]
+    assert ee.owner_assumption_id == "assumption:candidate"
+
+    # Transplant the evidence evaluation onto assumption:dep (different proposition/scope).
+    tampered_ee = replace(ee, owner_assumption_id="assumption:dep")
+    tampered_ev = replace(ev, evidence_evaluations=(tampered_ee,))
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_DECISION_EVIDENCE_REQUEST_DIGEST_MISMATCH"
+    ):
+        # Re-trigger validation by constructing the decision via replace (runs __post_init__).
+        replace(decision, evaluated_assumptions=(tampered_ev,))
+
+
+def test_mut_02_allow_evaluation_with_omitted_reachable_dependency_rejected() -> None:
+    """Fix #2: an ALLOW evaluation that omits a reachable dependency record is
+    rejected because the DFS replay cannot find the record for the edge."""
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    registry.apply(_propose_event(assumption_id="assumption:dep", clock=5))
+    registry.apply(_admit(registry, "assumption:dep", clock=6))
+    _admitted_candidate(store, assumption_deps=["assumption:dep"])
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.result == "ALLOW"
+    assert len(ev.traversed_dependencies) == 1
+
+    # Drop the only traversed record: root still declares the dep edge, but no
+    # record exists for the replay to consume. Validation fires at the
+    # evaluation's own __post_init__ (the DFS replay runs there).
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVAL_TRAVERSAL_RECORD_MISSING"
+    ):
+        replace(ev, traversed_dependencies=())
+
+
+def test_mut_03_reordered_traversed_dependency_rejected() -> None:
+    """Fix #2: reordering traversed records out of DFS order is rejected."""
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    # Two sibling leaf deps, both present.
+    registry.apply(_propose_event(assumption_id="assumption:dep-a", clock=5))
+    registry.apply(_admit(registry, "assumption:dep-a", clock=6))
+    registry.apply(_propose_event(assumption_id="assumption:dep-b", clock=5))
+    registry.apply(_admit(registry, "assumption:dep-b", clock=6))
+    _admitted_candidate(store, assumption_deps=["assumption:dep-a", "assumption:dep-b"])
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.result == "ALLOW"
+    order = [td.assumption_id for td in ev.traversed_dependencies]
+    assert order == ["assumption:dep-a", "assumption:dep-b"]
+
+    # Swap the two records: DFS drives dep-a first but would consume dep-b.
+    # Validation fires at the evaluation's __post_init__ (DFS replay).
+    reordered = (ev.traversed_dependencies[1], ev.traversed_dependencies[0])
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVAL_TRAVERSAL_ORDER_MISMATCH"
+    ):
+        replace(ev, traversed_dependencies=reordered)
+
+
+def test_mut_04_wrong_cycle_witness_rejected() -> None:
+    """Fix #2: a cycle decision whose cycle_witness does not match the replayed
+    cycle is rejected."""
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    registry.apply(
+        _propose_event(assumption_id="assumption:b", clock=5, assumption_deps=["assumption:a"])
+    )
+    registry.apply(
+        _propose_event(assumption_id="assumption:a", clock=10, assumption_deps=["assumption:b"])
+    )
+    registry.apply(_admit(registry, "assumption:b", clock=6))
+    registry.apply(_admit(registry, "assumption:a", clock=11))
+    binding = _build_binding(store, required_assumption_ids=("assumption:a",))
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.validation_code == "ASSUMPTION_USE_DEPENDENCY_CYCLE"
+    assert ev.cycle_witness != ()
+
+    # Tamper the witness to a syntactically-valid but wrong closed cycle.
+    # Validation fires at the evaluation's __post_init__ (DFS replay compares the
+    # witness it derives against the one on the receipt).
+    wrong_witness = ev.cycle_witness[:-1] + ("assumption:zzz",)
+    with pytest.raises(AssumptionGovernanceContractError, match="USE_EVAL_CYCLE_WITNESS_MISMATCH"):
+        replace(ev, cycle_witness=wrong_witness)
+
+
+def test_mut_05_dependency_record_with_altered_state_rejected() -> None:
+    """Fix #3: a gate-failed dependency record that illegally carries its own
+    assumption_dependency_ids is rejected (its edges were never traversed)."""
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    # dep is ADMITTED then EXPIRED -> TERMINAL (gate-failed, retains projected state).
+    registry.apply(_propose_event(assumption_id="assumption:dep", clock=5, expires=20))
+    registry.apply(_admit(registry, "assumption:dep", clock=6))
+    registry.apply(_expire(registry, "assumption:dep", clock=20))
+    _admitted_candidate(store, assumption_deps=["assumption:dep"])
+    binding = _build_binding(store, clock=15)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    assert ev.validation_code == "ASSUMPTION_USE_TERMINAL"
+    failed_dep = ev.traversed_dependencies[0]
+    assert failed_dep.validation_code == "ASSUMPTION_USE_TERMINAL"
+    # Gate-failed node retains full projected state...
+    assert failed_dep.standing == "EXPIRED"
+    assert failed_dep.current_event_digest is not None
+    # ...and has NO outgoing edges (they were never traversed).
+    assert failed_dep.assumption_dependency_ids == ()
+
+    # Re-attach a fake dep edge to the gate-failed record. Validation fires at
+    # the UseTimeTraversedAssumption's own __post_init__ (gate-failed nodes must
+    # carry no outgoing edges since those edges were never traversed).
+    with pytest.raises(
+        AssumptionGovernanceContractError,
+        match="USE_TRAVERSED_GATE_FAILED_HAS_ASSUMPTION_DEPS",
+    ):
+        replace(failed_dep, assumption_dependency_ids=("assumption:never-traversed",))
+
+
+def test_mut_06_fail_fast_edge_count_root_denies_first_child() -> None:
+    """Fix #4: root -> [a, b, c] where a denies (fail-fast) yields edges_examined == 1
+    (only the edge to a was followed). Grafting a work object with a different
+    edge count onto the decision is rejected."""
+    from csd_foundry.governance.v0_5._assumption_governance_contracts import (
+        AssumptionEvaluationWork,
+    )
+
+    store = InMemoryRegistryStore()
+    registry = AssumptionRegistry(store)
+    # a is rejected (TERMINAL) -> first child fails the gate, fail-fast stops.
+    registry.apply(_propose_event(assumption_id="assumption:a", clock=5))
+    registry.apply(_admit(registry, "assumption:a", clock=6))
+    registry.apply(_reject(registry, "assumption:a", clock=7))
+    # b and c are valid (never reached because a denies first).
+    registry.apply(_propose_event(assumption_id="assumption:b", clock=5))
+    registry.apply(_admit(registry, "assumption:b", clock=6))
+    registry.apply(_propose_event(assumption_id="assumption:c", clock=5))
+    registry.apply(_admit(registry, "assumption:c", clock=6))
+    _admitted_candidate(store, assumption_deps=["assumption:a", "assumption:b", "assumption:c"])
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    # Producer computed edges_examined == 1 (only candidate -> a was followed).
+    assert decision.evaluation_work.assumption_dependency_edges_examined == 1
+
+    # Graft a work object that claims 3 edges examined (all declared deps).
+    mismatched_work = AssumptionEvaluationWork.build(
+        assumption_histories_reconstructed=decision.evaluation_work.assumption_histories_reconstructed,
+        assumption_events_replayed=decision.evaluation_work.assumption_events_replayed,
+        authority_decisions_evaluated=0,
+        unique_assumption_nodes_evaluated=decision.evaluation_work.unique_assumption_nodes_evaluated,
+        assumption_dependency_edges_examined=3,
+        evidence_dependency_references_evaluated=decision.evaluation_work.evidence_dependency_references_evaluated,
+        active_challenges_evaluated=decision.evaluation_work.active_challenges_evaluated,
+        separation_duty_rules_evaluated=0,
+    )
+    with pytest.raises(AssumptionGovernanceContractError, match="USE_WORK_EDGES_MISMATCH"):
+        replace(decision, evaluation_work=mismatched_work)
+
+
+def test_mut_07_d2_receipt_with_tampered_digest_rejected() -> None:
+    """The D2 evidence receipt's request_digest must match its request; tampering
+    the receipt's request_digest is rejected at EvidenceEvaluation construction."""
+    store = InMemoryRegistryStore()
+    _admitted_candidate(store, evidence_deps=["evidence:e1"])
+    _add_verified_evidence(store, "evidence:e1")
+    binding = _build_binding(store)
+    evaluator = _build_evaluator(store)
+
+    decision = evaluate_assumption_use_admissibility(
+        store=store, binding=binding, evidence_evaluator=evaluator
+    )
+    ev = decision.evaluated_assumptions[0]
+    ee = ev.evidence_evaluations[0]
+
+    # Tamper the receipt's request_digest to disagree with the request.
+    tampered_receipt = replace(ee.receipt, request_digest=_digest("tampered"))
+    with pytest.raises(
+        AssumptionGovernanceContractError, match="USE_EVIDENCE_EVAL_REQUEST_MISMATCH"
+    ):
+        replace(ee, receipt=tampered_receipt)
