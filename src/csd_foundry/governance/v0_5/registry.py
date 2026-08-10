@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -100,6 +100,145 @@ class RegistryStore(Protocol):
     def reconstruct_snapshot(self, registry_type: str) -> tuple[tuple[RegistryEvent, ...], ...]: ...
 
 
+class GovernedRegistryStore(Protocol):
+    """Narrow protocol for stores that support locked transactional views."""
+
+    def locked_view(self) -> AbstractContextManager[LockedRegistryView]: ...
+
+
+class LockedRegistryView:
+    """Lifetime-bounded locked registry view.
+
+    Satisfies the complete ``RegistryStore`` structural interface while holding
+    the store's advisory lock. Mutation (``append``) fails closed; the only
+    mutation path is ``_commit_prepared``. Read methods use non-relocking
+    helpers (``_read_head``, ``_snapshot_unlocked``, ``_reconstruct_entity_unlocked``).
+
+    Lifetime-bound to its context manager: a newly constructed view is inert
+    (unusable) until activated by ``FilesystemRegistryStore.locked_view()``
+    while the lock is held. After ``close()``, every method raises
+    ``RegistryStoreError("REGISTRY_LOCKED_VIEW_CLOSED")``.
+    Direct construction outside ``locked_view()`` produces an unusable view.
+    """
+
+    def __init__(self, store: FilesystemRegistryStore) -> None:
+        self._store = store
+        self._closed = True  # inert until _activate()
+
+    def _activate(self) -> None:
+        """Activate the view. Called only by ``locked_view()`` while lock is held."""
+        self._closed = False
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise RegistryStoreError("REGISTRY_LOCKED_VIEW_CLOSED")
+
+    def append(self, event: RegistryEvent) -> RegistryAppendResult:
+        self._check_open()
+        raise RegistryStoreError("REGISTRY_LOCKED_VIEW_APPEND_FORBIDDEN")
+
+    def get_event(self, digest: str) -> RegistryEvent | None:
+        self._check_open()
+        return self._store.get_event(digest)
+
+    def entity_head(self, registry_type: str, entity_id: str) -> RegistryEntityHead | None:
+        self._check_open()
+        _require_registry_type(registry_type)
+        _require_entity_id(entity_id)
+        return self._store._read_head(registry_type, entity_id)
+
+    def snapshot(self, registry_type: str) -> RegistrySnapshot:
+        self._check_open()
+        return self._store._snapshot_unlocked(registry_type)
+
+    def reconstruct_entity(self, registry_type: str, entity_id: str) -> tuple[RegistryEvent, ...]:
+        self._check_open()
+        return self._store._reconstruct_entity_unlocked(registry_type, entity_id)
+
+    def reconstruct_snapshot(self, registry_type: str) -> tuple[tuple[RegistryEvent, ...], ...]:
+        self._check_open()
+        snap = self._store._snapshot_unlocked(registry_type)
+        return tuple(
+            self._store._reconstruct_entity_unlocked(registry_type, head.entity_id)
+            for head in snap.heads
+        )
+
+    def snapshot_root(self, registry_type: str) -> str:
+        """Return the root digest without constructing the full snapshot."""
+        self._check_open()
+        return self._store._snapshot_unlocked(registry_type).root_digest
+
+    def _commit_prepared(
+        self,
+        *,
+        event: RegistryEvent,
+        expected_current_head: RegistryEntityHead | None,
+        predicted_head: RegistryEntityHead,
+    ) -> None:
+        """Staged governed commit: verify, install, prepare, replace, fsync.
+
+        The ``os.replace`` is the commit point. If directory fsync fails after
+        the commit point, raise ``RegistryStoreError("REGISTRY_COMMIT_DURABILITY_UNCERTAIN")``.
+        """
+        self._check_open()
+        store = self._store
+        value = event.to_json_value()
+        registry_type = cast(str, value["registry_type"])
+        entity_id = cast(str, value["entity_id"])
+        # Verify current head matches expected.
+        current = store._read_head(registry_type, entity_id)
+        if current != expected_current_head:
+            raise RegistryStoreConflictError("GOVERNED_ADMIT_INTERNAL_CONFLICT")
+        # Install immutable event object.
+        store._install(store._object_path(event.digest), event.canonical_bytes)
+        # Prepare head temp + os.replace (commit point).
+        head_path = store._head_path(registry_type, entity_id)
+        head_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = store.temporary / f"{uuid.uuid4().hex}.tmp"
+        _write_fsync(temporary, _head_bytes(predicted_head), exclusive=True)
+        os.replace(temporary, head_path)
+        # Post-commit: directory fsync + head verification. Any failure here
+        # enters the reconciliation/uncertainty path, never a pre-commit semantic
+        # denial. The head is already logically advanced after os.replace.
+        try:
+            _fsync_directory(head_path.parent)
+        except OSError:
+            self._reconcile_post_commit(registry_type, entity_id, predicted_head)
+            raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN") from None
+        # Verify the actual head matches the predicted head. Any mismatch or
+        # read failure is also post-commit uncertainty — enter reconciliation.
+        try:
+            actual = store._read_head(registry_type, entity_id)
+        except Exception:
+            self._reconcile_post_commit(registry_type, entity_id, predicted_head)
+            raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN") from None
+        if actual != predicted_head:
+            self._reconcile_post_commit(registry_type, entity_id, predicted_head)
+            raise RegistryStoreError("GOVERNED_ADMIT_COMMIT_DURABILITY_UNCERTAIN")
+
+    def _reconcile_post_commit(
+        self, registry_type: str, entity_id: str, predicted_head: RegistryEntityHead
+    ) -> None:
+        """Best-effort head reconciliation after a post-commit failure.
+
+        If the actual head does not match the predicted head, the registry is in
+        an unexpected state. This method does not raise; the caller reports the
+        governed uncertainty code.
+        """
+        try:
+            store = self._store
+            actual = store._read_head(registry_type, entity_id)
+            if actual is not None and actual != predicted_head:
+                # The head advanced but not to the predicted value. Nothing more
+                # to do here; the caller reports uncertainty.
+                pass
+        except Exception:
+            pass
+
+    def close(self) -> None:
+        self._closed = True
+
+
 class InMemoryRegistryStore:
     """Ephemeral reference store backed by the filesystem protocol."""
 
@@ -124,6 +263,11 @@ class InMemoryRegistryStore:
 
     def reconstruct_snapshot(self, registry_type: str) -> tuple[tuple[RegistryEvent, ...], ...]:
         return self._store.reconstruct_snapshot(registry_type)
+
+    @contextmanager
+    def locked_view(self) -> Iterator[LockedRegistryView]:
+        with self._store.locked_view() as view:
+            yield view
 
 
 class FilesystemRegistryStore:
@@ -302,6 +446,77 @@ class FilesystemRegistryStore:
     def _lock(self) -> Iterator[None]:
         with advisory_lock(self.lock_path):
             yield
+
+    @contextmanager
+    def locked_view(self) -> Iterator[LockedRegistryView]:
+        """Acquire the registry lock and yield a lifetime-bounded locked view.
+
+        The lock is held for the duration of the ``with`` block. The view
+        provides non-relocking read access and a ``_commit_prepared`` primitive
+        for governed commits.
+        """
+        view = LockedRegistryView(self)
+        with self._lock():
+            view._activate()
+            try:
+                yield view
+            finally:
+                view.close()
+
+    def _snapshot_unlocked(self, registry_type: str) -> RegistrySnapshot:
+        """Compute a snapshot without acquiring the lock (must be called under lock)."""
+        _require_registry_type(registry_type)
+        directory = self.heads / registry_type.lower()
+        found: dict[str, RegistryEntityHead] = {}
+        if directory.is_dir():
+            for path in sorted(directory.glob("*.json")):
+                head = _parse_head(path.read_bytes())
+                if head.registry_type != registry_type:
+                    raise RegistryStoreConflictError("REGISTRY_HEAD_TYPE_MISMATCH")
+                expected_path = self._head_path(head.registry_type, head.entity_id)
+                if path != expected_path:
+                    raise RegistryStoreConflictError("REGISTRY_HEAD_PATH_MISMATCH")
+                existing = found.get(head.entity_id)
+                if existing is not None and existing != head:
+                    raise RegistryStoreConflictError("REGISTRY_HEAD_DUPLICATE_ENTITY")
+                found[head.entity_id] = head
+        heads = tuple(sorted(found.values(), key=lambda item: item.entity_id))
+        for head in heads:
+            event = self.get_event(head.event_digest)
+            if event is None:
+                raise RegistryStoreConflictError("REGISTRY_HEAD_EVENT_MISSING")
+            _verify_head_event(head, event)
+        return RegistrySnapshot(registry_type, heads, _snapshot_root(registry_type, heads))
+
+    def _reconstruct_entity_unlocked(
+        self, registry_type: str, entity_id: str
+    ) -> tuple[RegistryEvent, ...]:
+        """Reconstruct entity history without acquiring the lock (must be under lock)."""
+        head = self._read_head(registry_type, entity_id)
+        if head is None:
+            return ()
+        result: list[RegistryEvent] = []
+        digest: str | None = head.event_digest
+        expected_sequence = head.entity_sequence
+        seen: set[str] = set()
+        while digest is not None:
+            if digest in seen:
+                raise RegistryStoreConflictError("REGISTRY_EVENT_CYCLE")
+            seen.add(digest)
+            event = self.get_event(digest)
+            if event is None:
+                raise RegistryStoreConflictError("REGISTRY_CHAIN_EVENT_MISSING")
+            value = event.to_json_value()
+            if value["registry_type"] != registry_type or value["entity_id"] != entity_id:
+                raise RegistryStoreConflictError("REGISTRY_CHAIN_ENTITY_MISMATCH")
+            if value["entity_sequence"] != expected_sequence:
+                raise RegistryStoreConflictError("REGISTRY_CHAIN_SEQUENCE_MISMATCH")
+            result.append(event)
+            digest = cast(str | None, value["previous_entity_event_digest"])
+            expected_sequence -= 1
+        if expected_sequence != 0:
+            raise RegistryStoreConflictError("REGISTRY_CHAIN_NOT_GENESIS_LINKED")
+        return tuple(reversed(result))
 
 
 def build_registry_event(
