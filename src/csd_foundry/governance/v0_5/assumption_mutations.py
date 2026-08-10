@@ -366,11 +366,36 @@ def _mutate_catalog(
         )
         _rebuild_events(mutated)
     elif operator == "SUBSTITUTE_PROPOSER_AUTHORITY":
-        # SoD-style: forge the proposer to an unauthorized authority.
+        # Genuine SoD conflict: forge the proposer to the same authority that
+        # later performs ADMIT. The ADMIT grant is still valid (authority:admitter
+        # is granted ADMIT) -- it is the PROPOSER->ADMIT duty rule that blocks,
+        # not the grant. The detector is therefore ASSUMPTION_SEPARATION_OF_DUTY_DENIED.
         event = _find_event(mutated, operation="PROPOSE")
         _object(event, "payload")["proposer_authority_id"] = _required_string(
             parameters, "authority_id"
         )
+        _rebuild_events(mutated)
+    elif operator == "FORGE_SOD_CONFLICT":
+        # Re-point the ADMIT authority to the assumption's own proposer, creating
+        # a genuine PROPOSER->ADMIT separation-of-duty conflict. The ADMIT grant
+        # for the proposer is added so the grant is SELECTED and the SoD rule is
+        # what blocks (not a grant denial). The detector is
+        # ASSUMPTION_SEPARATION_OF_DUTY_DENIED.
+        propose_event = _find_event(mutated, operation="PROPOSE")
+        proposer_id = _required_string(_object(propose_event, "payload"), "proposer_authority_id")
+        admit_event = _find_event(mutated, operation="ADMIT")
+        _object(admit_event, "payload")["admitting_authority_id"] = proposer_id
+        # Re-grant ADMIT to the proposer in the serialized policy context.
+        policy = _object(catalog, "authority_policy")
+        for entry in _array_of_objects(policy, "ledger_entries"):
+            entry_grants = _array_of_objects(entry, "grants")
+            new_grant = deepcopy(entry_grants[0])
+            new_grant["grant_id"] = f"grant:sod-admitter-{proposer_id}"
+            new_grant["action"] = "ADMIT"
+            new_grant["authority_id"] = proposer_id
+            entry_grants.append(new_grant)
+            entry_grants.sort(key=lambda g: g["grant_id"])
+            break
         _rebuild_events(mutated)
     elif operator == "REMOVE_ASSUMPTION_DEPENDENCY":
         event = _find_event(
@@ -379,6 +404,23 @@ def _mutate_catalog(
             entity_id=_required_string(parameters, "assumption_id"),
         )
         _object(event, "payload")["assumption_dependency_ids"] = []
+        _rebuild_events(mutated)
+    elif operator == "INTRODUCE_MISSING_ADMISSION_DEPENDENCY":
+        # Admission-time failure: add a dependency on a nonexistent assumption
+        # to a PROPOSE event. The ADMIT for this assumption then fails the I1-C
+        # admission-time dependency DFS with
+        # ASSUMPTION_ADMISSION_DEPENDENCY_MISSING (not ASSUMPTION_EXPECTED_ROOT_MISMATCH,
+        # not a USE-time code).
+        event = _find_event(
+            mutated,
+            operation="PROPOSE",
+            entity_id=_required_string(parameters, "assumption_id"),
+        )
+        payload = _object(event, "payload")
+        existing = cast(list[str], payload["assumption_dependency_ids"])
+        missing_id = _required_string(parameters, "missing_dependency_id")
+        new_deps = sorted(set([*existing, missing_id]))
+        payload["assumption_dependency_ids"] = new_deps
         _rebuild_events(mutated)
     elif operator == "REPLACE_EVIDENCE_DEPENDENCY":
         event = _find_event(mutated, operation="PROPOSE")
@@ -440,23 +482,32 @@ def _mutate_catalog(
         ]
         _rebuild_events(mutated)
     elif operator == "SUBSTITUTE_EVIDENCE_REQUEST":
-        request = _object(mutated, "use_request")
-        evidence_requests = _object(request, "evidence_requests")
+        binding = _object(mutated, "use_binding")
+        evidence_requests = _object(binding, "evidence_requests")
         evidence_id = _required_string(parameters, "evidence_id")
         ev_req = _object(evidence_requests, evidence_id)
-        ev_req["request_digest"] = _ZERO_DIGEST
+        _object(ev_req, "request")["request_digest"] = _ZERO_DIGEST
     elif operator == "CORRUPT_CHILD_RECEIPT":
-        request = _object(mutated, "use_request")
-        evidence_requests = _object(request, "evidence_requests")
+        # Corrupt a complete D2 receipt: tamper an evidence-admissibility-receipt
+        # field, leaving the receipt_digest stale so the rebuilt receipt no
+        # longer equals the supplied one.
+        binding = _object(mutated, "use_binding")
+        evidence_requests = _object(binding, "evidence_requests")
         evidence_id = _required_string(parameters, "evidence_id")
-        ev_receipt = _object(_object(evidence_requests, evidence_id), "admissibility_receipt")
+        ev_receipt = _object(_object(evidence_requests, evidence_id), "receipt")
         ev_receipt["allowed"] = False
         ev_receipt["code"] = "EVIDENCE_INADMISSIBLE"
     elif operator == "ALTER_WORK_COUNTER":
-        # Tamper the expected_admissibility work-derived decision digest by
-        # flipping allowed: code; the decision_digest no longer matches.
-        admissibility = _object(mutated, "expected_admissibility")
-        admissibility["allowed"] = not cast(bool, admissibility["allowed"])
+        # Alter a work-evidence field in the serialized D2 receipt (flip the
+        # evidence_event_digest). The rebuilt receipt no longer equals the
+        # supplied one, so the use-time evidence phase rejects it with
+        # ASSUMPTION_USE_EVIDENCE_RECEIPT_INVALID before the decision digest is
+        # ever computed.
+        binding = _object(mutated, "use_binding")
+        evidence_requests = _object(binding, "evidence_requests")
+        evidence_id = _required_string(parameters, "evidence_id")
+        ev_receipt = _object(_object(evidence_requests, evidence_id), "receipt")
+        ev_receipt["evidence_event_digest"] = _ZERO_DIGEST
     elif operator == "CORRUPT_EXPECTED_ROOT":
         mutated["expected_registry_root"] = _ZERO_DIGEST
     else:
@@ -573,7 +624,7 @@ def _as_rejected_vector(
         "events": deepcopy(_array_of_objects(vector, "events")),
         "expected_error": expected_detector,
         "stage": stage,
-        "use_request": deepcopy(vector.get("use_request")),
+        "use_binding": deepcopy(vector.get("use_binding")),
         "vector_id": f"MUT-{mutation_id}",
     }
 

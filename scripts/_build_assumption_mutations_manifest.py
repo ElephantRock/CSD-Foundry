@@ -76,31 +76,43 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
         "REJECTED",
         {"stage": "AUTHORITY", "authority_id": "authority:intruder"},
     ),
-    # SOD (1)
+    # SOD (1): genuine PROPOSER->ADMIT separation-of-duty conflict. The ADMIT
+    # grant is re-granted to the proposer so the grant is SELECTED; it is the
+    # duty rule that blocks, not the grant.
     (
         "AM-SOD-001",
         "SOD",
-        "AV-A01",
-        "SUBSTITUTE_PROPOSER_AUTHORITY",
+        "AV-A02",
+        "FORGE_SOD_CONFLICT",
         "REJECTED",
-        {"stage": "AUTHORITY", "authority_id": "authority:admitter"},
+        {"stage": "AUTHORITY"},
     ),
-    # ADMISSION (2)
+    # ADMISSION (2): genuine admission-time dependency failures. The candidate
+    # gains a dependency on a nonexistent assumption; the ADMIT fails the I1-C
+    # admission-time dependency DFS with ASSUMPTION_ADMISSION_DEPENDENCY_MISSING.
     (
         "AM-ADMISSION-001",
         "ADMISSION",
-        "AV-A10",
-        "REMOVE_ASSUMPTION_DEPENDENCY",
-        "ACCEPTED_ERROR",
-        {"assumption_id": "assumption:a10a"},
+        "AV-A02",
+        "INTRODUCE_MISSING_ADMISSION_DEPENDENCY",
+        "REJECTED",
+        {
+            "stage": "ADMISSION",
+            "assumption_id": "assumption:a02",
+            "missing_dependency_id": "assumption:nonexistent",
+        },
     ),
     (
         "AM-ADMISSION-002",
         "ADMISSION",
-        "AV-A11",
-        "REPLACE_EVIDENCE_DEPENDENCY",
-        "ACCEPTED_ERROR",
-        {"evidence_dependency_ids": ["evidence:wrong"]},
+        "AV-A10",
+        "INTRODUCE_MISSING_ADMISSION_DEPENDENCY",
+        "REJECTED",
+        {
+            "stage": "ADMISSION",
+            "assumption_id": "assumption:a10a",
+            "missing_dependency_id": "assumption:nonexistent",
+        },
     ),
     # CHALLENGE (2)
     ("AM-CHALLENGE-001", "CHALLENGE", "AV-A03", "REMOVE_ACTIVE_CHALLENGE", "ACCEPTED_ERROR", {}),
@@ -158,7 +170,8 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
         "ACCEPTED_ERROR",
         {"evidence_id": "evidence:a11e"},
     ),
-    # RECEIPT (1)
+    # RECEIPT (1): corrupt a complete D2 receipt (allowed/code field), leaving
+    # receipt_digest stale.
     (
         "AM-RECEIPT-001",
         "RECEIPT",
@@ -167,8 +180,16 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
         "ACCEPTED_ERROR",
         {"evidence_id": "evidence:a11e"},
     ),
-    # WORK (1)
-    ("AM-WORK-001", "WORK", "AV-A02", "ALTER_WORK_COUNTER", "ACCEPTED_ERROR", {}),
+    # WORK (1): alter a work-evidence field in the serialized D2 receipt
+    # (evidence_event_digest), leaving receipt_digest stale.
+    (
+        "AM-WORK-001",
+        "WORK",
+        "AV-A11",
+        "ALTER_WORK_COUNTER",
+        "ACCEPTED_ERROR",
+        {"evidence_id": "evidence:a11e"},
+    ),
     # ROOT (1)
     ("AM-ROOT-001", "ROOT", "AV-A02", "CORRUPT_EXPECTED_ROOT", "ACCEPTED_ERROR", {}),
 ]
