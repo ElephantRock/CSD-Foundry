@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from csd_foundry.governance.v0_5.assumption import build_assumption_event
 from csd_foundry.governance.v0_5.canonicalization import catalog_digest
+from csd_foundry.governance.v0_5.contracts import RegistryEvent
 
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "data/canary/v0.5/assumption-v1"
@@ -90,16 +92,25 @@ _AUTHORITY = {
 }
 
 
+_RESOLUTION_AUTHORITY_ACTIONS = (
+    "RESOLVE_TO_ADMITTED",
+    "RESOLVE_TO_CONFIRMED",
+    "RESOLVE_TO_REJECTED",
+    "RESOLVE_TO_SUPERSEDED",
+)
+
+
 def _grant_digest(grant: dict[str, object]) -> str:
     unsigned = {
-        "schema_version": "authority-grant/1",
-        "grant_id": grant["grant_id"],
+        "schema_version": "assumption-authority-grant/1",
         "action": grant["action"],
-        "authority_id": grant["authority_id"],
-        "scope_ids": grant["scope_ids"],
         "assumption_materialities": grant["assumption_materialities"],
+        "authority_id": grant["authority_id"],
+        "challenge_materialities": grant["challenge_materialities"],
         "effective_from_sequence": grant["effective_from_sequence"],
         "effective_until_sequence": grant["effective_until_sequence"],
+        "grant_id": grant["grant_id"],
+        "scope_ids": grant["scope_ids"],
     }
     return _domain_digest("ASSUMPTION_AUTHORITY_GRANT", unsigned)
 
@@ -113,6 +124,7 @@ def _build_grant(
     materialities: tuple[str, ...],
     effective_from: int,
     effective_until: int | None,
+    challenge_materialities: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     grant = {
         "grant_id": grant_id,
@@ -120,6 +132,7 @@ def _build_grant(
         "authority_id": authority_id,
         "scope_ids": sorted(scope_ids),
         "assumption_materialities": sorted(materialities),
+        "challenge_materialities": sorted(challenge_materialities),
         "effective_from_sequence": effective_from,
         "effective_until_sequence": effective_until,
     }
@@ -129,7 +142,7 @@ def _build_grant(
 
 def _rule_digest(rule: dict[str, object]) -> str:
     unsigned = {
-        "schema_version": "separation-duty-rule/1",
+        "schema_version": "assumption-separation-duty-rule/1",
         "action": rule["action"],
         "assumption_materialities": rule["assumption_materialities"],
         "conflicting_roles": rule["conflicting_roles"],
@@ -160,7 +173,7 @@ def _build_rule(
 
 def _exception_digest(exc: dict[str, object]) -> str:
     unsigned = {
-        "schema_version": "duty-exception/1",
+        "schema_version": "assumption-duty-exception/1",
         "action": exc["action"],
         "assumption_ids": exc["assumption_ids"],
         "assumption_materialities": exc["assumption_materialities"],
@@ -230,12 +243,18 @@ def _ledger_entry_digest(entry_unsigned: dict[str, object]) -> str:
 def _policy_context() -> dict[str, Any]:
     """Build the canonical V3 policy context for the assumption corpus.
 
-    One ledger entry active from sequence 0, with grants covering all eight
-    lifecycle operations for the eight canonical authorities, plus a single
-    duty rule that prohibits PROPOSER -> ADMIT (same authority may not propose
-    then admit the same assumption). The duty rule has NO exception, so the
-    genuine SoD mutation (AM-SOD-001: proposer==admitter) is detected by the
+    One ledger entry active from sequence 0, with grants covering every frozen
+    authority action (the seven lifecycle actions plus the four RESOLVE_TO_*
+    resolution actions, the latter carrying challenge_materialities), plus a
+    single duty rule that prohibits PROPOSER -> ADMIT (same authority may not
+    propose then admit the same assumption). The duty rule has NO exception, so
+    the genuine SoD mutation (AM-SOD-001: proposer==admitter) is detected by the
     SoD rule rather than by grant denial.
+
+    The ledger entry carries the recomputed grant_set_digest,
+    separation_duty_rule_set_digest, and exception_set_digest, plus the policy
+    digest recomputed over the canonical policy content. The validator
+    independently recomputes each and requires equality.
     """
     grants = [
         _build_grant(
@@ -248,7 +267,23 @@ def _policy_context() -> dict[str, Any]:
             effective_until=None,
         )
         for op, authority in _AUTHORITY.items()
+        if op != "RESOLVE_CHALLENGES"
     ]
+    # Resolution grants: RESOLVE_CHALLENGES expands to four RESOLVE_TO_* actions
+    # carrying challenge_materialities. The resolver authority holds all four.
+    for action in _RESOLUTION_AUTHORITY_ACTIONS:
+        grants.append(
+            _build_grant(
+                grant_id=f"grant:{action.lower()}",
+                action=action,
+                authority_id="authority:resolver",
+                scope_ids=(SCOPE,),
+                materialities=("ADVISORY", "CRITICAL", "MATERIAL"),
+                effective_from=0,
+                effective_until=None,
+                challenge_materialities=("ADVISORY", "CRITICAL", "MATERIAL"),
+            )
+        )
     grants.sort(key=lambda g: g["grant_id"])
     duty_rules = [
         _build_rule(
@@ -260,14 +295,16 @@ def _policy_context() -> dict[str, Any]:
         )
     ]
     policy_id = "policy:assumption-v1"
-    policy_unsigned = {
-        "schema_version": "assumption-authority-policy/1",
-        "policy_id": policy_id,
-        "authority_root_digest": AUTHORITY_ROOT,
-        "committed_at_sequence": 0,
-        "grants": grants,
-    }
-    policy_digest_value = _policy_digest(policy_unsigned)
+    policy_unsigned, grant_set_digest_value, rule_set_digest_value, exception_set_digest_value = (
+        _policy_unsigned_value(
+            policy_id=policy_id,
+            authority_root_digest=AUTHORITY_ROOT,
+            grants=grants,
+            rules=duty_rules,
+            exceptions=[],
+        )
+    )
+    policy_digest_value = _domain_digest("ASSUMPTION_AUTHORITY_POLICY", policy_unsigned)
     effective_from = 0
     signing_payload_digest_value = _signing_payload_digest(effective_from)
     commit_receipt_digest_value = _commit_receipt_digest(policy_id)
@@ -284,6 +321,9 @@ def _policy_context() -> dict[str, Any]:
     entry_unsigned["ledger_entry_digest"] = _ledger_entry_digest(entry_unsigned)
     entry = {
         **entry_unsigned,
+        "grant_set_digest": grant_set_digest_value,
+        "separation_duty_rule_set_digest": rule_set_digest_value,
+        "exception_set_digest": exception_set_digest_value,
         "grants": grants,
         "duty_rules": duty_rules,
         "duty_exceptions": [],
@@ -294,30 +334,122 @@ def _policy_context() -> dict[str, Any]:
         "ledger_root_digest": LEDGER_ROOT,
         "policy_digest": policy_digest_value,
         "ledger_entries": [entry],
-        "evidence_registry": _evidence_registry(),
+        "evidence_registry": _evidence_registry(_EVIDENCE_CLOCKS),
     }
 
 
-def _evidence_registry() -> dict[str, Any]:
-    """Pinned admission receipts for every evidence identity referenced by the
-    corpus. Each receipt is a complete A0-style eligibility decision.
+# Each evidence_id is bound to the exact ADMIT clock of the assumption that
+# consumes it (the A0 decision's evaluated_at_sequence binds to the consuming
+# ADMIT clock). See av_a11/av_a13/av_a14/av_a15 for the consuming ADMITs.
+_EVIDENCE_CLOCKS = {
+    "evidence:a11e": 2,  # AV-A11 admit at clock 2
+    "evidence:a13e": 2,  # AV-A13 admit of a13b at clock 2
+    "evidence:a14ae": 4,  # AV-A14 admit of a14a at clock 4
+    "evidence:a14be": 6,  # AV-A14 admit of a14b at clock 6
+    "evidence:a15ae": 4,  # AV-A15 admit of a15a at clock 4
+    "evidence:a15be": 2,  # AV-A15 admit of a15b at clock 2
+}
+
+
+def _set_digest(domain: str, members: list[dict[str, object]]) -> str:
+    return _domain_digest(domain, {"members": members})
+
+
+def _policy_unsigned_value(
+    *,
+    policy_id: str,
+    authority_root_digest: str,
+    grants: list[dict[str, Any]],
+    rules: list[dict[str, Any]],
+    exceptions: list[dict[str, Any]],
+) -> tuple[dict[str, object], str, str, str]:
+    """Independently recompute the canonical authority-policy unsigned value and
+    its three set digests. Mirrors _policy_unsigned_value in the validator."""
+    grant_set = _set_digest("ASSUMPTION_AUTHORITY_GRANT_SET", [dict(g) for g in grants])
+    rule_set = _set_digest("ASSUMPTION_SEPARATION_DUTY_RULE_SET", [dict(r) for r in rules])
+    exception_set = _set_digest("ASSUMPTION_DUTY_EXCEPTION_SET", [dict(e) for e in exceptions])
+    unsigned = {
+        "schema_version": "assumption-authority-policy/1",
+        "authority_root_digest": authority_root_digest,
+        "duty_exceptions": [dict(e) for e in exceptions],
+        "exception_set_digest": exception_set,
+        "grant_set_digest": grant_set,
+        "grants": [dict(g) for g in grants],
+        "policy_id": policy_id,
+        "separation_duty_rule_set_digest": rule_set,
+        "separation_duty_rules": [dict(r) for r in rules],
+    }
+    return unsigned, grant_set, rule_set, exception_set
+
+
+def _evidence_decision_unsigned(
+    *,
+    evidence_id: str,
+    eligible: bool,
+    code: str,
+    evaluated_at_sequence: int,
+    current_event_digest: str | None,
+    current_status: str | None,
+) -> dict[str, object]:
+    return {
+        "schema_version": "evidence-admission-eligibility/1",
+        "code": code,
+        "current_event_digest": current_event_digest,
+        "current_status": current_status,
+        "eligible": eligible,
+        "evaluated_at_sequence": evaluated_at_sequence,
+        "evidence_id": evidence_id,
+        "evidence_registry_root": EVIDENCE_REGISTRY_ROOT,
+    }
+
+
+def _evidence_decision(
+    *,
+    evidence_id: str,
+    evaluated_at_sequence: int,
+) -> dict[str, Any]:
+    """Build a complete A0 EvidenceAdmissionEligibilityDecision record.
+
+    Mirrors EvidenceAdmissionEligibilityDecision.build exactly: eligible<->code
+    consistency is enforced, the current_event_digest is derived from the
+    evidence identity, and the decision_digest is recomputed over the canonical
+    unsigned value under the EVIDENCE_ADMISSION_ELIGIBILITY domain.
     """
-    evidence_ids = [
-        "evidence:a11e",
-        "evidence:a13e",
-        "evidence:a14ae",
-        "evidence:a14be",
-    ]
+    eligible = True
+    code = "EVIDENCE_ADMISSION_ELIGIBLE"
+    current_event_digest = (
+        "sha256:" + hashlib.sha256(b"evidence-event\0" + evidence_id.encode("utf-8")).hexdigest()
+    )
+    current_status = "ADMITTED"
+    unsigned = _evidence_decision_unsigned(
+        evidence_id=evidence_id,
+        eligible=eligible,
+        code=code,
+        evaluated_at_sequence=evaluated_at_sequence,
+        current_event_digest=current_event_digest,
+        current_status=current_status,
+    )
+    decision_digest = _domain_digest("EVIDENCE_ADMISSION_ELIGIBILITY", unsigned)
+    return {
+        **unsigned,
+        "decision_digest": decision_digest,
+    }
+
+
+def _evidence_registry(evidence_clocks: dict[str, int]) -> dict[str, Any]:
+    """Pinned A0 admission decisions for every evidence identity referenced by
+    the corpus. Each entry is a complete EvidenceAdmissionEligibilityDecision
+    record whose decision_digest the validator independently recomputes and
+    requires. ``evidence_clocks`` maps each evidence_id to the exact ADMIT clock
+    of the assumption that consumes it (the A0 decision's
+    evaluated_at_sequence binds to the consuming ADMIT clock).
+    """
     receipts: dict[str, Any] = {}
-    for evidence_id in evidence_ids:
-        receipts[evidence_id] = {
-            "evidence_id": evidence_id,
-            "eligible": True,
-            "code": "EVIDENCE_ADMISSIBLE",
-            "evaluated_at_sequence": 0,
-            "evidence_registry_root": EVIDENCE_REGISTRY_ROOT,
-            "admission_receipt_digest": _receipt(f"{evidence_id}:admission"),
-        }
+    for evidence_id, evaluated_at_sequence in evidence_clocks.items():
+        receipts[evidence_id] = _evidence_decision(
+            evidence_id=evidence_id,
+            evaluated_at_sequence=evaluated_at_sequence,
+        )
     return {
         "evidence_registry_root": EVIDENCE_REGISTRY_ROOT,
         "receipts": receipts,
@@ -380,17 +512,239 @@ def _ev(
     return event.to_json_value()
 
 
+def _projection_state(
+    envelopes: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Replay built envelopes to derive each assumption's current projection
+    state: ``{assumption_id: {current_entity_sequence, current_event_digest,
+    assumption_dependency_ids}}``. Mirrors what the validator's
+    _validate_history projects. ``assumption_dependency_ids`` comes from the
+    entity's PROPOSE event (immutable).
+    """
+    state: dict[str, dict[str, Any]] = {}
+    for ev in envelopes:
+        aid = ev["entity_id"]
+        seq = ev["entity_sequence"]
+        digest = ev["registry_event_digest"]
+        op = ev["payload"]["operation"]
+        entry = state.setdefault(
+            aid,
+            {
+                "current_entity_sequence": seq,
+                "current_event_digest": digest,
+                "assumption_dependency_ids": [],
+            },
+        )
+        entry["current_entity_sequence"] = seq
+        entry["current_event_digest"] = digest
+        if op == "PROPOSE":
+            entry["assumption_dependency_ids"] = list(ev["payload"]["assumption_dependency_ids"])
+    return state
+
+
+def _admission_traversal(
+    candidate_assumption_id: str,
+    assumption_dependency_ids: list[str],
+    projections: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Independently replay the admission dependency DFS over the candidate's
+    assumption_dependency_ids, collecting first-discovery traversal records.
+    Mirrors the validator's admission-gate DFS exactly (same field names, same
+    first-discovery order).
+    """
+    traversed: list[dict[str, Any]] = []
+    visited: set[str] = set()
+    stack_index: dict[str, int] = {candidate_assumption_id: 0}
+
+    def _dfs(node: str) -> None:
+        if node in stack_index:
+            return
+        if node in visited:
+            return
+        dep = projections.get(node)
+        if dep is None:
+            return
+        traversed.append(
+            {
+                "assumption_id": node,
+                "validation_code": "DEPENDENCY_PRESENT",
+                "current_entity_sequence": dep["current_entity_sequence"],
+                "current_event_digest": dep["current_event_digest"],
+                "direct_dependency_ids": list(dep["assumption_dependency_ids"]),
+            }
+        )
+        stack_index[node] = len(stack_index)
+        for child in dep["assumption_dependency_ids"]:
+            _dfs(child)
+        visited.add(node)
+
+    for dep_id in assumption_dependency_ids:
+        _dfs(dep_id)
+    return traversed
+
+
+def _admission_dependency_receipt_digest(
+    *,
+    assumption_id: str,
+    candidate_predecessor_event_digest: str,
+    evidence_registry_root: str,
+    assumption_dependency_ids: list[str],
+    evidence_dependency_ids: list[str],
+    traversed_dependencies: list[dict[str, Any]],
+    evidence_eligibility_decisions: list[dict[str, object]],
+    event_sequence: int,
+) -> str:
+    """Independently recompute the admission dependency receipt digest.
+
+    Mirrors _admission_dependency_receipt_digest in the validator exactly. The
+    candidate_entity_sequence is mechanically 2.
+    """
+    unsigned = {
+        "schema_version": "assumption-dependency-validation/1",
+        "assumption_dependency_ids": list(assumption_dependency_ids),
+        "assumption_id": assumption_id,
+        "assumption_registry_root": "",  # not bound by the validator's gate
+        "candidate_entity_sequence": 2,
+        "candidate_predecessor_event_digest": candidate_predecessor_event_digest,
+        "cycle_witness": [],
+        "evidence_dependency_ids": list(evidence_dependency_ids),
+        "evidence_eligibility_decisions": evidence_eligibility_decisions,
+        "evidence_registry_root": evidence_registry_root,
+        "event_sequence": event_sequence,
+        "traversed_dependencies": traversed_dependencies,
+        "validation_code": "DEPENDENCY_VALIDATION_PASSED",
+        "validation_result": "PASS",
+    }
+    return _domain_digest("ASSUMPTION_DEPENDENCY_VALIDATION", unsigned)
+
+
+def _evidence_decision_unsigned_for(
+    evidence_id: str,
+    admit_clock: int,
+) -> dict[str, object]:
+    """Canonical unsigned A0 decision value for ``evidence_id`` bound to
+    ``admit_clock``. Mirrors the validator's _evidence_admission_unsigned_value.
+    """
+    eligible = True
+    code = "EVIDENCE_ADMISSION_ELIGIBLE"
+    current_event_digest = (
+        "sha256:" + hashlib.sha256(b"evidence-event\0" + evidence_id.encode("utf-8")).hexdigest()
+    )
+    current_status = "ADMITTED"
+    return _evidence_decision_unsigned(
+        evidence_id=evidence_id,
+        eligible=eligible,
+        code=code,
+        evaluated_at_sequence=admit_clock,
+        current_event_digest=current_event_digest,
+        current_status=current_status,
+    )
+
+
 def _admit_payload(aid: str) -> dict[str, object]:
+    """Placeholder ADMIT payload. The admission_receipt_digest is finalized by
+    _finalize_admission_receipts after every event is built (the receipt digest
+    depends on the candidate PROPOSE state, dependency projections, and
+    evidence decisions, which are only fully known once all events exist)."""
     return {
         "operation": "ADMIT",
         "admitting_authority_id": "authority:admitter",
-        "admission_receipt_digest": _receipt(f"{aid}:admit-receipt"),
+        "admission_receipt_digest": _receipt(f"{aid}:admit-receipt-placeholder"),
     }
 
 
-# =====================================================================
-# Independent lifecycle replay to compute expected status per entity.
-# =====================================================================
+def _finalize_admission_receipts(
+    envelopes: list[dict[str, Any]],
+    evidence_registry_root: str,
+) -> list[dict[str, Any]]:
+    """Recompute every ADMIT event's admission_receipt_digest from the
+    candidate PROPOSE state + dependency projections + evidence decisions,
+    then rebuild the per-entity event chain (each ADMIT's registry_event_digest
+    changes, so any subsequent event for the same entity whose predecessor
+    pointed at that ADMIT must be re-pointed at the rebuilt digest).
+
+    Each event's ORIGINAL ``previous_entity_event_digest`` is preserved as-is
+    unless it pointed at an earlier event of the same entity whose digest was
+    itself rebuilt (in which case it is re-pointed to keep the chain
+    internally consistent). Intentionally-broken predecessors (rejected
+    vectors) are therefore preserved. Mirrors the validator's admission gate
+    exactly. Returns a NEW list of rebuilt envelopes (the input is not mutated).
+    """
+    # Map: (entity_id, entity_sequence) -> (old_digest, new_digest), so a
+    # later event whose predecessor legitimately pointed at the old digest can
+    # be re-pointed at the rebuilt digest. Intentionally-broken predecessors
+    # (which point at nothing real) are preserved verbatim.
+    digest_map: dict[tuple[str, int], tuple[str | None, str]] = {}
+    rebuilt: list[dict[str, Any]] = []
+    for raw_event in envelopes:
+        event = deepcopy(raw_event)
+        aid = event["entity_id"]
+        seq = event["entity_sequence"]
+        payload = event["payload"]
+        old_digest = event.get("registry_event_digest")
+        original_previous = event.get("previous_entity_event_digest")
+        # Re-point the predecessor at the rebuilt digest iff the original
+        # predecessor pointed at the real (old) digest of the immediately
+        # preceding same-entity event. This preserves intentionally-broken
+        # predecessors (which match no real prior event) while keeping
+        # legitimate chains consistent when an earlier ADMIT's digest changed.
+        prior = digest_map.get((aid, seq - 1))
+        if (
+            prior is not None
+            and prior[0] is not None
+            and original_previous == prior[0]
+            and prior[1] != prior[0]
+        ):
+            event["previous_entity_event_digest"] = prior[1]
+        if payload.get("operation") == "ADMIT":
+            # Recompute the admission receipt digest. The candidate's PROPOSE
+            # state is the entity's entity_sequence-1 event; dependency
+            # projections come from the rebuilt envelopes built so far. Skip
+            # recomputation when the predecessor is absent or is not a PROPOSE
+            # (malformed-by-design rejected vectors such as AV-R02 / AV-R04
+            # revival leave the placeholder receipt).
+            propose_event = _find_entity_seq(rebuilt, aid, seq - 1)
+            if propose_event is not None and propose_event["payload"].get("operation") == "PROPOSE":
+                projections = _projection_state(rebuilt)
+                propose_payload = propose_event["payload"]
+                assumption_dependency_ids = list(propose_payload["assumption_dependency_ids"])
+                evidence_dependency_ids = list(propose_payload["evidence_dependency_ids"])
+                traversed = _admission_traversal(aid, assumption_dependency_ids, projections)
+                evidence_decisions_unsigned = [
+                    _evidence_decision_unsigned_for(eid, event["clock_sequence"])
+                    for eid in sorted(evidence_dependency_ids)
+                ]
+                receipt_digest = _admission_dependency_receipt_digest(
+                    assumption_id=aid,
+                    candidate_predecessor_event_digest=propose_event["registry_event_digest"],
+                    evidence_registry_root=evidence_registry_root,
+                    assumption_dependency_ids=assumption_dependency_ids,
+                    evidence_dependency_ids=evidence_dependency_ids,
+                    traversed_dependencies=traversed,
+                    evidence_eligibility_decisions=evidence_decisions_unsigned,
+                    event_sequence=event["clock_sequence"],
+                )
+                payload["admission_receipt_digest"] = receipt_digest
+        # Rebuild this event's own registry_event_digest from its payload and
+        # (possibly re-pointed) predecessor.
+        unsigned = deepcopy(event)
+        unsigned.pop("registry_event_digest", None)
+        new_event = cast("RegistryEvent", RegistryEvent.build(unsigned)).to_json_value()
+        digest_map[(aid, seq)] = (old_digest, new_event["registry_event_digest"])
+        rebuilt.append(new_event)
+    return rebuilt
+
+
+def _find_entity_seq(
+    envelopes: list[dict[str, Any]],
+    entity_id: str,
+    entity_sequence: int,
+) -> dict[str, Any] | None:
+    for ev in envelopes:
+        if ev["entity_id"] == entity_id and ev["entity_sequence"] == entity_sequence:
+            return ev
+    return None
+
 
 _TERMINAL = {"REJECTED", "EXPIRED", "SUPERSEDED"}
 _ACTIVE = {"ADMITTED", "CONFIRMED"}
@@ -761,6 +1115,12 @@ def _denied_admissibility(
     assumption_id: str,
     policy_context: dict[str, Any],
     code: str,
+    *,
+    extra_histories: int = 0,
+    extra_events: int = 0,
+    extra_nodes: int = 0,
+    extra_edges: int = 0,
+    extra_evidence: int = 0,
 ) -> dict[str, Any]:
     by_entity: dict[str, list[dict[str, Any]]] = {}
     for ev in envelopes:
@@ -784,11 +1144,11 @@ def _denied_admissibility(
                 active.clear()
         active_challenges = len(active)
     work = {
-        "assumption_histories_reconstructed": 1,
-        "assumption_events_replayed": len(root_events),
-        "unique_assumption_nodes_evaluated": 1,
-        "assumption_dependency_edges_examined": 0,
-        "evidence_dependency_references_evaluated": 0,
+        "assumption_histories_reconstructed": 1 + extra_histories,
+        "assumption_events_replayed": len(root_events) + extra_events,
+        "unique_assumption_nodes_evaluated": 1 + extra_nodes,
+        "assumption_dependency_edges_examined": extra_edges,
+        "evidence_dependency_references_evaluated": extra_evidence,
         "active_challenges_evaluated": active_challenges,
         "separation_duty_rules_evaluated": 0,
     }
@@ -798,6 +1158,74 @@ def _denied_admissibility(
         allowed=False,
         code=code,
         assumption_event_digest=event_digest,
+        work=work,
+        policy_context=policy_context,
+    )
+    return {"allowed": False, "code": code, "decision_digest": digest}
+
+
+def _denied_two_assumption_admissibility(
+    binding: dict[str, Any],
+    envelopes: list[dict[str, Any]],
+    *,
+    first_assumption_id: str,
+    second_assumption_id: str,
+    policy_context: dict[str, Any],
+    code: str,
+) -> dict[str, Any]:
+    """Work counters for a two-top-level-assumption binding where the FIRST
+    denies at its self-gate and the SECOND is still evaluated (Corr #2: no
+    global top-level fail-fast). Both assumptions' histories are reconstructed
+    and both are counted as unique nodes; the binding is not admissible and the
+    reported denial is the first assumption's. The assumption_event_digest
+    carried in the receipt is the first assumption's head digest (the first
+    denial).
+    """
+    by_entity: dict[str, list[dict[str, Any]]] = {}
+    for ev in envelopes:
+        by_entity.setdefault(ev["entity_id"], []).append(ev)
+    first_events = by_entity.get(first_assumption_id, [])
+    second_events = by_entity.get(second_assumption_id, [])
+    histories = 0
+    events = 0
+    nodes = 0
+    challenges = 0
+    for assumption_events in (first_events, second_events):
+        if not assumption_events:
+            continue
+        histories += 1
+        events += len(assumption_events)
+        nodes += 1
+        active: set[str] = set()
+        for ev in assumption_events:
+            op = ev["payload"]["operation"]
+            if op == "CHALLENGE":
+                active.add(ev["payload"]["challenge_id"])
+            elif op == "RESOLVE_CHALLENGES":
+                for cid in ev["payload"]["resolved_challenge_ids"]:
+                    active.discard(cid)
+                outcome = ev["payload"]["resolution_outcome"]
+                if outcome in {"REJECT", "SUPERSEDE"}:
+                    active.clear()
+            elif op in {"REJECT", "EXPIRE", "SUPERSEDE"}:
+                active.clear()
+        challenges += len(active)
+    work = {
+        "assumption_histories_reconstructed": histories,
+        "assumption_events_replayed": events,
+        "unique_assumption_nodes_evaluated": nodes,
+        "assumption_dependency_edges_examined": 0,
+        "evidence_dependency_references_evaluated": 0,
+        "active_challenges_evaluated": challenges,
+        "separation_duty_rules_evaluated": 0,
+    }
+    work["work_digest"] = _work_digest(work)
+    first_head = first_events[-1]["registry_event_digest"] if first_events else None
+    digest = _use_decision(
+        binding,
+        allowed=False,
+        code=code,
+        assumption_event_digest=first_head,
         work=work,
         policy_context=policy_context,
     )
@@ -844,6 +1272,54 @@ def _evidence_request_for(
     return {"request": request, "receipt": receipt}
 
 
+def _evidence_request_inadmissible(
+    *,
+    evidence_id: str,
+    owner_proposition: str,
+    owner_scopes: list[str],
+    owner_reuse: str,
+    clock: int,
+    owner_limitations: list[str],
+    policy_context: dict[str, Any],
+    code: str,
+) -> dict[str, Any]:
+    """Build a complete D2 EvidenceUseRequest + INADMISSIBLE receipt pair.
+
+    The request digest is recomputed from the owner's projected state (so the
+    use-time evidence phase binds the request to the owner), and the receipt is
+    rebuilt from its canonical fields with allowed=False and the given denial
+    code. The validator's use-time evidence phase fail-closes on this receipt
+    and raises the receipt's code.
+    """
+    request_unsigned = _evidence_request_unsigned(
+        decision_id=_DECISION_ID,
+        evidence_id=evidence_id,
+        owner_proposition=owner_proposition,
+        owner_scopes=owner_scopes,
+        owner_reuse=owner_reuse,
+        clock=clock,
+        owner_limitations=owner_limitations,
+    )
+    request_digest = _domain_digest("EVIDENCE_USE_REQUEST", request_unsigned)
+    request = {**request_unsigned, "request_digest": request_digest}
+    evidence_event_digest = (
+        "sha256:" + hashlib.sha256(b"evidence-event\0" + evidence_id.encode("utf-8")).hexdigest()
+    )
+    receipt = _evidence_receipt(
+        allowed=False,
+        code=code,
+        request_digest=request_digest,
+        evidence_id=evidence_id,
+        evidence_event_digest=evidence_event_digest,
+        authority_policy_digest=policy_context["policy_digest"],
+        challenge_policy_digest="sha256:"
+        + hashlib.sha256(b"evidence-challenge-policy-v1").hexdigest(),
+        dependency_event_digests=(),
+        advisory_codes=(),
+    )
+    return {"request": request, "receipt": receipt}
+
+
 def _rejected_vector(
     vector_id: str,
     description: str,
@@ -853,6 +1329,7 @@ def _rejected_vector(
     *,
     use_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     if use_binding is not None:
         use_binding = _finalize_binding_for_vector(envelopes, use_binding)
     result: dict[str, Any] = {
@@ -884,6 +1361,8 @@ def build_vectors(policy_context: dict[str, Any]) -> list[tuple[str, dict[str, A
         av_a12,
         av_a13,
         av_a14,
+        av_a15,
+        av_a16,
         av_r01,
         av_r02,
         av_r03,
@@ -982,6 +1461,7 @@ def av_a01(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=prop,
     )
     envelopes = [ev]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(envelopes, _simple_use_binding(assumption_id=aid))
 
     vector = _accepted_vector(
@@ -1018,6 +1498,7 @@ def av_a02(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid),
     )
     envelopes = [e1, e2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=5)
     )
@@ -1068,6 +1549,7 @@ def av_a03(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         },
     )
     envelopes = [e1, e2, e3]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=5)
     )
@@ -1134,6 +1616,7 @@ def av_a04(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         },
     )
     envelopes = [e1, e2, e3, e4]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=6)
     )
@@ -1216,6 +1699,7 @@ def av_a05(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         },
     )
     envelopes = [e1, e2, e3, e4, e5]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=6)
     )
@@ -1266,6 +1750,7 @@ def av_a06(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         },
     )
     envelopes = [e1, e2, e3]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=5)
     )
@@ -1315,6 +1800,7 @@ def av_a07(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         },
     )
     envelopes = [e1, e2, e3]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=5)
     )
@@ -1365,6 +1851,7 @@ def av_a08(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         },
     )
     envelopes = [e1, e2, e3]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=25)
     )
@@ -1417,6 +1904,7 @@ def av_a09(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         },
     )
     envelopes = [e1, e2, e3]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=5)
     )
@@ -1488,6 +1976,7 @@ def av_a10(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid_a),
     )
     envelopes = [e_c, e_c2, e_b, e_b2, e_a, e_a2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid_a, clock=7)
     )
@@ -1534,6 +2023,7 @@ def av_a11(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid),
     )
     envelopes = [e1, e2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     evidence_requests = {
         evidence_id: _evidence_request_for(
             evidence_id=evidence_id,
@@ -1617,6 +2107,7 @@ def av_a12(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid_b),
     )
     envelopes = [e_c, e_c2, e_a, e_a2, e_b, e_b2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid_a, clock=7)
     )
@@ -1679,6 +2170,7 @@ def av_a13(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid_a),
     )
     envelopes = [e_b, e_b2, e_a, e_a2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     evidence_requests = {
         evidence_id: _evidence_request_for(
             evidence_id=evidence_id,
@@ -1785,6 +2277,7 @@ def av_a14(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid_b),
     )
     envelopes = [e_c, e_c2, e_a, e_a2, e_b, e_b2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     evidence_requests = {
         evidence_a: _evidence_request_for(
             evidence_id=evidence_a,
@@ -1838,6 +2331,182 @@ def av_a14(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         ),
     )
     return "AV-A14", _finalize_vector(vector)
+
+
+def av_a15(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """AV-A15: Root and dependency BOTH have evidence dependencies, making the
+    frozen D3.2-B DFS-then-evidence ordering observable.
+
+    A depends on B; A owns evidence:a15ae and B owns evidence:a15be. The
+    complete DFS runs first (collecting [A, B] in first-discovery order), THEN
+    evidence evaluates in first-discovery order (A's evidence first). A's use-
+    time D2 receipt is INADMISSIBLE, so the evidence phase denies after
+    evaluating exactly ONE evidence reference (A's). A depth-first post-order
+    evaluator (the prior defect) would have evaluated B's evidence first -- two
+    references -- before reaching A's denial. The pinned
+    ``evidence_dependency_references_evaluated == 1`` therefore proves the
+    first-discovery ordering and would break under post-order evaluation.
+    """
+    aid_a = "assumption:a15a"
+    aid_b = "assumption:a15b"
+    evidence_a = "evidence:a15ae"
+    evidence_b = "evidence:a15be"
+    evidence_deny_code = "EVIDENCE_REUSE_EXHAUSTED"
+    # B owns evidence_b; admitted at clock 2.
+    e_b = _ev(
+        assumption_id=aid_b,
+        entity_sequence=1,
+        previous=None,
+        clock=1,
+        source_receipt=_receipt(f"{aid_b}:propose"),
+        payload=_propose_payload(clock=1, expires_at=30, evidence_deps=(evidence_b,)),
+    )
+    e_b2 = _ev(
+        assumption_id=aid_b,
+        entity_sequence=2,
+        previous=e_b["registry_event_digest"],
+        clock=2,
+        source_receipt=_receipt(f"{aid_b}:admit"),
+        payload=_admit_payload(aid_b),
+    )
+    # A depends on B, owns evidence_a; admitted at clock 4.
+    e_a = _ev(
+        assumption_id=aid_a,
+        entity_sequence=1,
+        previous=None,
+        clock=3,
+        source_receipt=_receipt(f"{aid_a}:propose"),
+        payload=_propose_payload(
+            clock=3, expires_at=30, assumption_deps=(aid_b,), evidence_deps=(evidence_a,)
+        ),
+    )
+    e_a2 = _ev(
+        assumption_id=aid_a,
+        entity_sequence=2,
+        previous=e_a["registry_event_digest"],
+        clock=4,
+        source_receipt=_receipt(f"{aid_a}:admit"),
+        payload=_admit_payload(aid_a),
+    )
+    envelopes = [e_b, e_b2, e_a, e_a2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
+    evidence_requests = {
+        # A's use-time evidence is INADMISSIBLE; under first-discovery order it
+        # is evaluated first and denies after exactly one evidence reference.
+        evidence_a: _evidence_request_inadmissible(
+            evidence_id=evidence_a,
+            owner_proposition="control.connected",
+            owner_scopes=[SCOPE],
+            owner_reuse="D2",
+            clock=5,
+            owner_limitations=[],
+            policy_context=policy_context,
+            code=evidence_deny_code,
+        ),
+        evidence_b: _evidence_request_for(
+            evidence_id=evidence_b,
+            owner_proposition="control.connected",
+            owner_scopes=[SCOPE],
+            owner_reuse="D2",
+            clock=5,
+            owner_limitations=[],
+            policy_context=policy_context,
+        ),
+    }
+    binding = _finalize_binding_for_vector(
+        envelopes,
+        _simple_use_binding(assumption_id=aid_a, clock=5, evidence_requests=evidence_requests),
+    )
+
+    # Work counters: DFS completes fully (2 histories, 4 events, 2 nodes, 1
+    # edge A->B), then evidence evaluates A first and denies after ONE evidence
+    # reference (B's evidence is never reached). evidence_refs=1 pins the
+    # first-discovery order.
+    vector = _accepted_vector(
+        "AV-A15",
+        "Root+dep both carry evidence; DFS completes, then evidence denies on root first.",
+        envelopes,
+        policy_context,
+        use_binding=binding,
+        expected_admissibility=_denied_admissibility(
+            binding,
+            envelopes,
+            aid_a,
+            policy_context,
+            code=evidence_deny_code,
+            extra_histories=1,
+            extra_events=2,
+            extra_nodes=1,
+            extra_edges=1,
+            extra_evidence=1,
+        ),
+    )
+    return "AV-A15", _finalize_vector(vector)
+
+
+def av_a16(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """AV-A16: Two top-level assumptions where the first DENYs and the second
+    ALLOWs.
+
+    The binding requires both X (PROPOSED-only, denied at use time) and Y
+    (ADMITTED, allowed). Under the frozen D3.2-B contract EVERY required
+    assumption must be evaluated (no global top-level fail-fast), so BOTH X and
+    Y are evaluated. The binding is NOT admissible (X denies); the reported
+    denial is X's. The work counters pin that Y's history was also reconstructed
+    (Y counts as one history + two events), proving the second assumption was
+    evaluated rather than short-circuited by X's denial.
+    """
+    aid_x = "assumption:a16x"
+    aid_y = "assumption:a16y"
+    # X: PROPOSED only (denied at use time as ASSUMPTION_USE_NOT_ADMITTED).
+    e_x = _ev(
+        assumption_id=aid_x,
+        entity_sequence=1,
+        previous=None,
+        clock=1,
+        source_receipt=_receipt(f"{aid_x}:propose"),
+        payload=_propose_payload(clock=1, expires_at=30),
+    )
+    # Y: PROPOSED -> ADMITTED (allowed at use time).
+    e_y = _ev(
+        assumption_id=aid_y,
+        entity_sequence=1,
+        previous=None,
+        clock=2,
+        source_receipt=_receipt(f"{aid_y}:propose"),
+        payload=_propose_payload(clock=2, expires_at=30),
+    )
+    e_y2 = _ev(
+        assumption_id=aid_y,
+        entity_sequence=2,
+        previous=e_y["registry_event_digest"],
+        clock=3,
+        source_receipt=_receipt(f"{aid_y}:admit"),
+        payload=_admit_payload(aid_y),
+    )
+    envelopes = [e_x, e_y, e_y2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
+    binding = _finalize_binding_for_vector(
+        envelopes,
+        _simple_use_binding(assumption_id=aid_x, clock=5, required_assumption_ids=(aid_x, aid_y)),
+    )
+
+    vector = _accepted_vector(
+        "AV-A16",
+        "Two top-level assumptions: first denies, second allows; both evaluated.",
+        envelopes,
+        policy_context,
+        use_binding=binding,
+        expected_admissibility=_denied_two_assumption_admissibility(
+            binding,
+            envelopes,
+            first_assumption_id=aid_x,
+            second_assumption_id=aid_y,
+            policy_context=policy_context,
+            code="ASSUMPTION_USE_NOT_ADMITTED",
+        ),
+    )
+    return "AV-A16", _finalize_vector(vector)
 
 
 # =====================================================================
@@ -2198,6 +2867,7 @@ def av_r09(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid_b),
     )
     envelopes = [e_a, e_a2, e_b, e_b2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     return "AV-R09", _rejected_vector(
         "AV-R09",
         "Cyclic dependency attempt (A -> B -> A) is detected at admission time.",
@@ -2228,6 +2898,7 @@ def av_r10(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid),
     )
     envelopes = [e1, e2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=5)
     )
@@ -2265,6 +2936,7 @@ def av_r11(policy_context: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         payload=_admit_payload(aid),
     )
     envelopes = [e1, e2]
+    envelopes = _finalize_admission_receipts(envelopes, EVIDENCE_REGISTRY_ROOT)
     binding = _finalize_binding_for_vector(
         envelopes, _simple_use_binding(assumption_id=aid, clock=5)
     )

@@ -56,6 +56,49 @@ _MATERIALITIES = ("ADVISORY", "MATERIAL", "CRITICAL")
 _RESOLUTION_OUTCOMES = {"RETURN_TO_ADMITTED", "CONFIRM", "REJECT", "SUPERSEDE"}
 _TERMINAL = {"REJECTED", "EXPIRED", "SUPERSEDED"}
 _ACTIVE = {"ADMITTED", "CONFIRMED"}
+# Frozen authority-action vocabulary, replicated from
+# _assumption_governance_contracts. Lifecycle operations map onto these
+# authority actions; RESOLVE_CHALLENGES expands to one of the four
+# RESOLVE_TO_* actions via the resolution_outcome.
+_AUTHORITY_ACTIONS = (
+    "ADMIT",
+    "CHALLENGE",
+    "CONFIRM",
+    "EXPIRE",
+    "PROPOSE",
+    "REJECT",
+    "RESOLVE_TO_ADMITTED",
+    "RESOLVE_TO_CONFIRMED",
+    "RESOLVE_TO_REJECTED",
+    "RESOLVE_TO_SUPERSEDED",
+    "SUPERSEDE",
+)
+_RESOLUTION_AUTHORITY_ACTIONS = (
+    "RESOLVE_TO_ADMITTED",
+    "RESOLVE_TO_CONFIRMED",
+    "RESOLVE_TO_REJECTED",
+    "RESOLVE_TO_SUPERSEDED",
+)
+# Frozen resolution_outcome -> authority action expansion.
+_OUTCOME_TO_ACTION = {
+    "RETURN_TO_ADMITTED": "RESOLVE_TO_ADMITTED",
+    "CONFIRM": "RESOLVE_TO_CONFIRMED",
+    "REJECT": "RESOLVE_TO_REJECTED",
+    "SUPERSEDE": "RESOLVE_TO_SUPERSEDED",
+}
+# Frozen governance-role vocabulary, replicated from
+# _assumption_governance_contracts. Used to derive prior roles in frozen order
+# for the I1-B separation-of-duty evaluator.
+_ASSUMPTION_GOVERNANCE_ROLES = (
+    "ADMITTER",
+    "CHALLENGER",
+    "CONFIRMER",
+    "EXPIRY_AUTHORITY",
+    "PROPOSER",
+    "REJECTOR",
+    "RESOLVER",
+    "SUPERSEDER",
+)
 _AUTHORITY_FIELD = {
     "PROPOSE": "proposer_authority_id",
     "ADMIT": "admitting_authority_id",
@@ -80,6 +123,12 @@ _OPERATION_TO_ROLE: dict[str, str] = {
     "SUPERSEDE": "SUPERSEDER",
 }
 _GLOBAL_SCOPE = "scope:*"
+_AUTHORITY_GRANT_SCHEMA_VERSION = "assumption-authority-grant/1"
+_SEPARATION_DUTY_RULE_SCHEMA_VERSION = "assumption-separation-duty-rule/1"
+_DUTY_EXCEPTION_SCHEMA_VERSION = "assumption-duty-exception/1"
+_AUTHORITY_POLICY_SCHEMA_VERSION = "assumption-authority-policy/1"
+_EVIDENCE_ADMISSION_ELIGIBILITY_SCHEMA_VERSION = "evidence-admission-eligibility/1"
+_ADMISSION_DEPENDENCY_RECEIPT_SCHEMA_VERSION = "assumption-dependency-validation/1"
 
 
 class AssumptionConformanceError(RuntimeError):
@@ -749,15 +798,18 @@ def _select_applicable_grant(
     scope_id: str,
     assumption_materiality: str,
     event_sequence: int,
+    challenge_materiality: str = "",
 ) -> tuple[str, dict[str, Any] | None]:
     """Select exactly one applicable grant or deny with NO_APPLICABLE_GRANT /
     AMBIGUOUS_GRANTS. Returns ``(decision_type, grant_or_none)``.
 
     A grant is applicable iff action, authority, scope (global-or-exact),
-    materiality, and the half-open effective interval all match. Exactly one
-    applicable grant yields SELECTED; zero yields NO_APPLICABLE_GRANT; two or
-    more yields AMBIGUOUS_GRANTS (fail-closed).
+    materiality, challenge materiality (resolution grants only), and the
+    half-open effective interval all match. Exactly one applicable grant
+    yields SELECTED; zero yields NO_APPLICABLE_GRANT; two or more yields
+    AMBIGUOUS_GRANTS (fail-closed).
     """
+    is_resolution = action in _RESOLUTION_AUTHORITY_ACTIONS
     matches: list[dict[str, Any]] = []
     for grant in cast(list[dict[str, Any]], resolved_entry["grants"]):
         if cast(str, grant["action"]) != action:
@@ -768,6 +820,14 @@ def _select_applicable_grant(
             continue
         if assumption_materiality not in set(cast(list[str], grant["assumption_materialities"])):
             continue
+        if is_resolution:
+            grant_challenge_materialities = tuple(
+                cast(list[str], grant.get("challenge_materialities", []))
+            )
+            if not grant_challenge_materialities:
+                continue
+            if challenge_materiality not in grant_challenge_materialities:
+                continue
         eff_from = cast(int, grant["effective_from_sequence"])
         eff_until = grant.get("effective_until_sequence")
         if event_sequence < eff_from:
@@ -802,9 +862,45 @@ def _derive_prior_roles(
             break
         if auth_id == authority_id:
             observed.add(_OPERATION_TO_ROLE[_operation])
-    # Frozen role order (the _OPERATION_TO_ROLE image happens to be the
-    # ASSUMPTION_GOVERNANCE_ROLES order).
-    return tuple(role for role in _OPERATION_TO_ROLE.values() if role in observed)
+    # Frozen role order: ASSUMPTION_GOVERNANCE_ROLES is the authoritative
+    # tuple; correctness depends on tuple order, not on the _OPERATION_TO_ROLE
+    # image happening to share it.
+    return tuple(role for role in _ASSUMPTION_GOVERNANCE_ROLES if role in observed)
+
+
+def _authority_action_for(operation: str, payload: dict[str, Any]) -> str:
+    """Map a lifecycle operation (and its payload) onto the frozen authority
+    action vocabulary. For seven operations the action equals the operation;
+    for ``RESOLVE_CHALLENGES`` the action expands to one of the four
+    ``RESOLVE_TO_*`` actions via the resolution_outcome."""
+    if operation != "RESOLVE_CHALLENGES":
+        return operation
+    outcome = _required_token(payload, "resolution_outcome")
+    if outcome not in _OUTCOME_TO_ACTION:
+        raise AssumptionConformanceError("ASSUMPTION_RESOLUTION_OUTCOME_INVALID")
+    return _OUTCOME_TO_ACTION[outcome]
+
+
+def _challenge_materiality_for(
+    operation: str,
+    payload: dict[str, Any],
+    previous: IndependentAssumptionProjection | None,
+) -> str:
+    """Derive the challenge materiality of the resolved challenge(s) for a
+    RESOLVE_CHALLENGES candidate. Resolution grants bind to the challenge's
+    materiality; the candidate's materiality is the assumption's own.
+    """
+    if operation != "RESOLVE_CHALLENGES" or previous is None:
+        return ""
+    resolved_ids = _token_tuple(payload, "resolved_challenge_ids", allow_empty=False)
+    challenge_by_id = {item.challenge_id: item for item in previous.active_challenges}
+    # All resolved challenges must be active (also enforced by the lifecycle
+    # reducer); derive the materiality of the first resolved challenge.
+    for cid in resolved_ids:
+        challenge = challenge_by_id.get(cid)
+        if challenge is not None:
+            return previous.materiality
+    return previous.materiality
 
 
 # =====================================================================
@@ -822,6 +918,7 @@ def _evaluate_separation_of_duty(
     event_sequence: int,
     previous: IndependentAssumptionProjection | None,
     candidate_entity_sequence: int,
+    challenge_materiality: str = "",
 ) -> str:
     """Independently evaluate separation-of-duty for one candidate action.
 
@@ -837,6 +934,7 @@ def _evaluate_separation_of_duty(
         scope_id=scope_id,
         assumption_materiality=assumption_materiality,
         event_sequence=event_sequence,
+        challenge_materiality=challenge_materiality,
     )
     if decision_type != "SELECTED":
         return "DENY"
@@ -926,8 +1024,11 @@ def _validate_admission_dependencies(
     # previous_entity_event_digest must equal the PROPOSE head digest.
     if cast(str, admit_event["previous_entity_event_digest"]) != previous.current_event_digest:
         raise AssumptionConformanceError("ASSUMPTION_ADMISSION_PREDECESSOR_MISMATCH")
-    # Phase 1: assumption dependency DFS (existence + acyclicity).
+    # Phase 1: assumption dependency DFS (existence + reconstructability +
+    # acyclicity). Collect first-discovery traversal records so we can later
+    # derive the admission dependency receipt.
     assumption_dep_ids = previous.assumption_dependency_ids
+    traversed: list[dict[str, Any]] = []
     visited: set[str] = set()
     stack: list[str] = [previous.assumption_id]
     stack_index: dict[str, int] = {previous.assumption_id: 0}
@@ -946,6 +1047,15 @@ def _validate_admission_dependencies(
         # reconstruction, not standing. Here "reconstructable" means the
         # projection chain is internally consistent (already enforced by
         # _validate_history for every appended event).
+        traversed.append(
+            {
+                "assumption_id": dep.assumption_id,
+                "validation_code": "DEPENDENCY_PRESENT",
+                "current_entity_sequence": dep.current_entity_sequence,
+                "current_event_digest": dep.current_event_digest,
+                "direct_dependency_ids": list(dep.assumption_dependency_ids),
+            }
+        )
         stack_index[node] = len(stack)
         stack.append(node)
         for child in dep.assumption_dependency_ids:
@@ -957,16 +1067,92 @@ def _validate_admission_dependencies(
     for dep_id in assumption_dep_ids:
         _dfs(dep_id)
     # Phase 2: evidence admission eligibility (A0-style). Each direct evidence
-    # dependency must have a pinned admission receipt in the policy context's
-    # evidence registry that is eligible at the ADMIT clock.
+    # dependency must have a pinned A0 EvidenceAdmissionEligibilityDecision in
+    # the policy context's evidence registry whose evidence_id,
+    # evaluated_at_sequence (== ADMIT clock), and evidence_registry_root all
+    # bind to this ADMIT, fail-fast through the first ineligible. The decision
+    # digest is already required by _parse_policy_context; here we re-check the
+    # binding fields and derive the admission dependency receipt.
     evidence_registry = cast(dict[str, Any], policy_context.get("evidence_registry", {}))
-    receipts = evidence_registry.get("receipts", {})
+    receipts = cast(dict[str, Any], evidence_registry.get("receipts", {}))
+    evidence_registry_root = cast(str, evidence_registry.get("evidence_registry_root", ""))
+    evidence_decisions: list[dict[str, Any]] = []
     for evidence_id in previous.evidence_dependency_ids:
-        receipt = receipts.get(evidence_id)
-        if receipt is None:
+        decision = receipts.get(evidence_id)
+        if decision is None:
             raise AssumptionConformanceError("ASSUMPTION_ADMISSION_EVIDENCE_MISSING")
-        if receipt.get("eligible") is not True:
+        if cast(str, decision["evidence_id"]) != evidence_id:
+            raise AssumptionConformanceError("ASSUMPTION_ADMISSION_EVIDENCE_ID_MISMATCH")
+        if cast(int, decision["evaluated_at_sequence"]) != admit_clock:
+            raise AssumptionConformanceError("ASSUMPTION_ADMISSION_EVIDENCE_CLOCK_MISMATCH")
+        if cast(str, decision["evidence_registry_root"]) != evidence_registry_root:
+            raise AssumptionConformanceError("ASSUMPTION_ADMISSION_EVIDENCE_ROOT_MISMATCH")
+        evidence_decisions.append(decision)
+        if decision.get("eligible") is not True:
             raise AssumptionConformanceError("ASSUMPTION_ADMISSION_EVIDENCE_INELIGIBLE")
+    # Derive the admission dependency receipt from canonical fields and require
+    # the supplied admission_receipt_digest to equal the derived digest. The
+    # ADMIT payload carries the admission_receipt_digest.
+    payload = _object(admit_event, "payload")
+    supplied_receipt_digest = _required_digest(payload, "admission_receipt_digest")
+    derived_receipt_digest = _admission_dependency_receipt_digest(
+        assumption_id=previous.assumption_id,
+        candidate_predecessor_event_digest=previous.current_event_digest,
+        assumption_registry_root="",  # not bound by the validator's gate
+        evidence_registry_root=evidence_registry_root,
+        assumption_dependency_ids=previous.assumption_dependency_ids,
+        evidence_dependency_ids=previous.evidence_dependency_ids,
+        traversed_dependencies=traversed,
+        cycle_witness=(),
+        evidence_eligibility_decisions=[
+            _evidence_admission_unsigned_value(d) for d in evidence_decisions
+        ],
+        event_sequence=admit_clock,
+        validation_code="DEPENDENCY_VALIDATION_PASSED",
+        validation_result="PASS",
+    )
+    if supplied_receipt_digest != derived_receipt_digest:
+        raise AssumptionConformanceError("ASSUMPTION_ADMISSION_RECEIPT_MISMATCH")
+
+
+def _admission_dependency_receipt_digest(
+    *,
+    assumption_id: str,
+    candidate_predecessor_event_digest: str,
+    assumption_registry_root: str,
+    evidence_registry_root: str,
+    assumption_dependency_ids: tuple[str, ...],
+    evidence_dependency_ids: tuple[str, ...],
+    traversed_dependencies: list[dict[str, Any]],
+    cycle_witness: tuple[str, ...],
+    evidence_eligibility_decisions: list[dict[str, object]],
+    event_sequence: int,
+    validation_code: str,
+    validation_result: str,
+) -> str:
+    """Independently recompute the admission dependency receipt digest.
+
+    Replicates DependencyValidationReceipt._unsigned_value exactly. The
+    candidate_entity_sequence is mechanically 2 (PROPOSE seq 1 -> ADMIT seq 2)
+    and the traversed/evidence fields are canonicalized.
+    """
+    unsigned = {
+        "schema_version": _ADMISSION_DEPENDENCY_RECEIPT_SCHEMA_VERSION,
+        "assumption_dependency_ids": list(assumption_dependency_ids),
+        "assumption_id": assumption_id,
+        "assumption_registry_root": assumption_registry_root,
+        "candidate_entity_sequence": 2,
+        "candidate_predecessor_event_digest": candidate_predecessor_event_digest,
+        "cycle_witness": list(cycle_witness),
+        "evidence_dependency_ids": list(evidence_dependency_ids),
+        "evidence_eligibility_decisions": evidence_eligibility_decisions,
+        "evidence_registry_root": evidence_registry_root,
+        "event_sequence": event_sequence,
+        "traversed_dependencies": traversed_dependencies,
+        "validation_code": validation_code,
+        "validation_result": validation_result,
+    }
+    return _domain_digest("ASSUMPTION_DEPENDENCY_VALIDATION", unsigned)
 
 
 # =====================================================================
@@ -997,6 +1183,11 @@ def _authority_decision(
         scope_ids = previous.scope_ids
         materiality = previous.materiality
     event_sequence = cast(int, event["clock_sequence"])
+    # Map the lifecycle operation onto the frozen authority action vocabulary.
+    # RESOLVE_CHALLENGES expands to one of the four RESOLVE_TO_* actions via
+    # the resolution_outcome.
+    action = _authority_action_for(operation, payload)
+    challenge_materiality = _challenge_materiality_for(operation, payload, previous)
     # I1-A: V3 policy resolution at the admission clock.
     resolved_entry = _resolve_policy_at(policy_context, event_sequence)
     # The request scope for grant selection is the single narrow scope of the
@@ -1005,11 +1196,12 @@ def _authority_decision(
     scope_id = scope_ids[0] if scope_ids else _GLOBAL_SCOPE
     decision_type, selected_grant = _select_applicable_grant(
         resolved_entry,
-        action=operation,
+        action=action,
         authority_id=authority_id,
         scope_id=scope_id,
         assumption_materiality=materiality,
         event_sequence=event_sequence,
+        challenge_materiality=challenge_materiality,
     )
     if decision_type == "SELECTED":
         grant_allowed = True
@@ -1026,13 +1218,14 @@ def _authority_decision(
         candidate_entity_sequence = cast(int, event["entity_sequence"])
         sod_decision = _evaluate_separation_of_duty(
             resolved_entry=resolved_entry,
-            action=operation,
+            action=action,
             authority_id=authority_id,
             scope_id=scope_id,
             assumption_materiality=materiality,
             event_sequence=event_sequence,
             previous=previous,
             candidate_entity_sequence=candidate_entity_sequence,
+            challenge_materiality=challenge_materiality,
         )
         if sod_decision == "DENY":
             allowed = False
@@ -1121,43 +1314,51 @@ def _evaluate_use(
     # across all top-level evaluations to deduplicate shared dependencies.
     shared_visited: set[str] = set()
     shared_nodes: dict[str, _EvaluatedNode] = {}
-    any_denial = False
-    denial_code = "ASSUMPTION_USE_ALLOWED"
-    denial_event_digest: str | None = None
+    # Corr #2: evaluate EVERY required assumption. D3.2-B forbids a global
+    # top-level fail-fast: every top-level assumption must be evaluated so a
+    # tamper on the second assumption cannot hide behind a denial on the first.
+    # Each top-level evaluation is itself fail-closed (its own DFS+evidence
+    # short-circuits on the first denial), but the top-level loop runs to
+    # completion. The binding is admissible iff EVERY evaluation ALLOWs.
+    per_root_results: list[tuple[str, bool, str, str | None]] = []
     for assumption_id in required_assumption_ids:
         try:
-            _evaluate_node(
+            ordered_nodes = _phase_assumption_dfs(
                 assumption_id,
-                binding=binding,
-                decision_id=decision_id,
-                clock=clock,
                 projections=projections,
-                policy_context=policy_context,
-                visiting=set(),
-                visiting_stack=[],
+                clock=clock,
                 work=work,
                 shared_visited=shared_visited,
                 shared_nodes=shared_nodes,
+                visiting=set(),
                 root=True,
             )
+            _phase_evidence(
+                ordered_nodes,
+                binding=binding,
+                decision_id=decision_id,
+                clock=clock,
+                work=work,
+            )
+            per_root_results.append((assumption_id, True, "ASSUMPTION_USE_ALLOWED", None))
         except AssumptionConformanceError as exc:
-            any_denial = True
-            denial_code = exc.code
             current = projections.get(assumption_id)
-            denial_event_digest = None if current is None else current.current_event_digest
-            break
-    if not any_denial:
+            event_digest = None if current is None else current.current_event_digest
+            per_root_results.append((assumption_id, False, exc.code, event_digest))
+    admissible = all(allowed for _aid, allowed, _code, _digest in per_root_results)
+    if admissible:
         allowed = True
         code = "ASSUMPTION_USE_ALLOWED"
-        # decision_id shape: report the head digest of the FIRST required
-        # assumption as the assumption_event_digest, matching production's
-        # single-evaluation case and the fixture pin.
+        # The receipt carries the head digest of the FIRST required assumption.
         first = projections.get(required_assumption_ids[0])
         event_digest = None if first is None else first.current_event_digest
     else:
         allowed = False
-        code = denial_code
-        event_digest = denial_event_digest
+        # Report the first denial encountered, preserving the prior observable
+        # single-denial receipt shape for the common single-assumption case.
+        first_denial = next(item for item in per_root_results if not item[1])
+        code = first_denial[2]
+        event_digest = first_denial[3]
     work.finalize()
     # Use the first required assumption as the assumption_id carried in the
     # decision receipt (matches the fixture pin for the single-assumption case
@@ -1186,39 +1387,30 @@ def _evaluate_use(
     }
 
 
-def _evaluate_node(
+def _phase_assumption_dfs(
     assumption_id: str,
     *,
-    binding: dict[str, Any],
-    decision_id: str,
-    clock: int,
     projections: dict[str, IndependentAssumptionProjection],
-    policy_context: dict[str, Any],
-    visiting: set[str],
-    visiting_stack: list[str],
+    clock: int,
     work: _WorkCounters,
     shared_visited: set[str],
     shared_nodes: dict[str, _EvaluatedNode],
+    visiting: set[str],
     root: bool,
-) -> _EvaluatedNode:
-    """Evaluate one assumption node in frozen D3.2-B order:
+) -> list[IndependentAssumptionProjection]:
+    """Phase 1 of frozen D3.2-B use-time evaluation: complete the assumption
+    dependency DFS, returning the ordered first-discovery node list
+    ([self] + traversed in discovery order). Self-gates run first; on success
+    the DFS recurses into every dependency edge. Evidence is NOT evaluated
+    here -- it runs in :func:`_phase_evidence` after the full DFS completes.
 
-    1. self gates (existence/standing/challenge/temporal);
-    2. complete assumption DFS;
-    3. only after successful DFS: evidence phase.
-
-    Work counters deduplicate nodes by assumption_id across the whole decision,
-    so a shared dependency visited under two top-level assumptions is counted
-    once.
+    Work counters deduplicate nodes by assumption_id across the whole decision.
     """
     if assumption_id in visiting:
         raise AssumptionConformanceError("ASSUMPTION_USE_DEPENDENCY_CYCLE")
     visiting.add(assumption_id)
-    visiting_stack.append(assumption_id)
     assumption = projections.get(assumption_id)
     if assumption is None:
-        visiting.discard(assumption_id)
-        visiting_stack.pop()
         raise AssumptionConformanceError(
             "ASSUMPTION_USE_MISSING" if root else "ASSUMPTION_USE_DEPENDENCY_MISSING"
         )
@@ -1227,63 +1419,65 @@ def _evaluate_node(
     # NOT_YET_VALID > EXPIRED.
     if assumption.standing in _TERMINAL:
         _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
-        visiting.discard(assumption_id)
-        visiting_stack.pop()
         raise AssumptionConformanceError("ASSUMPTION_USE_TERMINAL")
     if assumption.standing not in _ACTIVE:
         _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
-        visiting.discard(assumption_id)
-        visiting_stack.pop()
         raise AssumptionConformanceError("ASSUMPTION_USE_NOT_ADMITTED")
     if assumption.active_challenges:
         _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
-        visiting.discard(assumption_id)
-        visiting_stack.pop()
         raise AssumptionConformanceError("ASSUMPTION_USE_CHALLENGED")
     if clock < assumption.valid_from_sequence:
         _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
-        visiting.discard(assumption_id)
-        visiting_stack.pop()
         raise AssumptionConformanceError("ASSUMPTION_USE_NOT_YET_VALID")
     if assumption.expires_at_sequence is not None and clock >= assumption.expires_at_sequence:
         _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
-        visiting.discard(assumption_id)
-        visiting_stack.pop()
         raise AssumptionConformanceError("ASSUMPTION_USE_EXPIRED")
-    # --- Phase 2: complete assumption DFS (only after self-gates pass) ---
+    # --- Complete assumption DFS (only after self-gates pass) ---
+    ordered_nodes: list[IndependentAssumptionProjection] = [assumption]
     for dependency_id in assumption.assumption_dependency_ids:
         work.dep_edges += 1
-        _evaluate_node(
+        child_nodes = _phase_assumption_dfs(
             dependency_id,
-            binding=binding,
-            decision_id=decision_id,
-            clock=clock,
             projections=projections,
-            policy_context=policy_context,
-            visiting=visiting,
-            visiting_stack=visiting_stack,
+            clock=clock,
             work=work,
             shared_visited=shared_visited,
             shared_nodes=shared_nodes,
+            visiting=visiting,
             root=False,
         )
+        ordered_nodes.extend(child_nodes)
     # Self node is recorded as visited only after its DFS completes
     # successfully (the production evaluator pushes self onto the DFS stack
     # before recursing into children; work counters count self as one history).
     _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
-    # --- Phase 3: evidence phase (only after DFS completes) ---
-    for evidence_id in assumption.evidence_dependency_ids:
-        work.evidence_refs += 1
-        _evaluate_evidence_dependency(
-            evidence_id,
-            decision_id=decision_id,
-            clock=clock,
-            owner=assumption,
-            binding=binding,
-        )
     visiting.discard(assumption_id)
-    visiting_stack.pop()
-    return shared_nodes[assumption_id]
+    return ordered_nodes
+
+
+def _phase_evidence(
+    ordered_nodes: list[IndependentAssumptionProjection],
+    *,
+    binding: dict[str, Any],
+    decision_id: str,
+    clock: int,
+    work: _WorkCounters,
+) -> None:
+    """Phase 2 of frozen D3.2-B use-time evaluation: evaluate evidence for
+    each node in first-discovery order (self first, then each traversed node
+    in the order its DFS discovered it). Runs ONLY after the full assumption
+    DFS completes successfully.
+    """
+    for owner in ordered_nodes:
+        for evidence_id in owner.evidence_dependency_ids:
+            work.evidence_refs += 1
+            _evaluate_evidence_dependency(
+                evidence_id,
+                decision_id=decision_id,
+                clock=clock,
+                owner=owner,
+                binding=binding,
+            )
 
 
 def _record_self_node(
@@ -1455,6 +1649,91 @@ def _validate_use_binding(
 # =====================================================================
 
 
+def _grant_unsigned_value(grant: dict[str, Any]) -> dict[str, object]:
+    """Independently recompute the canonical unsigned value of an authority
+    grant. Replicates AssumptionAuthorityGrant._unsigned_value exactly: the
+    grant's challenge_materialities are part of the digest regardless of
+    whether the action is a resolution action.
+    """
+    return {
+        "schema_version": _AUTHORITY_GRANT_SCHEMA_VERSION,
+        "action": grant["action"],
+        "assumption_materialities": list(grant["assumption_materialities"]),
+        "authority_id": grant["authority_id"],
+        "challenge_materialities": list(grant["challenge_materialities"]),
+        "effective_from_sequence": grant["effective_from_sequence"],
+        "effective_until_sequence": grant["effective_until_sequence"],
+        "grant_id": grant["grant_id"],
+        "scope_ids": list(grant["scope_ids"]),
+    }
+
+
+def _rule_unsigned_value(rule: dict[str, Any]) -> dict[str, object]:
+    return {
+        "schema_version": _SEPARATION_DUTY_RULE_SCHEMA_VERSION,
+        "action": rule["action"],
+        "assumption_materialities": list(rule["assumption_materialities"]),
+        "conflicting_roles": list(rule["conflicting_roles"]),
+        "rule_id": rule["rule_id"],
+        "scope_ids": list(rule["scope_ids"]),
+    }
+
+
+def _exception_unsigned_value(exc: dict[str, Any]) -> dict[str, object]:
+    return {
+        "schema_version": _DUTY_EXCEPTION_SCHEMA_VERSION,
+        "action": exc["action"],
+        "assumption_ids": list(exc["assumption_ids"]),
+        "assumption_materialities": list(exc["assumption_materialities"]),
+        "authority_id": exc["authority_id"],
+        "conflicting_roles": list(exc["conflicting_roles"]),
+        "effective_from_sequence": exc["effective_from_sequence"],
+        "effective_until_sequence": exc["effective_until_sequence"],
+        "exception_id": exc["exception_id"],
+        "reason_code": exc["reason_code"],
+        "rule_id": exc["rule_id"],
+        "scope_ids": list(exc["scope_ids"]),
+    }
+
+
+def _set_digest(domain: str, members: list[dict[str, object]]) -> str:
+    """Set digest = domain digest over ``{"members": [...]}``. Replicates
+    _set_digest from _assumption_governance_contracts exactly."""
+    return _domain_digest(domain, {"members": members})
+
+
+def _policy_unsigned_value(
+    *,
+    policy_id: str,
+    authority_root_digest: str,
+    grants: list[dict[str, Any]],
+    rules: list[dict[str, Any]],
+    exceptions: list[dict[str, Any]],
+) -> tuple[dict[str, object], str, str, str]:
+    """Independently recompute the canonical authority-policy unsigned value and
+    its three set digests. Returns ``(unsigned, grant_set_digest,
+    rule_set_digest, exception_set_digest)``.
+    """
+    grant_members: list[dict[str, object]] = [dict(g) for g in grants]
+    rule_members: list[dict[str, object]] = [dict(r) for r in rules]
+    exception_members: list[dict[str, object]] = [dict(e) for e in exceptions]
+    grant_set = _set_digest("ASSUMPTION_AUTHORITY_GRANT_SET", grant_members)
+    rule_set = _set_digest("ASSUMPTION_SEPARATION_DUTY_RULE_SET", rule_members)
+    exception_set = _set_digest("ASSUMPTION_DUTY_EXCEPTION_SET", exception_members)
+    unsigned: dict[str, object] = {
+        "schema_version": _AUTHORITY_POLICY_SCHEMA_VERSION,
+        "authority_root_digest": authority_root_digest,
+        "duty_exceptions": exception_members,
+        "exception_set_digest": exception_set,
+        "grant_set_digest": grant_set,
+        "grants": grant_members,
+        "policy_id": policy_id,
+        "separation_duty_rule_set_digest": rule_set,
+        "separation_duty_rules": rule_members,
+    }
+    return unsigned, grant_set, rule_set, exception_set
+
+
 def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
     """Parse and validate the serialized V3 policy context.
 
@@ -1499,6 +1778,9 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
                 "commit_receipt_digest",
                 "ledger_entry_digest",
                 "signing_payload_digest",
+                "grant_set_digest",
+                "separation_duty_rule_set_digest",
+                "exception_set_digest",
                 "grants",
                 "duty_rules",
                 "duty_exceptions",
@@ -1509,11 +1791,14 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
         if prev_effective is not None and effective <= prev_effective:
             raise AssumptionConformanceError("ASSUMPTION_POLICY_LEDGER_NOT_STRICTLY_INCREASING")
         prev_effective = effective
-        _required_token(entry, "policy_id")
+        policy_id = _required_token(entry, "policy_id")
         _required_digest(entry, "policy_digest")
         _required_digest(entry, "commit_receipt_digest")
         _required_digest(entry, "ledger_entry_digest")
         _required_digest(entry, "signing_payload_digest")
+        _required_digest(entry, "grant_set_digest")
+        _required_digest(entry, "separation_duty_rule_set_digest")
+        _required_digest(entry, "exception_set_digest")
         parsed_grants: list[dict[str, Any]] = []
         for raw_grant in _array(entry, "grants"):
             grant = _as_object(raw_grant, "ASSUMPTION_AUTHORITY_GRANT_INVALID")
@@ -1525,6 +1810,7 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
                     "authority_id",
                     "scope_ids",
                     "assumption_materialities",
+                    "challenge_materialities",
                     "effective_from_sequence",
                     "effective_until_sequence",
                     "grant_digest",
@@ -1533,7 +1819,7 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
             )
             _required_token(grant, "grant_id")
             action = _required_token(grant, "action")
-            if action not in _AUTHORITY_FIELD:
+            if action not in _AUTHORITY_ACTIONS:
                 raise AssumptionConformanceError("ASSUMPTION_AUTHORITY_GRANT_ACTION_INVALID")
             _required_token(grant, "authority_id")
             _token_tuple(grant, "scope_ids", allow_empty=False)
@@ -1543,13 +1829,39 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
                     raise AssumptionConformanceError(
                         "ASSUMPTION_AUTHORITY_GRANT_MATERIALITY_INVALID"
                     )
+            challenge_materialities = _token_tuple(
+                grant, "challenge_materialities", allow_empty=True
+            )
+            for mat in challenge_materialities:
+                if mat not in _MATERIALITIES:
+                    raise AssumptionConformanceError(
+                        "ASSUMPTION_AUTHORITY_GRANT_CHALLENGE_MATERIALITY_INVALID"
+                    )
+            # Resolution grants require challenge_materialities; non-resolution
+            # grants must not carry any.
+            is_resolution = action in _RESOLUTION_AUTHORITY_ACTIONS
+            if is_resolution and not challenge_materialities:
+                raise AssumptionConformanceError(
+                    "ASSUMPTION_AUTHORITY_GRANT_CHALLENGE_MATERIALITY_REQUIRED"
+                )
+            if not is_resolution and challenge_materialities:
+                raise AssumptionConformanceError(
+                    "ASSUMPTION_AUTHORITY_GRANT_CHALLENGE_MATERIALITY_UNEXPECTED"
+                )
             eff_from_value = _non_negative_int(grant, "effective_from_sequence")
             eff_until = grant.get("effective_until_sequence")
             if eff_until is not None and (
                 type(eff_until) is not int or eff_until <= eff_from_value
             ):
                 raise AssumptionConformanceError("ASSUMPTION_AUTHORITY_GRANT_INTERVAL_INVALID")
+            # Independently recompute the grant digest and require equality.
+            grant["grant_digest"]  # shape-check via _required_digest below
             _required_digest(grant, "grant_digest")
+            rebuilt_grant_digest = _domain_digest(
+                "ASSUMPTION_AUTHORITY_GRANT", _grant_unsigned_value(grant)
+            )
+            if cast(str, grant["grant_digest"]) != rebuilt_grant_digest:
+                raise AssumptionConformanceError("ASSUMPTION_AUTHORITY_GRANT_DIGEST_MISMATCH")
             parsed_grants.append(grant)
         # Grants must be canonical (sorted by grant_id, unique).
         grant_ids = [cast(str, g["grant_id"]) for g in parsed_grants]
@@ -1572,11 +1884,11 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
             )
             _required_token(rule, "rule_id")
             r_action = _required_token(rule, "action")
-            if r_action not in _AUTHORITY_FIELD:
+            if r_action not in _AUTHORITY_ACTIONS:
                 raise AssumptionConformanceError("ASSUMPTION_DUTY_RULE_ACTION_INVALID")
             roles = _token_tuple(rule, "conflicting_roles", allow_empty=False)
             for role in roles:
-                if role not in _OPERATION_TO_ROLE.values():
+                if role not in _ASSUMPTION_GOVERNANCE_ROLES:
                     raise AssumptionConformanceError("ASSUMPTION_DUTY_RULE_ROLE_INVALID")
             _token_tuple(rule, "scope_ids", allow_empty=False)
             r_mats = _token_tuple(rule, "assumption_materialities", allow_empty=False)
@@ -1584,6 +1896,11 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
                 if mat not in _MATERIALITIES:
                     raise AssumptionConformanceError("ASSUMPTION_DUTY_RULE_MATERIALITY_INVALID")
             _required_digest(rule, "rule_digest")
+            rebuilt_rule_digest = _domain_digest(
+                "ASSUMPTION_SEPARATION_DUTY_RULE", _rule_unsigned_value(rule)
+            )
+            if cast(str, rule["rule_digest"]) != rebuilt_rule_digest:
+                raise AssumptionConformanceError("ASSUMPTION_DUTY_RULE_DIGEST_MISMATCH")
             parsed_rules.append(rule)
         rule_ids = [cast(str, r["rule_id"]) for r in parsed_rules]
         if rule_ids != sorted(rule_ids) or len(set(rule_ids)) != len(rule_ids):
@@ -1612,12 +1929,12 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
             _required_token(exc, "exception_id")
             _required_token(exc, "rule_id")
             e_action = _required_token(exc, "action")
-            if e_action not in _AUTHORITY_FIELD:
+            if e_action not in _AUTHORITY_ACTIONS:
                 raise AssumptionConformanceError("ASSUMPTION_DUTY_EXCEPTION_ACTION_INVALID")
             _required_token(exc, "authority_id")
             e_roles = _token_tuple(exc, "conflicting_roles", allow_empty=False)
             for role in e_roles:
-                if role not in _OPERATION_TO_ROLE.values():
+                if role not in _ASSUMPTION_GOVERNANCE_ROLES:
                     raise AssumptionConformanceError("ASSUMPTION_DUTY_EXCEPTION_ROLE_INVALID")
             _token_tuple(exc, "scope_ids", allow_empty=False)
             _token_tuple(exc, "assumption_ids", allow_empty=True)
@@ -1635,15 +1952,47 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
             ):
                 raise AssumptionConformanceError("ASSUMPTION_DUTY_EXCEPTION_INTERVAL_INVALID")
             _required_digest(exc, "exception_digest")
+            rebuilt_exc_digest = _domain_digest(
+                "ASSUMPTION_DUTY_EXCEPTION", _exception_unsigned_value(exc)
+            )
+            if cast(str, exc["exception_digest"]) != rebuilt_exc_digest:
+                raise AssumptionConformanceError("ASSUMPTION_DUTY_EXCEPTION_DIGEST_MISMATCH")
             parsed_exceptions.append(exc)
         exc_ids = [cast(str, e["exception_id"]) for e in parsed_exceptions]
         if exc_ids != sorted(exc_ids) or len(set(exc_ids)) != len(exc_ids):
             raise AssumptionConformanceError("ASSUMPTION_DUTY_EXCEPTIONS_NOT_CANONICAL")
+        # Independently recompute the policy content and its three set digests
+        # from the parsed grants/rules/exceptions and require equality with the
+        # serialized set digests and policy_digest.
+        (
+            policy_unsigned,
+            grant_set_digest,
+            rule_set_digest,
+            exception_set_digest,
+        ) = _policy_unsigned_value(
+            policy_id=policy_id,
+            authority_root_digest=cast(str, value["authority_root_digest"]),
+            grants=parsed_grants,  # full grant dicts (with digest) feed set digests
+            rules=parsed_rules,
+            exceptions=parsed_exceptions,
+        )
+        if cast(str, entry["grant_set_digest"]) != grant_set_digest:
+            raise AssumptionConformanceError("ASSUMPTION_AUTHORITY_GRANT_SET_DIGEST_MISMATCH")
+        if cast(str, entry["separation_duty_rule_set_digest"]) != rule_set_digest:
+            raise AssumptionConformanceError("ASSUMPTION_DUTY_RULE_SET_DIGEST_MISMATCH")
+        if cast(str, entry["exception_set_digest"]) != exception_set_digest:
+            raise AssumptionConformanceError("ASSUMPTION_DUTY_EXCEPTION_SET_DIGEST_MISMATCH")
+        rebuilt_policy_digest = _domain_digest("ASSUMPTION_AUTHORITY_POLICY", policy_unsigned)
+        if cast(str, entry["policy_digest"]) != rebuilt_policy_digest:
+            raise AssumptionConformanceError("ASSUMPTION_AUTHORITY_POLICY_DIGEST_MISMATCH")
         entry["grants"] = parsed_grants
         entry["duty_rules"] = parsed_rules
         entry["duty_exceptions"] = parsed_exceptions
         parsed_entries.append(entry)
-    # Validate the evidence registry (pinned admission receipts).
+    # Validate the evidence registry (pinned admission decisions). Each receipt
+    # is a complete A0-style EvidenceAdmissionEligibilityDecision whose
+    # decision_digest the validator independently recompute-and-requires. This
+    # replaces the prior trust of a bare ``eligible`` boolean.
     ev_reg_raw = value.get("evidence_registry")
     if type(ev_reg_raw) is not dict:
         raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_REGISTRY_INVALID")
@@ -1652,10 +2001,17 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
         {"evidence_registry_root", "receipts"},
         code="ASSUMPTION_EVIDENCE_REGISTRY_KEYS_INVALID",
     )
-    _required_digest(cast(dict[str, Any], ev_reg_raw), "evidence_registry_root")
+    evidence_registry_root = _required_digest(
+        cast(dict[str, Any], ev_reg_raw), "evidence_registry_root"
+    )
     receipts_raw = cast(dict[str, Any], ev_reg_raw).get("receipts")
     if type(receipts_raw) is not dict:
         raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPTS_INVALID")
+    parsed_receipts: dict[str, dict[str, Any]] = {}
+    for evidence_id, raw_receipt in cast(dict[str, object], receipts_raw).items():
+        receipt = _as_object(raw_receipt, "ASSUMPTION_EVIDENCE_RECEIPT_INVALID")
+        _validate_evidence_admission_decision(receipt, evidence_id, evidence_registry_root)
+        parsed_receipts[evidence_id] = receipt
     return {
         "schema_version": value["schema_version"],
         "authority_root_digest": value["authority_root_digest"],
@@ -1663,9 +2019,82 @@ def _parse_policy_context(value: dict[str, Any]) -> dict[str, Any]:
         "policy_digest": value["policy_digest"],
         "ledger_entries": parsed_entries,
         "evidence_registry": {
-            "evidence_registry_root": cast(dict[str, Any], ev_reg_raw)["evidence_registry_root"],
-            "receipts": deepcopy(receipts_raw),
+            "evidence_registry_root": evidence_registry_root,
+            "receipts": parsed_receipts,
         },
+    }
+
+
+def _validate_evidence_admission_decision(
+    receipt: dict[str, Any],
+    evidence_id: str,
+    evidence_registry_root: str,
+) -> None:
+    """Independently validate one A0 EvidenceAdmissionEligibilityDecision.
+
+    Replicates EvidenceAdmissionEligibilityDecision.__post_init__: requires the
+    canonical keys, binds the evidence_id / evaluated_at_sequence /
+    evidence_registry_root, recompute-and-requires the decision_digest, and
+    enforces eligible<->code consistency.
+    """
+    _exact_keys(
+        receipt,
+        {
+            "schema_version",
+            "evidence_id",
+            "eligible",
+            "code",
+            "evaluated_at_sequence",
+            "evidence_registry_root",
+            "current_event_digest",
+            "current_status",
+            "decision_digest",
+        },
+        code="ASSUMPTION_EVIDENCE_RECEIPT_KEYS_INVALID",
+    )
+    if cast(str, receipt["schema_version"]) != _EVIDENCE_ADMISSION_ELIGIBILITY_SCHEMA_VERSION:
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_SCHEMA_INVALID")
+    if cast(str, receipt["evidence_id"]) != evidence_id:
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_ID_MISMATCH")
+    eligible = receipt.get("eligible")
+    if type(eligible) is not bool:
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_ELIGIBLE_INVALID")
+    code = _required_token(receipt, "code")
+    if eligible != (code == "EVIDENCE_ADMISSION_ELIGIBLE"):
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_RESULT_MISMATCH")
+    evaluated_at = receipt.get("evaluated_at_sequence")
+    if type(evaluated_at) is not int or isinstance(evaluated_at, bool) or evaluated_at < 0:
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_SEQUENCE_INVALID")
+    if cast(str, receipt["evidence_registry_root"]) != evidence_registry_root:
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_ROOT_MISMATCH")
+    current_event_digest = receipt.get("current_event_digest")
+    if current_event_digest is not None and (
+        type(current_event_digest) is not str or _DIGEST.fullmatch(current_event_digest) is None
+    ):
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_EVENT_INVALID")
+    current_status = receipt.get("current_status")
+    if current_status is not None and (
+        type(current_status) is not str or _TOKEN.fullmatch(current_status) is None
+    ):
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_STATUS_INVALID")
+    _required_digest(receipt, "decision_digest")
+    rebuilt_decision_digest = _domain_digest(
+        "EVIDENCE_ADMISSION_ELIGIBILITY", _evidence_admission_unsigned_value(receipt)
+    )
+    if cast(str, receipt["decision_digest"]) != rebuilt_decision_digest:
+        raise AssumptionConformanceError("ASSUMPTION_EVIDENCE_RECEIPT_DIGEST_MISMATCH")
+
+
+def _evidence_admission_unsigned_value(receipt: dict[str, Any]) -> dict[str, object]:
+    return {
+        "schema_version": _EVIDENCE_ADMISSION_ELIGIBILITY_SCHEMA_VERSION,
+        "code": receipt["code"],
+        "current_event_digest": receipt["current_event_digest"],
+        "current_status": receipt["current_status"],
+        "eligible": receipt["eligible"],
+        "evaluated_at_sequence": receipt["evaluated_at_sequence"],
+        "evidence_id": receipt["evidence_id"],
+        "evidence_registry_root": receipt["evidence_registry_root"],
     }
 
 

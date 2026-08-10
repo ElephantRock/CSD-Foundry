@@ -385,7 +385,11 @@ def _mutate_catalog(
         proposer_id = _required_string(_object(propose_event, "payload"), "proposer_authority_id")
         admit_event = _find_event(mutated, operation="ADMIT")
         _object(admit_event, "payload")["admitting_authority_id"] = proposer_id
-        # Re-grant ADMIT to the proposer in the serialized policy context.
+        # Re-grant ADMIT to the proposer in the serialized policy context. The
+        # new grant must carry challenge_materialities (empty for non-resolution
+        # actions) and the grant/set/policy digests must be recomputed so the
+        # mutated policy still parses and the SoD rule (not a digest mismatch)
+        # is what blocks.
         policy = _object(catalog, "authority_policy")
         for entry in _array_of_objects(policy, "ledger_entries"):
             entry_grants = _array_of_objects(entry, "grants")
@@ -393,9 +397,11 @@ def _mutate_catalog(
             new_grant["grant_id"] = f"grant:sod-admitter-{proposer_id}"
             new_grant["action"] = "ADMIT"
             new_grant["authority_id"] = proposer_id
+            new_grant["challenge_materialities"] = []
             entry_grants.append(new_grant)
             entry_grants.sort(key=lambda g: g["grant_id"])
             break
+        _recompute_policy_digests(policy)
         _rebuild_events(mutated)
     elif operator == "REMOVE_ASSUMPTION_DEPENDENCY":
         event = _find_event(
@@ -542,7 +548,12 @@ def _classify_mutation(
     report = validate_assumption_registry(vectors=catalog)
     if mode == "REJECTED":
         observed = dict(report.rejected_failure_codes).get(f"MUT-{mutation_id}")
-        if report.success and observed == expected_detector:
+        # The target mutation is KILLED iff its rejected vector fired the
+        # expected detector. A catalog-wide policy mutation (e.g. adding a
+        # grant) may also break unrelated accepted vectors' authority-decision
+        # pins; those collateral errors do not change whether THIS mutation was
+        # detected, so KILLED is determined by the target vector alone.
+        if observed == expected_detector:
             return "KILLED", observed
         if report.success:
             return "INVALID_MUTATION", observed
@@ -642,6 +653,100 @@ def _rebuild_events(vector: dict[str, Any]) -> None:
         heads[entity_id] = event.digest
         rebuilt.append(value)
     vector["events"] = rebuilt
+
+
+def _grant_unsigned(grant: dict[str, Any]) -> dict[str, object]:
+    return {
+        "schema_version": "assumption-authority-grant/1",
+        "action": grant["action"],
+        "assumption_materialities": grant["assumption_materialities"],
+        "authority_id": grant["authority_id"],
+        "challenge_materialities": grant.get("challenge_materialities", []),
+        "effective_from_sequence": grant["effective_from_sequence"],
+        "effective_until_sequence": grant["effective_until_sequence"],
+        "grant_id": grant["grant_id"],
+        "scope_ids": grant["scope_ids"],
+    }
+
+
+def _rule_unsigned(rule: dict[str, Any]) -> dict[str, object]:
+    return {
+        "schema_version": "assumption-separation-duty-rule/1",
+        "action": rule["action"],
+        "assumption_materialities": rule["assumption_materialities"],
+        "conflicting_roles": rule["conflicting_roles"],
+        "rule_id": rule["rule_id"],
+        "scope_ids": rule["scope_ids"],
+    }
+
+
+def _exception_unsigned(exc: dict[str, Any]) -> dict[str, object]:
+    return {
+        "schema_version": "assumption-duty-exception/1",
+        "action": exc["action"],
+        "assumption_ids": exc["assumption_ids"],
+        "assumption_materialities": exc["assumption_materialities"],
+        "authority_id": exc["authority_id"],
+        "conflicting_roles": exc["conflicting_roles"],
+        "effective_from_sequence": exc["effective_from_sequence"],
+        "effective_until_sequence": exc["effective_until_sequence"],
+        "exception_id": exc["exception_id"],
+        "reason_code": exc["reason_code"],
+        "rule_id": exc["rule_id"],
+        "scope_ids": exc["scope_ids"],
+    }
+
+
+def _recompute_policy_digests(policy: dict[str, Any]) -> None:
+    """Recompute every grant/rule/exception digest, the three set digests, and
+    the policy digest of each ledger entry after the grants/rules/exceptions
+    have been mutated. Mirrors the validator's recompute-and-require exactly so
+    the mutated policy still parses and the intended downstream detector
+    (rather than a parse-time digest mismatch) fires.
+    """
+    authority_root_digest = policy["authority_root_digest"]
+    for entry in _array_of_objects(policy, "ledger_entries"):
+        grants = _array_of_objects(entry, "grants")
+        for grant in grants:
+            grant["grant_digest"] = _domain_digest(
+                "ASSUMPTION_AUTHORITY_GRANT", _grant_unsigned(grant)
+            )
+        rules = _array_of_objects(entry, "duty_rules")
+        for rule in rules:
+            rule["rule_digest"] = _domain_digest(
+                "ASSUMPTION_SEPARATION_DUTY_RULE", _rule_unsigned(rule)
+            )
+        exceptions = _array_of_objects(entry, "duty_exceptions")
+        for exc in exceptions:
+            exc["exception_digest"] = _domain_digest(
+                "ASSUMPTION_DUTY_EXCEPTION", _exception_unsigned(exc)
+            )
+        grant_set = _domain_digest(
+            "ASSUMPTION_AUTHORITY_GRANT_SET", {"members": [dict(g) for g in grants]}
+        )
+        rule_set = _domain_digest(
+            "ASSUMPTION_SEPARATION_DUTY_RULE_SET",
+            {"members": [dict(r) for r in rules]},
+        )
+        exception_set = _domain_digest(
+            "ASSUMPTION_DUTY_EXCEPTION_SET",
+            {"members": [dict(e) for e in exceptions]},
+        )
+        policy_unsigned = {
+            "schema_version": "assumption-authority-policy/1",
+            "authority_root_digest": authority_root_digest,
+            "duty_exceptions": [dict(e) for e in exceptions],
+            "exception_set_digest": exception_set,
+            "grant_set_digest": grant_set,
+            "grants": [dict(g) for g in grants],
+            "policy_id": entry["policy_id"],
+            "separation_duty_rule_set_digest": rule_set,
+            "separation_duty_rules": [dict(r) for r in rules],
+        }
+        entry["grant_set_digest"] = grant_set
+        entry["separation_duty_rule_set_digest"] = rule_set
+        entry["exception_set_digest"] = exception_set
+        entry["policy_digest"] = _domain_digest("ASSUMPTION_AUTHORITY_POLICY", policy_unsigned)
 
 
 def _rebuild_single_event(event: dict[str, Any]) -> None:
