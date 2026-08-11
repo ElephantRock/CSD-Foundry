@@ -146,14 +146,15 @@ def _graph_digest_of(canonical_bytes: bytes) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _classify_difference(key: str, *, type_mismatch: bool) -> str:
-    """Classify one difference path into a closed family by leaf-key name.
+def _classify_difference(path: str, *, present_both_sides: bool) -> str:
+    """Classify one difference path into a closed family by full-path inspection.
 
-    Keyword families take precedence over the structural/presence families.
-    ``type_mismatch`` indicates the two values at this path had incompatible
-    JSON categories (e.g. object vs scalar), which is the RELABELED signal.
+    Keyword families take precedence: if ANY segment of the full dot-joined path
+    contains a keyword, the corresponding family applies regardless of presence.
+    When no keyword matches, a path present on both sides (value/type changed)
+    is RELABELED, and a path present on only one side is ADDED_REMOVED.
     """
-    lower = key.lower()
+    lower = path.lower()
     if "scope" in lower:
         return "SCOPE"
     if (
@@ -168,9 +169,7 @@ def _classify_difference(key: str, *, type_mismatch: bool) -> str:
         return "AUTHORITY"
     if "evidence" in lower or "admission" in lower:
         return "EVIDENCE_ADMISSION"
-    if type_mismatch:
-        return "RELABELED"
-    return "ADDED_REMOVED"
+    return "RELABELED" if present_both_sides else "ADDED_REMOVED"
 
 
 def _collect_differences(
@@ -183,9 +182,11 @@ def _collect_differences(
     """Recursively walk two JSON object graphs recording differing paths.
 
     Both inputs are JSON objects (validated by the caller). Two sub-values are
-    recursed into only when both are objects; every other inequality (presence
-    difference, scalar value change, or category mismatch) emits one difference
-    path at the current key.
+    recursed into only when both are objects. When a key exists on only one
+    side the path is recorded as ADDED_REMOVED. When both sides have the key but
+    the JSON-type-aware values differ the path is recorded as RELABELED (or the
+    keyword family matching the full path). JSON-type-aware comparison treats
+    ``true`` and ``1`` as distinct even though Python compares them equal.
     """
     all_keys = set(primary) | set(shadow)
     for key in sorted(all_keys):
@@ -197,13 +198,12 @@ def _collect_differences(
             shadow_value = shadow[key]
             if type(primary_value) is dict and type(shadow_value) is dict:
                 _collect_differences(primary_value, shadow_value, path, paths, families)
-            elif primary_value != shadow_value:
-                type_mismatch = type(primary_value) is not type(shadow_value)
+            elif type(primary_value) is not type(shadow_value) or primary_value != shadow_value:
                 paths.append(path)
-                families.append(_classify_difference(key, type_mismatch=type_mismatch))
+                families.append(_classify_difference(path, present_both_sides=True))
         else:
             paths.append(path)
-            families.append(_classify_difference(key, type_mismatch=False))
+            families.append(_classify_difference(path, present_both_sides=False))
 
 
 def _require_canonical_tokens(value: object, code: str, *, allow_empty: bool) -> tuple[str, ...]:
@@ -637,10 +637,7 @@ class GovernedAlternativeModelAdmitResult:
             raise AssumptionGovernanceContractError(
                 "GOVERNED_ALT_MODEL_RESULT_EVENT_CLOCK_MISMATCH"
             )
-        if (
-            value["source_receipt_digest"]
-            != self.authorization.structural_difference_receipt.receipt_digest
-        ):
+        if value["source_receipt_digest"] != self.authorization.authorization_digest:
             raise AssumptionGovernanceContractError(
                 "GOVERNED_ALT_MODEL_RESULT_EVENT_SOURCE_RECEIPT_MISMATCH"
             )
@@ -703,7 +700,7 @@ def _build_admit_event(
         entity_sequence=2,
         previous_entity_event_digest=authorization.candidate_predecessor_event_digest,
         clock_sequence=authorization.event_sequence,
-        source_receipt_digest=authorization.structural_difference_receipt.receipt_digest,
+        source_receipt_digest=authorization.authorization_digest,
         payload={
             "operation": "ADMIT",
             "admitting_authority_id": authorization.admitting_authority_id,
@@ -787,6 +784,7 @@ def append_governed_alternative_model_admit(
                             event_sequence,
                             retry_authorization,
                             current_head,
+                            structural_difference_receipt,
                         )
                     raise GovernedAlternativeModelError(
                         "GOVERNED_ALT_MODEL_ALREADY_ADMITTED", detail=model_id
@@ -923,6 +921,7 @@ def _handle_retry(
     event_sequence: int,
     retry_auth: GovernedAlternativeModelAuthorization,
     current_head: RegistryEntityHead,
+    structural_difference_receipt: StructuralDifferenceReceipt,
 ) -> GovernedAlternativeModelAdmitResult:
     """Handle exact snapshot-equivalent retry for an already-committed ADMIT."""
     if retry_auth.model_id != model_id:
@@ -936,6 +935,15 @@ def _handle_retry(
     if retry_auth.event_sequence != event_sequence:
         raise GovernedAlternativeModelError(
             "GOVERNED_ALT_MODEL_RETRY_SNAPSHOT_MISMATCH", detail="event_sequence"
+        )
+    # The separately supplied structural-difference receipt must equal the one
+    # bound inside the retry authorization (it is otherwise ignored on retry).
+    if (
+        structural_difference_receipt.receipt_digest
+        != retry_auth.structural_difference_receipt.receipt_digest
+    ):
+        raise GovernedAlternativeModelError(
+            "GOVERNED_ALT_MODEL_RETRY_SNAPSHOT_MISMATCH", detail="structural_difference_receipt"
         )
 
     existing_event = view.get_event(current_head.event_digest)
@@ -1257,6 +1265,135 @@ def compare_alternative_model_replays(
     )
 
 
+def _bind_replay_receipt(
+    receipt: ReplayReceipt,
+    *,
+    graph_digest: str,
+    decision_context_digest: str,
+    initial_state_digest: str,
+    logical_clock: int,
+    runner_revision: str,
+    required_inventory: tuple[str, ...],
+) -> None:
+    """Exact-type and cross-bind every replay receipt field to its invocation args.
+
+    Defends against an injected executor returning a receipt whose fields do not
+    match the arguments it was invoked with.
+    """
+    if type(receipt) is not ReplayReceipt:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_RECEIPT_TYPE_INVALID")
+    if receipt.graph_digest != graph_digest:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_GRAPH_DIGEST_BINDING_MISMATCH")
+    if receipt.decision_context_digest != decision_context_digest:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_DECISION_CONTEXT_BINDING_MISMATCH")
+    if receipt.initial_state_digest != initial_state_digest:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_INITIAL_STATE_BINDING_MISMATCH")
+    if receipt.logical_clock != logical_clock:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_LOGICAL_CLOCK_BINDING_MISMATCH")
+    if receipt.runner_revision != runner_revision:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_RUNNER_REVISION_BINDING_MISMATCH")
+    if receipt.required_inventory != required_inventory:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_REQUIRED_INVENTORY_BINDING_MISMATCH")
+
+
+def run_full_replay_comparison(
+    *,
+    executor: AlternativeModelReplayExecutor,
+    structural_difference_receipt: StructuralDifferenceReceipt,
+    primary_graph_bytes: bytes,
+    shadow_graph_bytes: bytes,
+    decision_context_digest: str,
+    initial_state_digest: str,
+    logical_clock: int,
+    runner_revision: str,
+    required_inventory: tuple[str, ...],
+) -> ComparisonReceipt:
+    """Production FULL_REPLAY orchestration: replay both graphs and compare.
+
+    Canonicalizes both graph byte strings, verifies both graph digests against
+    the structural-difference receipt, invokes the injected executor for the
+    primary and shadow graphs under identical decision context, exact-type and
+    cross-binds every returned receipt field to its invocation arguments,
+    validates the FULL_REPLAY invariants (executed == required, nothing skipped
+    or pruned), then constructs and returns the canonical comparison receipt.
+    """
+    if type(structural_difference_receipt) is not StructuralDifferenceReceipt:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_DIFFERENCE_RECEIPT_TYPE_INVALID")
+    _require_digest(decision_context_digest, "FULL_REPLAY_DECISION_CONTEXT_INVALID")
+    _require_digest(initial_state_digest, "FULL_REPLAY_INITIAL_STATE_INVALID")
+    if type(logical_clock) is not int or isinstance(logical_clock, bool) or logical_clock < 1:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_LOGICAL_CLOCK_INVALID")
+    _require_token(runner_revision, "FULL_REPLAY_RUNNER_REVISION_INVALID")
+    required = _require_canonical_tokens(
+        required_inventory, "FULL_REPLAY_REQUIRED_INVENTORY_INVALID", allow_empty=True
+    )
+
+    # Canonicalize both graph byte strings.
+    primary_canon = _canonical_graph_bytes(primary_graph_bytes)
+    shadow_canon = _canonical_graph_bytes(shadow_graph_bytes)
+
+    # Verify both graph digests against the structural-difference receipt.
+    if _graph_digest_of(primary_canon) != structural_difference_receipt.primary_graph_digest:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_PRIMARY_GRAPH_DIGEST_MISMATCH")
+    if _graph_digest_of(shadow_canon) != structural_difference_receipt.shadow_graph_digest:
+        raise AssumptionGovernanceContractError("FULL_REPLAY_SHADOW_GRAPH_DIGEST_MISMATCH")
+
+    # Invoke the executor for the primary graph.
+    primary_replay = executor.replay(
+        graph_bytes=primary_canon,
+        graph_digest=structural_difference_receipt.primary_graph_digest,
+        decision_context_digest=decision_context_digest,
+        initial_state_digest=initial_state_digest,
+        logical_clock=logical_clock,
+        runner_revision=runner_revision,
+        required_inventory=required,
+    )
+    _bind_replay_receipt(
+        primary_replay,
+        graph_digest=structural_difference_receipt.primary_graph_digest,
+        decision_context_digest=decision_context_digest,
+        initial_state_digest=initial_state_digest,
+        logical_clock=logical_clock,
+        runner_revision=runner_revision,
+        required_inventory=required,
+    )
+
+    # Invoke the executor for the shadow graph (identical context except graph).
+    shadow_replay = executor.replay(
+        graph_bytes=shadow_canon,
+        graph_digest=structural_difference_receipt.shadow_graph_digest,
+        decision_context_digest=decision_context_digest,
+        initial_state_digest=initial_state_digest,
+        logical_clock=logical_clock,
+        runner_revision=runner_revision,
+        required_inventory=required,
+    )
+    _bind_replay_receipt(
+        shadow_replay,
+        graph_digest=structural_difference_receipt.shadow_graph_digest,
+        decision_context_digest=decision_context_digest,
+        initial_state_digest=initial_state_digest,
+        logical_clock=logical_clock,
+        runner_revision=runner_revision,
+        required_inventory=required,
+    )
+
+    # Validate FULL_REPLAY invariants on both receipts.
+    for receipt in (primary_replay, shadow_replay):
+        if receipt.executed_inventory != required:
+            raise AssumptionGovernanceContractError("FULL_REPLAY_NOT_FULLY_EXECUTED")
+        if receipt.skipped_inventory != ():
+            raise AssumptionGovernanceContractError("FULL_REPLAY_SKIPPED_NONEMPTY")
+        if receipt.pruned_inventory != ():
+            raise AssumptionGovernanceContractError("FULL_REPLAY_PRUNED_NONEMPTY")
+
+    return compare_alternative_model_replays(
+        structural_difference_receipt=structural_difference_receipt,
+        primary_replay_receipt=primary_replay,
+        shadow_replay_receipt=shadow_replay,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # F. Use-time authority gate
 # --------------------------------------------------------------------------- #
@@ -1426,4 +1563,5 @@ __all__ = [
     "compute_structural_difference_digest",
     "detect_structural_difference",
     "evaluate_alternative_model_use_authority",
+    "run_full_replay_comparison",
 ]

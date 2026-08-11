@@ -18,6 +18,7 @@ from csd_foundry.governance.v0_5._governed_alternative_model import (
     compute_structural_difference_digest,
     detect_structural_difference,
     evaluate_alternative_model_use_authority,
+    run_full_replay_comparison,
 )
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "compute_structural_difference_digest",
     "detect_structural_difference",
     "evaluate_alternative_model_use_authority",
+    "run_full_replay_comparison",
 ]

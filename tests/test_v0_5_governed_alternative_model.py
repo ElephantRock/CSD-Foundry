@@ -41,6 +41,7 @@ from csd_foundry.governance.v0_5._governed_alternative_model import (
     compute_structural_difference_digest,
     detect_structural_difference,
     evaluate_alternative_model_use_authority,
+    run_full_replay_comparison,
 )
 from csd_foundry.governance.v0_5.alternative_model import (
     STANDING_ADMITTED,
@@ -413,8 +414,12 @@ def test_01_valid_admission_with_material_difference_appended() -> None:
     assert result.head.entity_sequence == 2
     assert result.projected.separation_status == STANDING_UNVERIFIED
     assert result.projected.admitting_authority_id == "authority:admitter"
-    # The ADMIT event source receipt is the structural-difference receipt.
-    assert result.event.to_json_value()["source_receipt_digest"] == receipt.receipt_digest
+    # The ADMIT event source receipt is the authorization digest (which
+    # transitively binds the structural-difference receipt).
+    assert (
+        result.event.to_json_value()["source_receipt_digest"]
+        == result.authorization.authorization_digest
+    )
     # Root advanced.
     assert _roots(store) != root_before
     # Head observable through the store.
@@ -678,8 +683,8 @@ _FAMILY_GRAPH_PAIRS = {
         {"evidence_ref": "e2", "semantic_seed": "s"},
     ),
     "ADDED_REMOVED": (
-        {"notes": "a", "semantic_seed": "s"},
-        {"notes": "b", "semantic_seed": "s"},
+        {"semantic_seed": "s", "extra_key": "x"},
+        {"semantic_seed": "s"},
     ),
     "RELABELED": (
         {"config": {"x": 1}, "semantic_seed": "s"},
@@ -699,21 +704,31 @@ def test_13_each_family_triggers_full_replay(family: str) -> None:
 
     assert receipt.has_material_difference is True
     assert family in receipt.difference_families
-    # FULL_REPLAY comparison completes.
-    comparison = _run_comparison(
-        _TestReplayExecutor(),
-        receipt,
-        primary_bytes=primary_bytes,
-        shadow_bytes=shadow_bytes,
+    # FULL_REPLAY comparison completes through the production orchestration.
+    comparison = run_full_replay_comparison(
+        executor=_TestReplayExecutor(),
+        structural_difference_receipt=receipt,
+        primary_graph_bytes=primary_bytes,
+        shadow_graph_bytes=shadow_bytes,
+        decision_context_digest=_digest("ctx"),
+        initial_state_digest=_digest("init"),
+        logical_clock=7,
+        runner_revision="runner:test-rev-1",
+        required_inventory=("inv:a", "inv:b"),
     )
     assert comparison.comparison_result == "INVARIANT"
 
 
-def test_14_relabeled_family_requires_type_mismatch() -> None:
-    """RELABELED fires only on a JSON-category mismatch at a non-keyword key."""
-    receipt = _detect({"config": {"x": 1}}, {"config": "scalar"})
-    assert receipt.difference_paths == ("config",)
-    assert receipt.difference_families == ("RELABELED",)
+def test_14_relabeled_family_on_same_key_value_change() -> None:
+    """RELABELED fires on any same-key value/type change at a non-keyword path."""
+    # Object vs scalar (type mismatch).
+    receipt_a = _detect({"config": {"x": 1}}, {"config": "scalar"})
+    assert receipt_a.difference_paths == ("config",)
+    assert receipt_a.difference_families == ("RELABELED",)
+    # Scalar value change (no type mismatch).
+    receipt_b = _detect({"notes": "a"}, {"notes": "b"})
+    assert receipt_b.difference_paths == ("notes",)
+    assert receipt_b.difference_families == ("RELABELED",)
 
 
 def test_15_multiple_families_collected_sorted_unique() -> None:
@@ -734,9 +749,9 @@ def test_15_multiple_families_collected_sorted_unique() -> None:
     }
     receipt = _detect(primary, shadow)
     assert receipt.difference_families == (
-        "ADDED_REMOVED",
         "AUTHORITY",
         "EVIDENCE_ADMISSION",
+        "RELABELED",
         "SCOPE",
         "TEMPORAL",
     )
