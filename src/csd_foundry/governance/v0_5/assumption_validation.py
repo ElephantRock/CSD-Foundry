@@ -1761,7 +1761,7 @@ def _evaluate_one_use_assumption(
             code="ASSUMPTION_USE_MISSING",
             history_event_count=0,
         )
-        _record_self_node_failure(assumption_id, shared_visited)
+        _record_self_node_failure(assumption_id, shared_visited, work)
         return (
             _build_use_evaluation(
                 assumption_id=assumption_id,
@@ -2008,11 +2008,17 @@ def _evaluate_one_use_assumption(
 def _record_self_node_failure(
     assumption_id: str,
     shared_visited: set[str],
+    work: _WorkCounters,
 ) -> None:
-    """Record a top-level MISSING failure (no projection to count)."""
+    """Record a top-level MISSING failure.
+
+    Production counts a missing root as 1 unique node / 1 history / 0 events / 0 challenges.
+    """
     if assumption_id in shared_visited:
         return
     shared_visited.add(assumption_id)
+    work.histories += 1
+    work.unique_nodes += 1
 
 
 def _self_gate_code(assumption: IndependentAssumptionProjection, clock: int) -> str | None:
@@ -2106,8 +2112,8 @@ def _build_use_evaluation(
 
 
 def _binding_to_json_value(binding: dict[str, Any]) -> dict[str, object]:
-    """Build the DecisionAssumptionBinding-shaped unsigned value (without
-    binding_digest, matching production's to_json_value used inside the decision
+    """Build the DecisionAssumptionBinding to_json_value (WITH binding_digest),
+    matching production's to_json_value used inside the AssumptionUseAdmissibilityDecision
     unsigned value)."""
     return {
         "schema_version": "decision-assumption-binding/1",
@@ -2119,6 +2125,7 @@ def _binding_to_json_value(binding: dict[str, Any]) -> dict[str, object]:
         "required_assumption_ids": list(binding["required_assumption_ids"]),
         "semantic_projection_receipt_digest": binding["semantic_projection_receipt_digest"],
         "validated_event_digest": binding["validated_event_digest"],
+        "binding_digest": binding["binding_digest"],
     }
 
 

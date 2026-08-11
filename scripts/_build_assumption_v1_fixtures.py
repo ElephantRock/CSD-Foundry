@@ -1660,6 +1660,7 @@ def _use_decision_unsigned(
         "required_assumption_ids": list(binding["required_assumption_ids"]),
         "semantic_projection_receipt_digest": binding["semantic_projection_receipt_digest"],
         "validated_event_digest": binding["validated_event_digest"],
+        "binding_digest": binding["binding_digest"],
     }
     decision_unsigned: dict[str, object] = {
         "schema_version": "assumption-use-admissibility-decision/1",
