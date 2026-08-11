@@ -43,11 +43,11 @@ def test_committed_alternative_model_vectors_validate_independently() -> None:
 
     assert report.success
     assert report.accepted_vector_count == 11
-    assert report.rejected_vector_count == 7
+    assert report.rejected_vector_count == 10
     assert len(report.accepted_registry_roots) == 11
-    assert len(report.rejected_failure_codes) == 7
+    assert len(report.rejected_failure_codes) == 10
     assert report.vector_catalog_digest == (
-        "sha256:5b7609b8d88d0a0f165d656c22f645732450b46c79e2da178f131fa40b0da4d2"
+        "sha256:ff521c8095c662a07be5e7dc798e37cc6be73964e2b489dfabcaa1e3e26b3b3f"
     )
     # Import boundary: the validator must not import any production governance
     # module other than canonicalization, contracts, and resources.

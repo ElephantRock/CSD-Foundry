@@ -1529,6 +1529,132 @@ def _r_admission_evidence_missing() -> dict[str, Any]:
     }
 
 
+def _r_structural_difference_declared_mismatch() -> dict[str, Any]:
+    """AMV-R08: structural-difference receipt declared_difference_digest corrupted.
+
+    The receipt's ``declared_difference_digest`` no longer matches its
+    ``computed_difference_digest``, so the independent structural-difference
+    detector rejects it during the governed ADMIT authorization reconstruction
+    (and again at the STRUCTURAL_DIFFERENCE stage dispatcher).
+    """
+    base = _v_basic_governed_admit()
+    admissions = deepcopy(base["admissions"])
+    receipt = admissions[0]["structural_difference_receipt"]
+    # Corrupt only declared_difference_digest (still a syntactically valid digest)
+    # so the computed-vs-declared check fires before the self-digest check.
+    receipt["declared_difference_digest"] = _literal_digest("corrupted-declared-difference")
+    return {
+        "vector_id": "AMV-R08",
+        "description": "structural-difference declared_difference_digest corrupted.",
+        "events": deepcopy(base["events"]),
+        "admissions": admissions,
+        "expected_authorization_digests": deepcopy(base["expected_authorization_digests"]),
+        "expected_error": "STRUCTURAL_DIFFERENCE_DECLARED_MISMATCH",
+        "stage": "STRUCTURAL_DIFFERENCE",
+    }
+
+
+def _r_replay_not_fully_executed() -> dict[str, Any]:
+    """AMV-R09: replay receipt executed_inventory != required_inventory.
+
+    The history (PROPOSE -> governed ADMIT) is valid; the defect lives in a
+    top-level FULL_REPLAY receipt whose executed inventory is a canonical subset
+    of the required inventory, so the FULL_REPLAY invariant check fires at the
+    REPLAY stage dispatcher.
+    """
+    base = _v_replay_and_comparison()
+    replay_receipts = deepcopy(base["replay_receipts"])
+    first = replay_receipts[0]
+    required = first["required_inventory"]
+    # executed must remain a canonical token tuple (sorted/unique) but differ
+    # from required, so the FULL_REPLAY invariant check is the one that fires.
+    first["executed_inventory"] = list(required[:1]) if len(required) > 1 else []
+    return {
+        "vector_id": "AMV-R09",
+        "description": "replay executed_inventory != required_inventory.",
+        "events": deepcopy(base["events"]),
+        "admissions": deepcopy(base["admissions"]),
+        "expected_authorization_digests": deepcopy(base["expected_authorization_digests"]),
+        "replay_receipts": replay_receipts,
+        "comparison_receipts": deepcopy(base["comparison_receipts"]),
+        "expected_error": "REPLAY_RECEIPT_NOT_FULLY_EXECUTED",
+        "stage": "REPLAY",
+    }
+
+
+def _r_comparison_context_mismatch() -> dict[str, Any]:
+    """AMV-R10: comparison primary/shadow decision_context_digest mismatch.
+
+    Each nested replay receipt is individually valid (correct self-digest), but
+    their decision_context_digests differ, so the canonical comparison binding
+    check fires at the COMPARISON stage dispatcher.
+    """
+    model_id = "alt-model:r10"
+    admission, receipt = _build_admission(model_id=model_id, shadow_seed="shadow-divergent")
+    primary_digest = receipt["primary_graph_digest"]
+    shadow_digest = receipt["shadow_graph_digest"]
+    propose = _ev(
+        model_id=model_id,
+        entity_sequence=1,
+        previous=None,
+        clock=1,
+        source_receipt=_receipt(f"{model_id}:propose"),
+        payload=_propose_payload(
+            graph_digest=shadow_digest,
+            declared_difference_digest=receipt["declared_difference_digest"],
+            valid_from=1,
+            expires_at=100,
+        ),
+    )
+    propose = _rebuild_chain([propose])[0]
+    admit = _admit_event(
+        model_id=model_id,
+        propose_event=propose,
+        admit_clock=2,
+        admitting_authority_id="authority:admitter",
+        alt_model_root=_snapshot_root([propose]),
+        receipt=receipt,
+    )
+    decision_context_primary = _literal_digest("decision-context:r10:primary")
+    decision_context_shadow = _literal_digest("decision-context:r10:shadow")
+    initial_state = _literal_digest("initial-state:r10")
+    primary_replay = _build_replay_receipt(
+        graph_digest=primary_digest,
+        decision_context_digest=decision_context_primary,
+        initial_state_digest=initial_state,
+        logical_clock=5,
+        runner_revision="runner:v1",
+        required_inventory=("node:n1", "node:n2"),
+        semantic_outcome_digest=_literal_digest("outcome:r10:primary"),
+    )
+    shadow_replay = _build_replay_receipt(
+        graph_digest=shadow_digest,
+        decision_context_digest=decision_context_shadow,
+        initial_state_digest=initial_state,
+        logical_clock=5,
+        runner_revision="runner:v1",
+        required_inventory=("node:n1", "node:n2"),
+        semantic_outcome_digest=_literal_digest("outcome:r10:shadow"),
+    )
+    comparison = _build_comparison_receipt(
+        primary_replay=primary_replay,
+        shadow_replay=shadow_replay,
+        structural_difference_receipt=receipt,
+    )
+    return _finalize_vector(
+        {
+            "vector_id": "AMV-R10",
+            "description": "comparison primary/shadow decision_context mismatch.",
+            "events": [propose, admit],
+            "admissions": [admission],
+            "replay_receipts": [primary_replay, shadow_replay],
+            "comparison_receipts": [comparison],
+            "expected_error": "COMPARISON_RECEIPT_DECISION_CONTEXT_MISMATCH",
+            "stage": "COMPARISON",
+        }
+    )
+
+
 def main() -> None:
     accepted_builders = [
         _v_basic_governed_admit,
@@ -1551,6 +1677,9 @@ def main() -> None:
         _r_use_denied_expired,
         _r_corrupt_expected_root,
         _r_admission_evidence_missing,
+        _r_structural_difference_declared_mismatch,
+        _r_replay_not_fully_executed,
+        _r_comparison_context_mismatch,
     ]
 
     accepted_files: list[str] = []

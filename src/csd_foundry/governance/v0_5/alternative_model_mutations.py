@@ -648,6 +648,46 @@ def _mutate_catalog(
         }
         events.append(reject)
         _rebuild_events(mutated)
+    elif operator == "SWAP_EVENT_ORDER":
+        # Swap the last two consecutive same-model events so the list order is
+        # non-canonical: the entity_sequence values no longer increase by one
+        # when the validator walks the chain, so the chain verifier detects the
+        # reordering (ENTITY_SEQUENCE_NOT_SUCCESSOR). Events are NOT rebuilt —
+        # their per-event digests stay valid and only the list order is wrong.
+        events = _array_of_objects(mutated, "events")
+        swap_idx: int | None = None
+        for i in range(len(events) - 2, -1, -1):
+            if events[i]["entity_id"] == events[i + 1]["entity_id"]:
+                swap_idx = i
+                break
+        if swap_idx is None:
+            raise AlternativeModelMutationError(
+                "ALTERNATIVE_MODEL_MUTATION_PARAMETER_INVALID",
+                "no consecutive same-model events to swap",
+            )
+        events[swap_idx], events[swap_idx + 1] = events[swap_idx + 1], events[swap_idx]
+    elif operator == "CORRUPT_COMPARISON_LOGICAL_CLOCK":
+        # Corrupt the shadow replay's logical_clock and recompute its self-digest
+        # so both nested replays still pass individual validation, but the
+        # comparison's identical-logical_clock binding check fails.
+        comparison = _find_comparison_receipt(mutated)
+        shadow = _object(comparison, "shadow_replay_receipt")
+        shadow["logical_clock"] = cast(int, shadow["logical_clock"]) + 1
+        _recompute_replay_receipt_digest(shadow)
+    elif operator == "DOWNGRADE_TO_UNVERIFIED":
+        # Drop every event after the baseline model's ADMIT, leaving it UNVERIFIED
+        # so the use-time authority gate denies with USE_DENIED_UNVERIFIED.
+        admit = _find_event(mutated, operation="ADMIT")
+        model_id = cast(str, admit["entity_id"])
+        admit_seq = cast(int, admit["entity_sequence"])
+        events = _array_of_objects(mutated, "events")
+        mutated["events"] = [
+            event
+            for event in events
+            if not (
+                event["entity_id"] == model_id and cast(int, event["entity_sequence"]) > admit_seq
+            )
+        ]
     else:
         raise AlternativeModelMutationError(
             "ALTERNATIVE_MODEL_MUTATION_OPERATOR_UNSUPPORTED", operator

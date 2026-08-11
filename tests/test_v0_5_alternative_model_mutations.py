@@ -10,14 +10,14 @@ def test_alternative_model_mutation_campaign_kills_every_declared_mutation() -> 
     report = evaluate_alternative_mutations()
 
     assert report.success
-    assert len(report.results) == 38
-    assert report.killed_count == 38
+    assert len(report.results) == 41
+    assert report.killed_count == 41
     assert report.survived_count == 0
     assert report.equivalent_count == 0
     assert report.invalid_mutation_count == 0
     assert report.unexplained_escape_count == 0
     assert report.mutation_catalog_digest == (
-        "sha256:6e336fa681911fb521a4a5e5d5ead335a3c7f3ffbd64e5c5e48f3ebf6dcfc92c"
+        "sha256:48f109da5d56e3034a7a4e3a9450126ed19d609d5344440aeeea5523eac3c3d9"
     )
     assert all(item.observed_classification == "KILLED" for item in report.results)
     assert all(item.observed_detector == item.expected_detector for item in report.results)
@@ -58,4 +58,4 @@ def test_alternative_model_mutation_resources_are_defensive_copies() -> None:
     second = alternative_model_mutation_manifest()
     second_mutations = second["mutations"]
     assert isinstance(second_mutations, list)
-    assert len(second_mutations) == 38
+    assert len(second_mutations) == 41

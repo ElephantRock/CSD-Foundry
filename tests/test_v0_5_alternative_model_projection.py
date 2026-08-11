@@ -1318,3 +1318,61 @@ def test_impact_receipt_records_confirmed_to_challenged_transition() -> None:
     assert impacts[0].previous_status == STANDING_CONFIRMED
     # CONFIRM -> CHALLENGE: standing becomes CHALLENGED.
     assert impacts[0].current_status == "CHALLENGED"
+
+
+def test_expire_impact_receipt_carries_model_local_d4_surface() -> None:
+    """A staged EXPIRE on an expirable ADMITTED/CONFIRMED model emits an
+    ``AlternativeModelImpactReceipt`` carrying the previous/current status, the
+    trigger event digest, the declared model-local D4 surface (scope, assumption,
+    evidence identifiers), and the post-event D4 registry root."""
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, model_id="alt-model:expire-impact", clock=1, expires=10)
+    admitted = _admit(store, proposed, clock=2)
+    confirmed = _confirm(store, admitted, clock=3)
+
+    claim, validated_event, semantic = _context(20)
+    source_digest = _projection_source(claim, validated_event, semantic)
+    expire_event = build_alternative_model_event(
+        model_id=confirmed.model_id,
+        entity_sequence=confirmed.current_entity_sequence + 1,
+        previous_entity_event_digest=confirmed.current_event_digest,
+        clock_sequence=20,
+        source_receipt_digest=source_digest,
+        payload={
+            "operation": "EXPIRE",
+            "expiry_authority_id": "authority:explicit",
+            "expiry_receipt_digest": _digest("explicit-expiry-receipt"),
+        },
+    )
+
+    adapter = StagedAlternativeModelProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(expire_event),
+    )
+    plan = adapter.project(
+        claim=claim,
+        validated_event=validated_event,
+        semantic_receipt=semantic,
+        committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
+    )
+
+    # The explicit EXPIRE makes the model EXPIRED, which suppresses any planned
+    # expiry, so there is exactly one staged event and one impact receipt.
+    assert len(plan.events) == 1
+    assert plan.events[0].digest == expire_event.digest
+
+    impacts = [
+        item for item in plan.impact_receipts if item.trigger_event_digest == expire_event.digest
+    ]
+    assert len(impacts) == 1
+    receipt = impacts[0]
+    assert receipt.previous_status == STANDING_CONFIRMED
+    assert receipt.current_status == "EXPIRED"
+    assert receipt.trigger_event_digest == expire_event.digest
+    assert receipt.scope_ids == ("scope:control-17",)
+    assert receipt.assumption_ids == ()
+    assert receipt.evidence_ids == ()
+    # Post-event D4 root captured immediately after the EXPIRE was applied.
+    assert receipt.alternative_model_registry_root_digest == plan.projected_root_digest

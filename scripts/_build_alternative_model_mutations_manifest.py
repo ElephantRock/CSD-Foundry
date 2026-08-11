@@ -56,6 +56,15 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
         "REJECTED",
         {"stage": "HISTORY"},
     ),
+    # HISTORY: event ordering (1)
+    (
+        "AM-HISTORY-004",
+        "HISTORY",
+        "AMV-A02",
+        "SWAP_EVENT_ORDER",
+        "REJECTED",
+        {"stage": "HISTORY"},
+    ),
     # IDENTITY (1)
     (
         "AM-IDENTITY-001",
@@ -312,6 +321,15 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
         "ACCEPTED_ERROR",
         {},
     ),
+    # COMPARISON: logical_clock binding mutation (1)
+    (
+        "AM-COMPARISON-004",
+        "COMPARISON",
+        "AMV-A09",
+        "CORRUPT_COMPARISON_LOGICAL_CLOCK",
+        "ACCEPTED_ERROR",
+        {},
+    ),
     # AUTHORIZATION: root/authority binding mutations (2)
     (
         "AM-AUTHORIZATION-003",
@@ -351,6 +369,15 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
         "USE_TIME",
         "AMV-A02",
         "CORRUPT_USE_TERMINAL",
+        "REJECTED",
+        {"stage": "USE"},
+    ),
+    # USE-TIME: UNVERIFIED downgrade gate (1)
+    (
+        "AM-USE-006",
+        "USE_TIME",
+        "AMV-A02",
+        "DOWNGRADE_TO_UNVERIFIED",
         "REJECTED",
         {"stage": "USE"},
     ),
