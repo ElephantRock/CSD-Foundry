@@ -723,11 +723,11 @@ def test_14_relabeled_family_on_same_key_value_change() -> None:
     """RELABELED fires on any same-key value/type change at a non-keyword path."""
     # Object vs scalar (type mismatch).
     receipt_a = _detect({"config": {"x": 1}}, {"config": "scalar"})
-    assert receipt_a.difference_paths == ("config",)
+    assert receipt_a.difference_paths == ("/config",)
     assert receipt_a.difference_families == ("RELABELED",)
     # Scalar value change (no type mismatch).
     receipt_b = _detect({"notes": "a"}, {"notes": "b"})
-    assert receipt_b.difference_paths == ("notes",)
+    assert receipt_b.difference_paths == ("/notes",)
     assert receipt_b.difference_families == ("RELABELED",)
 
 
@@ -1188,3 +1188,128 @@ def test_facade_reexports_governed_error() -> None:
     )
 
     assert FacadeUseAuthorityDecision is UseAuthorityDecision
+
+
+def test_array_authority_member_change_classified_as_authority() -> None:
+    """A change inside a list element's authority_id field is classified as AUTHORITY."""
+    primary = _canonical_json({"nodes": [{"authority_id": "authority:a"}]})
+    shadow = _canonical_json({"nodes": [{"authority_id": "authority:b"}]})
+    primary_digest = _graph_digest_of(primary)
+    shadow_digest = _graph_digest_of(shadow)
+    diff_digest = compute_structural_difference_digest(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+    )
+    receipt = detect_structural_difference(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+        primary_graph_digest=primary_digest,
+        shadow_graph_digest=shadow_digest,
+        declared_difference_digest=diff_digest,
+    )
+    assert "AUTHORITY" in receipt.difference_families
+    assert receipt.has_material_difference is True
+    assert receipt.difference_paths == ("/nodes/0/authority_id",)
+
+
+def test_array_member_added_classified_as_added_removed() -> None:
+    """A list member present on one side only is classified as ADDED_REMOVED."""
+    primary = _canonical_json({"nodes": [{"id": "a"}]})
+    shadow = _canonical_json({"nodes": [{"id": "a"}, {"id": "b"}]})
+    primary_digest = _graph_digest_of(primary)
+    shadow_digest = _graph_digest_of(shadow)
+    diff_digest = compute_structural_difference_digest(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+    )
+    receipt = detect_structural_difference(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+        primary_graph_digest=primary_digest,
+        shadow_graph_digest=shadow_digest,
+        declared_difference_digest=diff_digest,
+    )
+    assert "ADDED_REMOVED" in receipt.difference_families
+    assert receipt.has_material_difference is True
+    assert receipt.difference_paths == ("/nodes/1",)
+
+
+def test_nested_list_scope_key_classified_as_scope() -> None:
+    """A change in a nested list element's scope_id field is classified as SCOPE."""
+    primary = _canonical_json({"layers": [{"scope_ids": ["scope:alpha"]}]})
+    shadow = _canonical_json({"layers": [{"scope_ids": ["scope:beta"]}]})
+    primary_digest = _graph_digest_of(primary)
+    shadow_digest = _graph_digest_of(shadow)
+    diff_digest = compute_structural_difference_digest(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+    )
+    receipt = detect_structural_difference(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+        primary_graph_digest=primary_digest,
+        shadow_graph_digest=shadow_digest,
+        declared_difference_digest=diff_digest,
+    )
+    assert "SCOPE" in receipt.difference_families
+    assert receipt.has_material_difference is True
+    assert receipt.difference_paths == ("/layers/0/scope_ids/0",)
+
+
+def test_json_pointer_collision_and_escaping() -> None:
+    """RFC 6901 JSON Pointer paths are unambiguous: object keys containing
+    ``/`` and ``~`` are escaped so they cannot collide with structural segments.
+
+    Two structurally different representations that would collide under
+    dot/bracket notation produce distinct JSON Pointer paths:
+
+    - Object key ``"nodes[0]"`` containing an authority_id → ``/nodes[0]/authority_id``
+    - Array ``nodes`` index 0 containing an authority_id → ``/nodes/0/authority_id``
+
+    Additionally, keys containing ``/`` and ``~`` are properly escaped:
+    ``"a/b~c"`` → ``/a~1b~0c``.
+    """
+    # 1. Object key "nodes[0]" — brackets are NOT escaped (only / and ~ are).
+    primary_a = _canonical_json({"nodes[0]": {"authority_id": "authority:a"}})
+    shadow_a = _canonical_json({"nodes[0]": {"authority_id": "authority:b"}})
+    receipt_a = detect_structural_difference(
+        primary_graph_bytes=primary_a,
+        shadow_graph_bytes=shadow_a,
+        primary_graph_digest=_graph_digest_of(primary_a),
+        shadow_graph_digest=_graph_digest_of(shadow_a),
+        declared_difference_digest=compute_structural_difference_digest(
+            primary_graph_bytes=primary_a, shadow_graph_bytes=shadow_a
+        ),
+    )
+    assert receipt_a.difference_paths == ("/nodes[0]/authority_id",)
+
+    # 2. Actual array path — distinct from the object-key path above.
+    primary_b = _canonical_json({"nodes": [{"authority_id": "authority:a"}]})
+    shadow_b = _canonical_json({"nodes": [{"authority_id": "authority:b"}]})
+    receipt_b = detect_structural_difference(
+        primary_graph_bytes=primary_b,
+        shadow_graph_bytes=shadow_b,
+        primary_graph_digest=_graph_digest_of(primary_b),
+        shadow_graph_digest=_graph_digest_of(shadow_b),
+        declared_difference_digest=compute_structural_difference_digest(
+            primary_graph_bytes=primary_b, shadow_graph_bytes=shadow_b
+        ),
+    )
+    assert receipt_b.difference_paths == ("/nodes/0/authority_id",)
+
+    # The two paths must be distinct.
+    assert receipt_a.difference_paths != receipt_b.difference_paths
+
+    # 3. Keys containing / and ~ are escaped: "a/b~c" → segment "a~1b~0c".
+    primary_c = _canonical_json({"a/b~c": 1})
+    shadow_c = _canonical_json({"a/b~c": 2})
+    receipt_c = detect_structural_difference(
+        primary_graph_bytes=primary_c,
+        shadow_graph_bytes=shadow_c,
+        primary_graph_digest=_graph_digest_of(primary_c),
+        shadow_graph_digest=_graph_digest_of(shadow_c),
+        declared_difference_digest=compute_structural_difference_digest(
+            primary_graph_bytes=primary_c, shadow_graph_bytes=shadow_c
+        ),
+    )
+    assert receipt_c.difference_paths == ("/a~1b~0c",)
