@@ -42,6 +42,7 @@ from csd_foundry.governance.v0_5.assumption import (
     STANDING_EXPIRED,
     Assumption,
     AssumptionRegistry,
+    AssumptionRegistryError,
     build_assumption_event,
 )
 from csd_foundry.governance.v0_5.assumption_governance_contracts import (
@@ -1038,7 +1039,7 @@ def test_committed_root_unchanged_after_reduction_failure() -> None:
         assumption_id="assumption:1",
         entity_sequence=challenged.current_entity_sequence + 1,
         previous_entity_event_digest=challenged.current_event_digest,
-        clock_sequence=2,
+        clock_sequence=20,
         source_receipt_digest=source_digest,
         payload={
             "operation": "CONFIRM",
@@ -1052,7 +1053,10 @@ def test_committed_root_unchanged_after_reduction_failure() -> None:
         intent_resolver=_IntentResolver(bad_event),
     )
 
-    with pytest.raises(Exception):  # noqa: B017 - any reducer failure is acceptable
+    with pytest.raises(
+        AssumptionRegistryError,
+        match="ASSUMPTION_CONFIRM_WITH_ACTIVE_CHALLENGES",
+    ):
         adapter.project(
             claim=claim,
             validated_event=validated_event,
@@ -1425,6 +1429,109 @@ def test_governed_admit_evidence_root_mismatch_rejected() -> None:
             semantic_receipt=semantic,
             committed_store=store,
             evidence_root_digest=_digest("mismatched-evidence-root"),
+            governed_evidence=(auth,),
+        )
+
+
+def test_governed_admit_stale_sequence_rejected() -> None:
+    """An authorization at event_sequence=2 is rejected when the staged ADMIT
+    uses clock_sequence=3 (CLOCK_MISMATCH)."""
+
+    governed = _build_governed_admit_evidence(
+        InMemoryRegistryStore(),
+        candidate_id="assumption:1",
+        clock=1,
+        admit_clock=2,
+    )
+    auth = governed.authorization
+    dep_receipt = governed.dependency_receipt
+
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=100)
+
+    admit_event = build_assumption_event(
+        assumption_id="assumption:1",
+        entity_sequence=proposed.current_entity_sequence + 1,
+        previous_entity_event_digest=proposed.current_event_digest,
+        clock_sequence=3,  # != auth.event_sequence (2)
+        source_receipt_digest=dep_receipt.receipt_digest,
+        payload={
+            "operation": "ADMIT",
+            "admitting_authority_id": auth.admitting_authority_id,
+            "admission_receipt_digest": auth.authorization_digest,
+        },
+    )
+
+    claim, validated_event, semantic = _context(3)
+    adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(admit_event),
+    )
+    with pytest.raises(
+        AssumptionProjectionError,
+        match="ASSUMPTION_PROJECTION_ADMIT_CLOCK_MISMATCH",
+    ):
+        adapter.project(
+            claim=claim,
+            validated_event=validated_event,
+            semantic_receipt=semantic,
+            committed_store=store,
+            evidence_root_digest=governed.evidence_root,
+            governed_evidence=(auth,),
+        )
+
+
+def test_governed_admit_stale_assumption_root_rejected() -> None:
+    """An authorization bound to root R1 is rejected when the predecessor store
+    has a different root R2 (ROOT_MISMATCH)."""
+
+    # Build governed evidence in seed_store (root R1)
+    seed_store = InMemoryRegistryStore()
+    governed = _build_governed_admit_evidence(
+        seed_store,
+        candidate_id="assumption:1",
+        clock=1,
+        admit_clock=2,
+    )
+    auth = governed.authorization
+    dep_receipt = governed.dependency_receipt
+
+    # Build a DIFFERENT store with a different assumption root (R2)
+    # by adding a second assumption entity.
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=100)
+    _propose(store, assumption_id="assumption:other", clock=1, expires=100)
+    _admit(store, AssumptionRegistry(store).current("assumption:other"), clock=2)
+    # Now store root != seed_store root (different entities)
+
+    admit_event = build_assumption_event(
+        assumption_id="assumption:1",
+        entity_sequence=proposed.current_entity_sequence + 1,
+        previous_entity_event_digest=proposed.current_event_digest,
+        clock_sequence=2,
+        source_receipt_digest=dep_receipt.receipt_digest,
+        payload={
+            "operation": "ADMIT",
+            "admitting_authority_id": auth.admitting_authority_id,
+            "admission_receipt_digest": auth.authorization_digest,
+        },
+    )
+
+    claim, validated_event, semantic = _context(2)
+    adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(admit_event),
+    )
+    with pytest.raises(
+        AssumptionProjectionError,
+        match="ASSUMPTION_PROJECTION_ADMIT_ROOT_MISMATCH",
+    ):
+        adapter.project(
+            claim=claim,
+            validated_event=validated_event,
+            semantic_receipt=semantic,
+            committed_store=store,
+            evidence_root_digest=governed.evidence_root,
             governed_evidence=(auth,),
         )
 
