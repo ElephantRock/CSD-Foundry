@@ -51,6 +51,8 @@ jobs:
       - run: csd-foundry-admission --release v0.5
       - run: csd-foundry-evidence-v0-5 --release v0.5
       - run: csd-foundry-evidence-mutations-v0-5 --release v0.5
+      - run: csd-foundry-assumption-v0-5 --release v0.5
+      - run: csd-foundry-assumption-mutations-v0-5 --release v0.5
       - run: csd-foundry-temporal-v0-5 --release v0.5
       - run: csd-foundry demo > /tmp/csd-foundry-demo.json && test -s /tmp/csd-foundry-demo.json
       - run: pip wheel . --no-deps --wheel-dir /tmp/csd-wheelhouse
@@ -73,6 +75,8 @@ jobs:
           /tmp/csd-installed/bin/csd-foundry-admission --release v0.5 > admission-report.json
           /tmp/csd-installed/bin/csd-foundry-evidence-v0-5 --release v0.5 > evidence-report.json
           /tmp/csd-installed/bin/csd-foundry-evidence-mutations-v0-5 --release v0.5 > evidence-mutation-report.json
+          /tmp/csd-installed/bin/csd-foundry-assumption-v0-5 --release v0.5 > assumption-report.json
+          /tmp/csd-installed/bin/csd-foundry-assumption-mutations-v0-5 --release v0.5 > assumption-mutation-report.json
           /tmp/csd-installed/bin/csd-foundry-temporal-v0-5 --release v0.5 > temporal-v0-5-report.json
           test -s scenario-report.json
           test -s temporal-report.json
@@ -88,4 +92,6 @@ jobs:
           test -s admission-report.json
           test -s evidence-report.json
           test -s evidence-mutation-report.json
+          test -s assumption-report.json
+          test -s assumption-mutation-report.json
           test -s temporal-v0-5-report.json
