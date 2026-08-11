@@ -102,6 +102,7 @@ class AlternativeModel:
     primary_model_id: str
     graph_digest: str
     declared_difference_digest: str
+    challenge_basis_code: str
     scope_ids: tuple[str, ...]
     assumption_ids: tuple[str, ...]
     evidence_ids: tuple[str, ...]
@@ -130,6 +131,7 @@ class AlternativeModel:
         _require_digest(
             self.declared_difference_digest, "ALTERNATIVE_MODEL_DIFFERENCE_DIGEST_INVALID"
         )
+        _require_token(self.challenge_basis_code, "ALTERNATIVE_MODEL_CHALLENGE_BASIS_INVALID")
         _require_sorted_tokens(self.scope_ids, "ALTERNATIVE_MODEL_SCOPE_IDS_INVALID")
         _require_sorted_tokens(
             self.assumption_ids, "ALTERNATIVE_MODEL_ASSUMPTION_IDS_INVALID", allow_empty=True
@@ -316,6 +318,7 @@ def _propose(
             "primary_model_id",
             "graph_digest",
             "declared_difference_digest",
+            "challenge_basis_code",
             "scope_ids",
             "assumption_ids",
             "evidence_ids",
@@ -336,6 +339,9 @@ def _propose(
     )
     declared_difference_digest = _required_digest(
         payload, "declared_difference_digest", "ALTERNATIVE_MODEL_DIFFERENCE_DIGEST_INVALID"
+    )
+    challenge_basis_code = _required_token(
+        payload, "challenge_basis_code", "ALTERNATIVE_MODEL_CHALLENGE_BASIS_INVALID"
     )
     scope_ids = _required_token_tuple(payload, "scope_ids", "ALTERNATIVE_MODEL_SCOPE_IDS_INVALID")
     assumption_ids = _optional_token_tuple(
@@ -374,6 +380,7 @@ def _propose(
         primary_model_id=primary_model_id,
         graph_digest=graph_digest,
         declared_difference_digest=declared_difference_digest,
+        challenge_basis_code=challenge_basis_code,
         scope_ids=scope_ids,
         assumption_ids=assumption_ids,
         evidence_ids=evidence_ids,
@@ -548,18 +555,20 @@ def _resolve_challenges(
             separation_status=STANDING_REJECTED,
             active_challenges=(),
         )
-    # UPHOLD: keep unresolved challenges, restore to pre-challenge standing
+    # UPHOLD: replacement must not be supplied for either outcome
+    if replacement is not None:
+        raise AlternativeModelRegistryError("ALTERNATIVE_MODEL_REPLACEMENT_UNEXPECTED")
+    # UPHOLD: keep unresolved challenges, preserve pre-challenge standing
     remaining = tuple(
         c for c in previous.active_challenges if c.challenge_id not in set(resolved_ids)
     )
     if remaining:
         return _advance(previous, event, value, active_challenges=remaining)
-    # All resolved: restore to ADMITTED (the original pre-challenge standing)
+    # All resolved: preserve previous.separation_status (not hardcoded ADMITTED)
     return _advance(
         previous,
         event,
         value,
-        separation_status=STANDING_ADMITTED,
         active_challenges=(),
     )
 
