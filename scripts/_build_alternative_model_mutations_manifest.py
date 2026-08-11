@@ -270,6 +270,90 @@ SPECS: list[tuple[str, str, str, str, str, dict[str, Any]]] = [
         "ACCEPTED_ERROR",
         {"challenge_basis_code": "basis:tampered"},
     ),
+    # REPLAY: nonempty pruned_inventory + context/state/runner binding mutations (4)
+    (
+        "AM-REPLAY-003",
+        "REPLAY",
+        "AMV-A09",
+        "CORRUPT_REPLAY_PRUNED",
+        "ACCEPTED_ERROR",
+        {},
+    ),
+    (
+        "AM-REPLAY-004",
+        "REPLAY",
+        "AMV-A09",
+        "CORRUPT_REPLAY_RUNNER",
+        "ACCEPTED_ERROR",
+        {},
+    ),
+    (
+        "AM-REPLAY-005",
+        "REPLAY",
+        "AMV-A09",
+        "CORRUPT_REPLAY_DECISION_CONTEXT",
+        "ACCEPTED_ERROR",
+        {},
+    ),
+    (
+        "AM-REPLAY-006",
+        "REPLAY",
+        "AMV-A09",
+        "CORRUPT_REPLAY_INITIAL_STATE",
+        "ACCEPTED_ERROR",
+        {},
+    ),
+    # COMPARISON: context binding mutation (1)
+    (
+        "AM-COMPARISON-003",
+        "COMPARISON",
+        "AMV-A09",
+        "CORRUPT_COMPARISON_CONTEXT",
+        "ACCEPTED_ERROR",
+        {},
+    ),
+    # AUTHORIZATION: root/authority binding mutations (2)
+    (
+        "AM-AUTHORIZATION-003",
+        "AUTHORITY",
+        "AMV-A01",
+        "SUBSTITUTE_ADMITTING_AUTHORITY",
+        "ACCEPTED_ERROR",
+        {"authority_id": "authority:intruder"},
+    ),
+    (
+        "AM-AUTHORIZATION-004",
+        "AUTHORIZATION_ROOT",
+        "AMV-A01",
+        "CORRUPT_AUTHORIZATION_ROOT",
+        "ACCEPTED_ERROR",
+        {"extra_model_id": "alt-model:extra-root"},
+    ),
+    # USE-TIME: terminal/expiry/reuse-class mutations (3)
+    (
+        "AM-USE-003",
+        "USE_TIME",
+        "AMV-A02",
+        "CORRUPT_USE_REUSE_CLASS",
+        "REJECTED",
+        {"stage": "USE"},
+    ),
+    (
+        "AM-USE-004",
+        "USE_TIME",
+        "AMV-A02",
+        "CORRUPT_USE_EXPIRY",
+        "REJECTED",
+        {"stage": "USE", "logical_clock": 200},
+    ),
+    (
+        "AM-USE-005",
+        "USE_TIME",
+        "AMV-A02",
+        "CORRUPT_USE_TERMINAL",
+        "REJECTED",
+        {"stage": "USE"},
+    ),
 ]
 
 

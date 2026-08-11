@@ -303,23 +303,58 @@ def test_expiry_planner_is_logical_clock_driven_and_idempotent() -> None:
     assert store.snapshot("ALTERNATIVE_MODEL").root_digest == original_root
 
 
-def test_expiry_planner_skips_unverified_and_unexpired_models() -> None:
-    """UNVERIFIED models are not expirable (only ADMITTED/CONFIRMED)."""
+def test_expiry_planner_expires_unverified_models() -> None:
+    """UNVERIFIED models ARE expirable (P3.5 includes UNVERIFIED in expirable standings)."""
 
     store = InMemoryRegistryStore()
     proposed = _propose(store, model_id="alt-model:unverified", clock=1, expires=10)
     _admit(store, proposed, clock=2)
-    # Model is now UNVERIFIED (not ADMITTED), so not expirable.
+    # Model is now UNVERIFIED, which IS expirable per the frozen P3.5 contract.
+    original_root = store.snapshot("ALTERNATIVE_MODEL").root_digest
+
+    planner = AlternativeModelExpiryPlanner(expiry_authority=_StaticExpiryAuthority())
+    early = planner.plan(
+        store=store,
+        clock_sequence=9,
+        source_receipt_digest=_digest("tick:9"),
+    )
+    on_time = planner.plan(
+        store=store,
+        clock_sequence=10,
+        source_receipt_digest=_digest("tick:10"),
+    )
+
+    # clock 9 < expires_at 10 → not yet expirable.
+    assert early.events == ()
+    # clock 10 >= expires_at 10 → expirable.
+    assert len(on_time.events) == 1
+    assert on_time.events[0].to_json_value()["payload"]["operation"] == "EXPIRE"
+    # Planner must not mutate the committed store.
+    assert store.snapshot("ALTERNATIVE_MODEL").root_digest == original_root
+
+
+def test_challenged_model_expiry_still_works() -> None:
+    """A CHALLENGED model (derived from underlying UNVERIFIED with active challenges)
+    is still expirable — the expiry check uses the underlying separation_status."""
+
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, model_id="alt-model:challenged", clock=1, expires=10)
+    admitted = _admit(store, proposed, clock=2)
+    challenged = _challenge(store, admitted, clock=4, challenge_id="challenge:c1")
+    # The model's separation_status is still UNVERIFIED (challenges don't change it),
+    # but the derived standing is CHALLENGED due to the active challenge.
+    assert challenged.standing == "CHALLENGED"
     original_root = store.snapshot("ALTERNATIVE_MODEL").root_digest
 
     planner = AlternativeModelExpiryPlanner(expiry_authority=_StaticExpiryAuthority())
     plan = planner.plan(
         store=store,
-        clock_sequence=20,
-        source_receipt_digest=_digest("tick:20"),
+        clock_sequence=10,
+        source_receipt_digest=_digest("tick:10"),
     )
 
-    assert plan.events == ()
+    assert len(plan.events) == 1
+    assert plan.events[0].to_json_value()["payload"]["operation"] == "EXPIRE"
     assert store.snapshot("ALTERNATIVE_MODEL").root_digest == original_root
 
 
@@ -356,10 +391,14 @@ def test_empty_impact_closure_when_no_impact_event() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     assert len(plan.impact_receipts) == 1
-    assert plan.impact_receipts[0].affected_model_ids == ()
+    assert plan.impact_receipts[0].scope_ids == ("scope:control-17",)
+    assert plan.impact_receipts[0].assumption_ids == ()
+    assert plan.impact_receipts[0].evidence_ids == ()
 
 
 @pytest.mark.parametrize(
@@ -422,6 +461,8 @@ def test_each_impact_operation_emits_receipt(operation: str, payload: dict[str, 
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     impacts = [item for item in plan.impact_receipts if item.trigger_event_digest == event.digest]
@@ -465,6 +506,8 @@ def test_resolve_challenges_impact_emits_receipt() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     impacts = [item for item in plan.impact_receipts if item.trigger_event_digest == event.digest]
@@ -490,6 +533,8 @@ def test_staged_projection_does_not_mutate_committed_store() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     assert plan.projected_root_digest != original_root
@@ -511,12 +556,16 @@ def test_restart_replay_byte_identity() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
     second = adapter.project(
         claim=claim,
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     assert first.to_json_value() == second.to_json_value()
@@ -536,6 +585,8 @@ def test_candidate_root_reconstruction_from_predecessor_and_events() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     rebuilt = InMemoryRegistryStore()
@@ -569,6 +620,8 @@ def test_committed_root_unchanged_after_context_failure() -> None:
             validated_event=validated_event,
             semantic_receipt=semantic,
             committed_store=store,
+            evidence_root_digest=_digest("evidence-root"),
+            assumption_root_digest=_digest("assumption-root"),
         )
 
     assert store.snapshot("ALTERNATIVE_MODEL").root_digest == original_root
@@ -587,6 +640,8 @@ def test_empty_projection_when_nothing_expirable() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     assert plan.events == ()
@@ -625,6 +680,8 @@ def test_explicit_expire_suppresses_planned_expiry() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     assert len(plan.events) == 1
@@ -787,10 +844,9 @@ def _build_replay_receipt(
 def test_governed_admit_bindings_preserved_on_staged_admit() -> None:
     """A staged ADMIT built from a real authorization is validated and preserved."""
     seed_store = InMemoryRegistryStore()
-    evidence = _build_governed_admit_evidence(
+    auth, comparison = _build_governed_admit_with_comparison(
         seed_store, model_id="alt-model:1", clock=1, admit_clock=2
     )
-    auth = evidence.authorization
 
     # Committed store has only PROPOSE.
     store = InMemoryRegistryStore()
@@ -825,13 +881,16 @@ def test_governed_admit_bindings_preserved_on_staged_admit() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
-        governed_admit_evidence=((auth, None),),
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
+        governed_admit_evidence=((auth, comparison),),
     )
 
     assert len(plan.events) == 1
     staged = plan.events[0]
     assert staged.canonical_bytes == admit_event.canonical_bytes
     assert staged.digest == admit_event.digest
+    assert plan.admit_comparison_bindings == (("alt-model:1", comparison.comparison_digest),)
 
 
 def test_governed_admit_without_evidence_rejected() -> None:
@@ -877,15 +936,16 @@ def test_governed_admit_without_evidence_rejected() -> None:
             validated_event=validated_event,
             semantic_receipt=semantic,
             committed_store=store,
+            evidence_root_digest=_digest("evidence-root"),
+            assumption_root_digest=_digest("assumption-root"),
         )
 
 
 def test_governed_admit_source_digest_tamper_rejected() -> None:
     seed_store = InMemoryRegistryStore()
-    evidence = _build_governed_admit_evidence(
+    auth, comparison = _build_governed_admit_with_comparison(
         seed_store, model_id="alt-model:1", clock=1, admit_clock=2
     )
-    auth = evidence.authorization
 
     store = InMemoryRegistryStore()
     proposed = _propose(
@@ -923,7 +983,9 @@ def test_governed_admit_source_digest_tamper_rejected() -> None:
             validated_event=validated_event,
             semantic_receipt=semantic,
             committed_store=store,
-            governed_admit_evidence=((auth, None),),
+            evidence_root_digest=_digest("evidence-root"),
+            assumption_root_digest=_digest("assumption-root"),
+            governed_admit_evidence=((auth, comparison),),
         )
 
 
@@ -931,10 +993,9 @@ def test_governed_admit_stale_root_rejected() -> None:
     """An authorization bound to root R1 is rejected when the predecessor store
     has a different root R2 (ROOT_MISMATCH)."""
     seed_store = InMemoryRegistryStore()
-    evidence = _build_governed_admit_evidence(
+    auth, comparison = _build_governed_admit_with_comparison(
         seed_store, model_id="alt-model:1", clock=1, admit_clock=2
     )
-    auth = evidence.authorization
 
     # Different store with a different root (extra entity).
     store = InMemoryRegistryStore()
@@ -974,7 +1035,9 @@ def test_governed_admit_stale_root_rejected() -> None:
             validated_event=validated_event,
             semantic_receipt=semantic,
             committed_store=store,
-            governed_admit_evidence=((auth, None),),
+            evidence_root_digest=_digest("evidence-root"),
+            assumption_root_digest=_digest("assumption-root"),
+            governed_admit_evidence=((auth, comparison),),
         )
 
 
@@ -1006,6 +1069,8 @@ def test_non_admit_event_does_not_require_governed_evidence() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     confirm_events = [
@@ -1060,11 +1125,65 @@ def test_governed_admit_with_comparison_evidence_accepted() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
         governed_admit_evidence=((auth, comparison),),
     )
 
     assert len(plan.events) == 1
     assert plan.events[0].digest == admit_event.digest
+
+
+def test_governed_admit_without_comparison_rejected() -> None:
+    """ADMIT + authorization but no comparison receipt → fail closed."""
+    seed_store = InMemoryRegistryStore()
+    auth, _ = _build_governed_admit_with_comparison(
+        seed_store, model_id="alt-model:1", clock=1, admit_clock=2
+    )
+
+    store = InMemoryRegistryStore()
+    proposed = _propose(
+        store,
+        model_id="alt-model:1",
+        clock=1,
+        expires=100,
+        graph_digest=auth.shadow_graph_digest,
+        declared_difference_digest=auth.structural_difference_receipt.declared_difference_digest,
+    )
+
+    admit_event = build_alternative_model_event(
+        model_id="alt-model:1",
+        entity_sequence=proposed.current_entity_sequence + 1,
+        previous_entity_event_digest=proposed.current_event_digest,
+        clock_sequence=2,
+        source_receipt_digest=auth.authorization_digest,
+        payload={
+            "operation": "ADMIT",
+            "admitting_authority_id": auth.admitting_authority_id,
+        },
+    )
+
+    claim, validated_event, semantic = _context(2)
+    adapter = StagedAlternativeModelProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(admit_event),
+    )
+    with pytest.raises(
+        AlternativeModelProjectionError,
+        match="ALT_MODEL_PROJECTION_COMPARISON_MISSING",
+    ):
+        adapter.project(
+            claim=claim,
+            validated_event=validated_event,
+            semantic_receipt=semantic,
+            committed_store=store,
+            evidence_root_digest=_digest("evidence-root"),
+            assumption_root_digest=_digest("assumption-root"),
+            governed_admit_evidence=cast(
+                "tuple[tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt], ...]",
+                ((auth, None),),
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1130,6 +1249,8 @@ def test_staging_append_fault_leaves_committed_store_byte_identical() -> None:
             validated_event=validated_event,
             semantic_receipt=semantic,
             committed_store=store,
+            evidence_root_digest=_digest("evidence-root"),
+            assumption_root_digest=_digest("assumption-root"),
         )
 
     assert store.snapshot("ALTERNATIVE_MODEL").root_digest == original_root
@@ -1145,6 +1266,8 @@ def test_staging_append_fault_leaves_committed_store_byte_identical() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     assert len(plan.events) == 2
@@ -1186,6 +1309,8 @@ def test_impact_receipt_records_confirmed_to_challenged_transition() -> None:
         validated_event=validated_event,
         semantic_receipt=semantic,
         committed_store=store,
+        evidence_root_digest=_digest("evidence-root"),
+        assumption_root_digest=_digest("assumption-root"),
     )
 
     impacts = [item for item in plan.impact_receipts if item.trigger_event_digest == event.digest]

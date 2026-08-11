@@ -540,6 +540,114 @@ def _mutate_catalog(
         paths = cast(list[str], receipt["difference_paths"])
         paths.append("/node/with~0escape")
         receipt["difference_paths"] = sorted(set(paths))
+    elif operator == "CORRUPT_REPLAY_PRUNED":
+        # Set pruned_inventory to nonempty, violating the FULL_REPLAY invariant.
+        replay = _find_replay_receipt(mutated)
+        required = cast(list[str], replay["required_inventory"])
+        replay["pruned_inventory"] = required[:1] if required else ["node:pruned"]
+    elif operator == "CORRUPT_REPLAY_RUNNER":
+        # Corrupt runner_revision to an invalid token format.
+        replay = _find_replay_receipt(mutated)
+        replay["runner_revision"] = "runner invalid token"
+    elif operator == "CORRUPT_REPLAY_DECISION_CONTEXT":
+        # Change decision_context_digest so the self-digest no longer matches.
+        replay = _find_replay_receipt(mutated)
+        replay["decision_context_digest"] = _ZERO_DIGEST
+    elif operator == "CORRUPT_REPLAY_INITIAL_STATE":
+        # Change initial_state_digest so the self-digest no longer matches.
+        replay = _find_replay_receipt(mutated)
+        replay["initial_state_digest"] = _ZERO_DIGEST
+    elif operator == "CORRUPT_COMPARISON_CONTEXT":
+        # Change the shadow replay's decision_context_digest and recompute its
+        # self-digest so both replays pass individual validation but the
+        # comparison's identical-decision-context binding check fails.
+        comparison = _find_comparison_receipt(mutated)
+        shadow = _object(comparison, "shadow_replay_receipt")
+        shadow["decision_context_digest"] = _ZERO_DIGEST
+        _recompute_replay_receipt_digest(shadow)
+    elif operator == "CORRUPT_AUTHORIZATION_ROOT":
+        # Insert a PROPOSE for a second model before the ADMIT, changing the
+        # pre-ADMIT registry root. The ADMIT's source_receipt_digest was bound
+        # to the original single-model root, so the reconstructed authorization
+        # digest differs (ADMISSION_AUTHORIZATION_MISMATCH).
+        events = _array_of_objects(mutated, "events")
+        admit = _find_event(mutated, operation="ADMIT")
+        admit_idx = events.index(admit)
+        extra_id = _required_string(parameters, "extra_model_id")
+        extra_propose = {
+            "schema_version": "registry-event/1",
+            "registry_type": "ALTERNATIVE_MODEL",
+            "entity_id": extra_id,
+            "entity_sequence": 1,
+            "previous_entity_event_digest": None,
+            "clock_sequence": 1,
+            "projection_phase": "ALTERNATIVE_MODEL_REGISTRY",
+            "source_receipt_digest": _literal_digest(f"{mutation_id}:extra-propose"),
+            "payload_schema_version": "alternative-model-event/1",
+            "payload": {
+                "operation": "PROPOSE",
+                "model_version": "v1",
+                "primary_model_id": "model:primary",
+                "graph_digest": _ZERO_DIGEST,
+                "declared_difference_digest": _ZERO_DIGEST,
+                "challenge_basis_code": "basis:extra",
+                "scope_ids": ["scope:extra"],
+                "assumption_ids": [],
+                "evidence_ids": [],
+                "proposer_authority_id": "authority:extra-proposer",
+                "materiality": "MATERIAL",
+                "valid_from_sequence": 1,
+                "expires_at_sequence": 100,
+                "limitations": [],
+                "maximum_reuse_class": "D2",
+            },
+            "registry_event_digest": _ZERO_DIGEST,
+        }
+        events.insert(admit_idx, extra_propose)
+        _rebuild_events(mutated)
+    elif operator == "CORRUPT_USE_REUSE_CLASS":
+        # Change required_reuse_class to exceed the model's maximum (D2),
+        # triggering USE_DENIED_REUSE_CLASS.
+        binding = _object(mutated, "use_authority")
+        binding["required_reuse_class"] = "BENCHMARK"
+    elif operator == "CORRUPT_USE_EXPIRY":
+        # Change logical_clock past the model's expiry, triggering
+        # USE_DENIED_EXPIRED.
+        binding = _object(mutated, "use_authority")
+        clock = parameters.get("logical_clock")
+        if type(clock) is not int or isinstance(clock, bool) or clock < 1:
+            raise AlternativeModelMutationError(
+                "ALTERNATIVE_MODEL_MUTATION_PARAMETER_INVALID", "logical_clock"
+            )
+        binding["logical_clock"] = clock
+    elif operator == "CORRUPT_USE_TERMINAL":
+        # Append a REJECT event after the model's head, making it terminal, then
+        # the use-authority gate denies with USE_DENIED_TERMINAL.
+        events = _array_of_objects(mutated, "events")
+        head = max(
+            events,
+            key=lambda e: cast(int, e["entity_sequence"]),
+        )
+        model_id = cast(str, head["entity_id"])
+        reject = {
+            "schema_version": "registry-event/1",
+            "registry_type": "ALTERNATIVE_MODEL",
+            "entity_id": model_id,
+            "entity_sequence": cast(int, head["entity_sequence"]) + 1,
+            "previous_entity_event_digest": head["registry_event_digest"],
+            "clock_sequence": cast(int, head["clock_sequence"]) + 1,
+            "projection_phase": "ALTERNATIVE_MODEL_REGISTRY",
+            "source_receipt_digest": _literal_digest(f"{mutation_id}:reject"),
+            "payload_schema_version": "alternative-model-event/1",
+            "payload": {
+                "operation": "REJECT",
+                "rejecting_authority_id": "authority:rejector",
+                "reason_code": "reason:terminal-mutation",
+            },
+            "registry_event_digest": _ZERO_DIGEST,
+        }
+        events.append(reject)
+        _rebuild_events(mutated)
     else:
         raise AlternativeModelMutationError(
             "ALTERNATIVE_MODEL_MUTATION_OPERATOR_UNSUPPORTED", operator
@@ -650,7 +758,7 @@ def _as_rejected_vector(
     expected_detector: str,
     stage: str,
 ) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "description": f"Mutation {mutation_id} must fail closed.",
         "events": deepcopy(_array_of_objects(vector, "events")),
         "expected_error": expected_detector,
@@ -661,6 +769,10 @@ def _as_rejected_vector(
         ),
         "vector_id": f"MUT-{mutation_id}",
     }
+    use_authority = deepcopy(vector.get("use_authority"))
+    if use_authority is not None:
+        result["use_authority"] = use_authority
+    return result
 
 
 def _rebuild_events(vector: dict[str, Any]) -> None:
@@ -781,6 +893,32 @@ def _string_or_placeholder(value: object, placeholder: str) -> str:
 
 def _literal_digest(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+_REPLAY_RECEIPT_SCHEMA_VERSION = "alternative-model-replay-receipt/1"
+
+
+def _recompute_replay_receipt_digest(replay: dict[str, Any]) -> None:
+    """Recompute a serialized replay receipt's self-digest in-place.
+
+    Mirrors the production ``ReplayReceipt._unsigned_value`` + domain digest
+    exactly so the mutated receipt still passes individual self-digest
+    validation while breaking a cross-receipt binding (e.g. comparison context).
+    """
+    unsigned: dict[str, object] = {
+        "schema_version": _REPLAY_RECEIPT_SCHEMA_VERSION,
+        "graph_digest": replay["graph_digest"],
+        "decision_context_digest": replay["decision_context_digest"],
+        "initial_state_digest": replay["initial_state_digest"],
+        "logical_clock": replay["logical_clock"],
+        "runner_revision": replay["runner_revision"],
+        "required_inventory": list(replay["required_inventory"]),
+        "executed_inventory": list(replay["executed_inventory"]),
+        "skipped_inventory": list(replay["skipped_inventory"]),
+        "pruned_inventory": list(replay["pruned_inventory"]),
+        "semantic_outcome_digest": replay["semantic_outcome_digest"],
+    }
+    replay["receipt_digest"] = _domain_digest("ALTERNATIVE_MODEL_REPLAY_RECEIPT", unsigned)
 
 
 def _domain_digest(domain: str, value: object) -> str:

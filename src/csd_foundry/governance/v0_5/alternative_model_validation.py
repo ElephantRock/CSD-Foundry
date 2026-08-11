@@ -320,14 +320,19 @@ def validate_alternative_model_registry(
                 actual_root = _snapshot_root(result.projections)
                 if actual_root != expected_root:
                     observed = "ALTERNATIVE_MODEL_EXPECTED_ROOT_MISMATCH"
-            elif stage in {
-                "HISTORY",
-                "LIFECYCLE",
-                "ADMISSION",
-                "STRUCTURAL_DIFFERENCE",
-                "REPLAY",
-                "COMPARISON",
-            }:
+            elif stage in {"HISTORY", "LIFECYCLE", "ADMISSION"}:
+                # History/lifecycle/admission errors are caught by _validate_history
+                # above. If we reach here without exception, the vector was
+                # unexpectedly accepted.
+                observed = None
+            elif stage == "STRUCTURAL_DIFFERENCE":
+                _validate_structural_difference_receipts(vector)
+                observed = None
+            elif stage == "REPLAY":
+                _validate_replay_receipts(vector)
+                observed = None
+            elif stage == "COMPARISON":
+                _validate_comparison_receipts(vector)
                 observed = None
             else:
                 observed = "ALTERNATIVE_MODEL_VECTOR_STAGE_INVALID"

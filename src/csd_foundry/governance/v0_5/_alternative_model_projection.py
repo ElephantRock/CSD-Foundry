@@ -11,10 +11,18 @@ Binding model (P3.5 review corrections):
   The adapter validates they are well-formed (correct registry type, clock
   consistency) but does NOT require a generic source digest.
 * Governed ADMIT events are validated against caller-supplied
-  :class:`GovernedAlternativeModelAuthorization` + :class:`ComparisonReceipt`
-  evidence: the event's ``source_receipt_digest`` must equal the
-  ``authorization.authorization_digest``, and the comparison receipt's
-  structural-difference set must match the authorization's.
+  :class:`GovernedAlternativeModelAuthorization` + non-optional
+  :class:`ComparisonReceipt` evidence: the event's ``source_receipt_digest``
+  must equal the ``authorization.authorization_digest``, and the comparison
+  receipt's ``structural_difference_receipt`` must be exactly equal (full
+  receipt object equality) to the authorization's. Canonical
+  ``(model_id, comparison_digest)`` pairs are bound into the projection plan.
+* The caller must supply ``evidence_root_digest`` and ``assumption_root_digest``
+  for each projection attempt; both are bound into the plan.
+* Expiry applies to UNVERIFIED, ADMITTED, and CONFIRMED standings.
+* Impact receipts carry only the affected model's declared model-local D4
+  surface (scope, assumption, evidence identifiers) — no cross-model dependency
+  or transitive-closure claims.
 * The expiry authority returns a self-digesting
   :class:`AlternativeModelExpiryAuthorization` per model; the planner does not
   invent or trust arbitrary authority/receipt strings.
@@ -37,6 +45,7 @@ from csd_foundry.governance.v0_5._governed_alternative_model import (
 from csd_foundry.governance.v0_5.alternative_model import (
     STANDING_ADMITTED,
     STANDING_CONFIRMED,
+    STANDING_UNVERIFIED,
     AlternativeModel,
     build_alternative_model_event,
     project_alternative_model_history,
@@ -57,7 +66,7 @@ PROJECTION_PLAN_SCHEMA_VERSION = "alternative-model-projection-plan/1"
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
-_EXPIRABLE_STANDINGS = {STANDING_ADMITTED, STANDING_CONFIRMED}
+_EXPIRABLE_STANDINGS = {STANDING_UNVERIFIED, STANDING_ADMITTED, STANDING_CONFIRMED}
 _IMPACT_OPERATIONS = {
     "CHALLENGE",
     "RESOLVE_CHALLENGES",
@@ -356,13 +365,21 @@ def _eligible_for_expiry(model: AlternativeModel | None, clock_sequence: int) ->
 
 @dataclass(frozen=True, slots=True)
 class AlternativeModelImpactReceipt:
-    """Self-digesting impact receipt for one alternative-model impact operation."""
+    """Self-digesting impact receipt for one alternative-model impact operation.
+
+    Carries only the affected model's declared model-local D4 surface (scope,
+    assumption, evidence identifiers). It makes no cross-model dependency
+    claims — the completeness boundary is strictly the model's own declared
+    surface, not a reverse transitive closure.
+    """
 
     model_id: str
     previous_status: str
     current_status: str
     trigger_event_digest: str
-    affected_model_ids: tuple[str, ...]
+    scope_ids: tuple[str, ...]
+    assumption_ids: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
     alternative_model_registry_root_digest: str
     completeness_boundary: str
     receipt_digest: str
@@ -372,7 +389,9 @@ class AlternativeModelImpactReceipt:
         _require_token(self.previous_status, "ALT_MODEL_IMPACT_PREVIOUS_STATUS_INVALID")
         _require_token(self.current_status, "ALT_MODEL_IMPACT_CURRENT_STATUS_INVALID")
         _require_digest(self.trigger_event_digest, "ALT_MODEL_IMPACT_EVENT_INVALID")
-        _require_tokens(self.affected_model_ids, "ALT_MODEL_IMPACT_DEPENDENCIES_INVALID")
+        _require_tokens(self.scope_ids, "ALT_MODEL_IMPACT_SCOPE_IDS_INVALID")
+        _require_tokens(self.assumption_ids, "ALT_MODEL_IMPACT_ASSUMPTION_IDS_INVALID")
+        _require_tokens(self.evidence_ids, "ALT_MODEL_IMPACT_EVIDENCE_IDS_INVALID")
         _require_digest(
             self.alternative_model_registry_root_digest, "ALT_MODEL_IMPACT_ROOT_INVALID"
         )
@@ -391,23 +410,30 @@ class AlternativeModelImpactReceipt:
         previous_status: str,
         current_status: str,
         trigger_event_digest: str,
-        affected_model_ids: tuple[str, ...],
+        scope_ids: tuple[str, ...],
+        assumption_ids: tuple[str, ...],
+        evidence_ids: tuple[str, ...],
         alternative_model_registry_root_digest: str,
     ) -> AlternativeModelImpactReceipt:
-        dependencies = tuple(sorted(set(affected_model_ids)))
+        canonical_scope = tuple(sorted(set(scope_ids)))
+        canonical_assumption = tuple(sorted(set(assumption_ids)))
+        canonical_evidence = tuple(sorted(set(evidence_ids)))
         boundary = (
-            "Reverse transitive closure over primary_model_id links; substantive "
-            "survival is decided by the semantic projector."
+            "Declared model-local D4 impact surface (scope, assumption, evidence "
+            "identifiers) for the affected model only; no cross-model dependency "
+            "or transitive-closure claims are made."
         )
         unsigned: dict[str, object] = {
             "schema_version": IMPACT_RECEIPT_SCHEMA_VERSION,
-            "affected_model_ids": list(dependencies),
             "alternative_model_registry_root_digest": alternative_model_registry_root_digest,
+            "assumption_ids": list(canonical_assumption),
             "completeness_boundary": boundary,
             "current_status": current_status,
+            "evidence_ids": list(canonical_evidence),
             "impact_kind": "REASSESSMENT_REQUIRED",
             "model_id": model_id,
             "previous_status": previous_status,
+            "scope_ids": list(canonical_scope),
             "trigger_event_digest": trigger_event_digest,
         }
         return cls(
@@ -415,7 +441,9 @@ class AlternativeModelImpactReceipt:
             previous_status=previous_status,
             current_status=current_status,
             trigger_event_digest=trigger_event_digest,
-            affected_model_ids=dependencies,
+            scope_ids=canonical_scope,
+            assumption_ids=canonical_assumption,
+            evidence_ids=canonical_evidence,
             alternative_model_registry_root_digest=alternative_model_registry_root_digest,
             completeness_boundary=boundary,
             receipt_digest=_digest_object("ALTERNATIVE_MODEL_IMPACT_RECEIPT", unsigned),
@@ -424,13 +452,15 @@ class AlternativeModelImpactReceipt:
     def _unsigned(self) -> dict[str, object]:
         return {
             "schema_version": IMPACT_RECEIPT_SCHEMA_VERSION,
-            "affected_model_ids": list(self.affected_model_ids),
             "alternative_model_registry_root_digest": self.alternative_model_registry_root_digest,
+            "assumption_ids": list(self.assumption_ids),
             "completeness_boundary": self.completeness_boundary,
             "current_status": self.current_status,
+            "evidence_ids": list(self.evidence_ids),
             "impact_kind": "REASSESSMENT_REQUIRED",
             "model_id": self.model_id,
             "previous_status": self.previous_status,
+            "scope_ids": list(self.scope_ids),
             "trigger_event_digest": self.trigger_event_digest,
         }
 
@@ -448,9 +478,12 @@ class AlternativeModelProjectionPlan:
     clock_sequence: int
     predecessor_root_digest: str
     projected_root_digest: str
+    evidence_root_digest: str
+    assumption_root_digest: str
     events: tuple[RegistryEvent, ...]
     impact_receipts: tuple[AlternativeModelImpactReceipt, ...]
     expiry_plan_digest: str
+    admit_comparison_bindings: tuple[tuple[str, str], ...]
     plan_digest: str
 
     def __post_init__(self) -> None:
@@ -460,12 +493,26 @@ class AlternativeModelProjectionPlan:
             self.semantic_receipt_digest,
             self.predecessor_root_digest,
             self.projected_root_digest,
+            self.evidence_root_digest,
+            self.assumption_root_digest,
             self.expiry_plan_digest,
             self.plan_digest,
         ):
             _require_digest(value, "ALT_MODEL_PROJECTION_DIGEST_INVALID")
         if type(self.clock_sequence) is not int or self.clock_sequence < 1:
             raise AlternativeModelProjectionError("ALT_MODEL_PROJECTION_CLOCK_INVALID")
+        if type(self.admit_comparison_bindings) is not tuple:
+            raise AlternativeModelProjectionError(
+                "ALT_MODEL_PROJECTION_COMPARISON_BINDINGS_INVALID"
+            )
+        for pair in self.admit_comparison_bindings:
+            if type(pair) is not tuple or len(pair) != 2:
+                raise AlternativeModelProjectionError(
+                    "ALT_MODEL_PROJECTION_COMPARISON_BINDINGS_INVALID"
+                )
+            model_id, comparison_digest = pair
+            _require_token(model_id, "ALT_MODEL_PROJECTION_COMPARISON_BINDINGS_INVALID")
+            _require_digest(comparison_digest, "ALT_MODEL_PROJECTION_COMPARISON_BINDINGS_INVALID")
         if self.plan_digest != _digest_object(
             "ALTERNATIVE_MODEL_PROJECTION_PLAN", self._unsigned()
         ):
@@ -482,9 +529,14 @@ class AlternativeModelProjectionPlan:
     def _unsigned(self) -> dict[str, object]:
         return {
             "schema_version": PROJECTION_PLAN_SCHEMA_VERSION,
+            "admit_comparison_bindings": [
+                [model_id, digest] for model_id, digest in self.admit_comparison_bindings
+            ],
             "clock_claim_digest": self.clock_claim_digest,
             "clock_sequence": self.clock_sequence,
             "event_digests": list(self.event_digests),
+            "evidence_root_digest": self.evidence_root_digest,
+            "assumption_root_digest": self.assumption_root_digest,
             "expiry_plan_digest": self.expiry_plan_digest,
             "impact_receipt_digests": list(self.impact_receipt_digests),
             "predecessor_root_digest": self.predecessor_root_digest,
@@ -525,12 +577,16 @@ class StagedAlternativeModelProjectionAdapter:
         validated_event: ValidatedEvent,
         semantic_receipt: SemanticProjectionReceipt,
         committed_store: RegistryStore,
+        evidence_root_digest: str,
+        assumption_root_digest: str,
         governed_admit_evidence: tuple[
-            tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt | None], ...
+            tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt], ...
         ] = (),
     ) -> AlternativeModelProjectionPlan:
         sequence = _claim_sequence(claim)
         _verify_context(claim, validated_event, semantic_receipt)
+        _require_digest(evidence_root_digest, "ALT_MODEL_PROJECTION_EVIDENCE_ROOT_INVALID")
+        _require_digest(assumption_root_digest, "ALT_MODEL_PROJECTION_ASSUMPTION_ROOT_INVALID")
         predecessor_root = committed_store.snapshot("ALTERNATIVE_MODEL").root_digest
         staged = _clone_store(committed_store, self.staging_store_factory)
         source_digest = _projection_source_digest(claim, validated_event, semantic_receipt)
@@ -544,7 +600,9 @@ class StagedAlternativeModelProjectionAdapter:
             )
         )
         _verify_event_bindings(explicit, sequence)
-        _verify_governed_admit_bindings(explicit, governed_admit_evidence, predecessor_root)
+        comparison_bindings = _verify_governed_admit_bindings(
+            explicit, governed_admit_evidence, predecessor_root
+        )
         impacts: list[AlternativeModelImpactReceipt] = []
         _apply_events(
             explicit,
@@ -569,9 +627,14 @@ class StagedAlternativeModelProjectionAdapter:
         projected_root = staged.snapshot("ALTERNATIVE_MODEL").root_digest
         unsigned: dict[str, object] = {
             "schema_version": PROJECTION_PLAN_SCHEMA_VERSION,
+            "admit_comparison_bindings": [
+                [model_id, digest] for model_id, digest in comparison_bindings
+            ],
             "clock_claim_digest": claim.digest,
             "clock_sequence": sequence,
             "event_digests": [event.digest for event in events],
+            "evidence_root_digest": evidence_root_digest,
+            "assumption_root_digest": assumption_root_digest,
             "expiry_plan_digest": expiry.plan_digest,
             "impact_receipt_digests": [item.receipt_digest for item in impacts],
             "predecessor_root_digest": predecessor_root,
@@ -586,9 +649,12 @@ class StagedAlternativeModelProjectionAdapter:
             clock_sequence=sequence,
             predecessor_root_digest=predecessor_root,
             projected_root_digest=projected_root,
+            evidence_root_digest=evidence_root_digest,
+            assumption_root_digest=assumption_root_digest,
             events=events,
             impact_receipts=tuple(impacts),
             expiry_plan_digest=expiry.plan_digest,
+            admit_comparison_bindings=comparison_bindings,
             plan_digest=_digest_object("ALTERNATIVE_MODEL_PROJECTION_PLAN", unsigned),
         )
 
@@ -619,7 +685,9 @@ def _apply_events(
                 previous_status=previous.status,
                 current_status=current.status,
                 trigger_event_digest=event.digest,
-                affected_model_ids=_dependent_ids(store, model_id),
+                scope_ids=current.scope_ids,
+                assumption_ids=current.assumption_ids,
+                evidence_ids=current.evidence_ids,
                 alternative_model_registry_root_digest=store.snapshot(
                     "ALTERNATIVE_MODEL"
                 ).root_digest,
@@ -662,19 +730,23 @@ def _verify_event_bindings(
 def _verify_governed_admit_bindings(
     events: tuple[RegistryEvent, ...],
     governed_admit_evidence: tuple[
-        tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt | None], ...
+        tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt], ...
     ],
     predecessor_root_digest: str,
-) -> None:
+) -> tuple[tuple[str, str], ...]:
     """Validate the real production binding for each explicit ADMIT event.
 
     Cross-binds the event against the authorization's identity, predecessor,
-    sequence, authority, root, and source-receipt digest. When a comparison
-    receipt is supplied, cross-binds its structural-difference set against the
-    authorization's structural-difference receipt.
+    sequence, authority, root, and source-receipt digest. Requires a non-optional
+    :class:`ComparisonReceipt` for every ADMIT event whose
+    ``structural_difference_receipt`` is exactly equal (full receipt object
+    equality) to the authorization's ``structural_difference_receipt``.
+
+    Returns canonical ``(model_id, comparison_digest)`` pairs for every ADMIT
+    event, sorted by model_id.
     """
     auth_by_id: dict[str, GovernedAlternativeModelAuthorization] = {}
-    comparison_by_id: dict[str, ComparisonReceipt | None] = {}
+    comparison_by_id: dict[str, ComparisonReceipt] = {}
     if type(governed_admit_evidence) is not tuple:
         raise AlternativeModelProjectionError("ALT_MODEL_PROJECTION_GOVERNED_EVIDENCE_INVALID")
     seen: set[str] = set()
@@ -689,10 +761,15 @@ def _verify_governed_admit_bindings(
             )
         seen.add(authorization.model_id)
         auth_by_id[authorization.model_id] = authorization
-        if comparison is not None and type(comparison) is not ComparisonReceipt:
+        if comparison is None:
+            raise AlternativeModelProjectionError(
+                "ALT_MODEL_PROJECTION_COMPARISON_MISSING", authorization.model_id
+            )
+        if type(comparison) is not ComparisonReceipt:
             raise AlternativeModelProjectionError("ALT_MODEL_PROJECTION_COMPARISON_TYPE_INVALID")
         comparison_by_id[authorization.model_id] = comparison
 
+    bindings: list[tuple[str, str]] = []
     for event in events:
         payload = event.to_json_value().get("payload")
         if type(payload) is not dict:
@@ -720,36 +797,18 @@ def _verify_governed_admit_bindings(
         if value.get("source_receipt_digest") != auth.authorization_digest:
             raise AlternativeModelProjectionError("ALT_MODEL_PROJECTION_ADMIT_SOURCE_MISMATCH")
 
-        comparison = comparison_by_id.get(model_id)
-        if comparison is not None:
-            diff = comparison.structural_difference_receipt
-            if diff.primary_graph_digest != auth.primary_graph_digest:
-                raise AlternativeModelProjectionError(
-                    "ALT_MODEL_PROJECTION_COMPARISON_PRIMARY_GRAPH_MISMATCH"
-                )
-            if diff.shadow_graph_digest != auth.shadow_graph_digest:
-                raise AlternativeModelProjectionError(
-                    "ALT_MODEL_PROJECTION_COMPARISON_SHADOW_GRAPH_MISMATCH"
-                )
-            if (
-                diff.declared_difference_digest
-                != auth.structural_difference_receipt.declared_difference_digest
-            ):
-                raise AlternativeModelProjectionError(
-                    "ALT_MODEL_PROJECTION_COMPARISON_DIFFERENCE_MISMATCH"
-                )
+        model_comparison = comparison_by_id.get(model_id)
+        if model_comparison is None:
+            raise AlternativeModelProjectionError(
+                "ALT_MODEL_PROJECTION_COMPARISON_MISSING", model_id
+            )
+        if model_comparison.structural_difference_receipt != auth.structural_difference_receipt:
+            raise AlternativeModelProjectionError(
+                "ALT_MODEL_PROJECTION_COMPARISON_RECEIPT_MISMATCH", model_id
+            )
+        bindings.append((model_id, model_comparison.comparison_digest))
 
-
-def _dependent_ids(store: RegistryStore, model_id: str) -> tuple[str, ...]:
-    """Reverse transitive closure over primary_model_id links.
-
-    Alternative models do not carry an explicit dependency-id tuple (unlike
-    assumptions). The impact closure is therefore empty by default: an event on
-    one alternative model does not mechanically affect any other. The semantic
-    projector may still re-derive dependencies. Returns sorted unique ids.
-    """
-    del store, model_id
-    return ()
+    return tuple(sorted(bindings))
 
 
 def _claim_sequence(claim: ClockClaim) -> int:
