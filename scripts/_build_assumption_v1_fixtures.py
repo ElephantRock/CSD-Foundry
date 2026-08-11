@@ -813,9 +813,11 @@ def _sod_decision_unsigned(
             continue
         if assumption_materiality not in set(cast(list[str], rule["assumption_materialities"])):
             continue
+        # Defect #1 (fixed): every APPLICABLE rule emits a rule evaluation entry,
+        # including when it has zero actual conflicts. Matches production
+        # (_assumption_separation_duty_evaluator) and the validator's
+        # _sod_decision_unsigned_value exactly.
         rule_conflicts = prior_set & set(cast(list[str], rule["conflicting_roles"]))
-        if not rule_conflicts:
-            continue
         rule_waived: set[str] = set()
         rule_waiving: list[tuple[str, str]] = []
         for exception in exceptions:
@@ -1407,13 +1409,19 @@ def _fixture_run_dfs(
         traversed_records.append(
             _traversed_state(node, dproj, "ASSUMPTION_USE_NODE_PRESENT", dhist)
         )
-        dep_edges += 1
         dfs_stack_index[node] = len(dfs_stack)
         dfs_stack.append(node)
+        # Defect #2b (fixed): count one examined edge per _dfs(child) invocation
+        # from this parent's dependency list, BEFORE the recursive call. Matches
+        # production's _replay_dfs_closure and the validator's _dfs. The edge is
+        # counted regardless of whether the child is new, already visited, or
+        # terminal; the failed short-circuit prevents counting children after a
+        # sibling already terminated the DFS.
         for child in dproj["assumption_dependency_ids"]:
-            _dfs(child)
             if failed:
                 break
+            dep_edges += 1
+            _dfs(child)
         if not failed:
             dfs_stack.pop()
             del dfs_stack_index[node]
@@ -1422,6 +1430,9 @@ def _fixture_run_dfs(
     for dep_id in root_proj["assumption_dependency_ids"]:
         if failed:
             break
+        # Defect #2b (fixed): each top-level dependency edge from the root is
+        # counted before the _dfs invocation, matching production.
+        dep_edges += 1
         _dfs(dep_id)
     return {
         "traversed_records": traversed_records,
@@ -1459,6 +1470,21 @@ def _use_decision_unsigned(
     evidence_refs = 0
     challenges_count = 0
     shared_visited: set[str] = set()
+
+    def _count_node(node_id: str, node_history: int, node_challenges: int) -> None:
+        """Record one unique node in the work counters (Defect #2a). Mirrors
+        the validator's _record_self_node + _record_traversed_nodes: each unique
+        assumption_id contributes one history + one unique_node, its
+        history_event_count to events, and its active-challenge count."""
+        nonlocal histories, events_count, unique_nodes, challenges_count
+        if node_id in shared_visited:
+            return
+        shared_visited.add(node_id)
+        histories += 1
+        events_count += node_history
+        unique_nodes += 1
+        challenges_count += node_challenges
+
     evaluated_assumptions: list[dict[str, object]] = []
     reported_code = "ASSUMPTION_USE_ALLOWED"
     first_event_digest: str | None = None
@@ -1466,8 +1492,9 @@ def _use_decision_unsigned(
         proj = projections.get(aid)
         if proj is None:
             self_state = _traversed_state(aid, None, "ASSUMPTION_USE_MISSING", 0)
-            if aid not in shared_visited:
-                shared_visited.add(aid)
+            # Defect #2a (fixed): a top-level MISSING node still counts as one
+            # unique history/node (0 events, 0 challenges), matching production.
+            _count_node(aid, 0, 0)
             evaluated_assumptions.append(
                 _use_evaluation(aid, "ASSUMPTION_USE_MISSING", "DENY", self_state, [], [], [])
             )
@@ -1478,12 +1505,7 @@ def _use_decision_unsigned(
         gate_code = _self_gate_code_fixture(proj, clock)
         if gate_code is not None:
             self_state = _traversed_state(aid, proj, gate_code, history_event_count)
-            if aid not in shared_visited:
-                shared_visited.add(aid)
-                histories += 1
-                events_count += history_event_count
-                unique_nodes += 1
-                challenges_count += len(proj["active_challenge_ids"])
+            _count_node(aid, history_event_count, len(proj["active_challenge_ids"]))
             evaluated_assumptions.append(
                 _use_evaluation(aid, gate_code, "DENY", self_state, [], [], [])
             )
@@ -1499,12 +1521,17 @@ def _use_decision_unsigned(
         dfs_failed = dfs_result["failed"]
         dfs_code = dfs_result["code"]
         dep_edges += dfs_result["dep_edges"]
-        if aid not in shared_visited:
-            shared_visited.add(aid)
-            histories += 1
-            events_count += history_event_count
-            unique_nodes += 1
-            challenges_count += len(proj["active_challenge_ids"])
+        _count_node(aid, history_event_count, len(proj["active_challenge_ids"]))
+        # Defect #2a (fixed): every traversed dependency node counts toward
+        # histories/events/unique_nodes/challenges, deduplicated by id. Mirrors
+        # production's _validate_work_counters and the validator's
+        # _record_traversed_nodes.
+        for rec in cast(list[dict[str, object]], traversed_records):
+            _count_node(
+                cast(str, rec["assumption_id"]),
+                cast(int, rec["history_event_count"]),
+                len(cast(list[str], rec["active_challenge_ids"])),
+            )
         if dfs_failed:
             evaluated_assumptions.append(
                 _use_evaluation(

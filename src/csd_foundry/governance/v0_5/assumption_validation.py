@@ -1397,9 +1397,14 @@ def _sod_decision_unsigned_value(
             continue
         if assumption_materiality not in set(cast(list[str], rule["assumption_materialities"])):
             continue
+        # Defect #1 (fixed): every APPLICABLE rule emits a rule evaluation entry,
+        # including when it has zero actual conflicts. Production
+        # (_assumption_separation_duty_evaluator) always appends a
+        # SeparationOfDutyRuleEvaluation for an applicable rule, even with empty
+        # conflicting_roles / waived_roles / remaining_conflicts. The rule's
+        # digest is therefore always included in evaluated_rule_digests and so
+        # contributes to the SoD decision digest.
         rule_conflicts = prior_set & set(cast(list[str], rule["conflicting_roles"]))
-        if not rule_conflicts:
-            continue
         rule_waived: set[str] = set()
         rule_waiving: list[tuple[str, str]] = []
         for exception in exceptions:
@@ -1864,13 +1869,20 @@ def _evaluate_one_use_assumption(
                 history_event_count=dep_history,
             )
         )
-        work.dep_edges += 1
         dfs_stack_index[node] = len(dfs_stack)
         dfs_stack.append(node)
+        # Defect #2b (fixed): count one examined edge per _dfs(child)
+        # invocation from this parent's dependency list, BEFORE the recursive
+        # call. This matches production's _replay_dfs_closure, which increments
+        # edges_followed before each child _dfs regardless of whether the child
+        # is new, already visited, or terminal (cycle/missing/gate-failed). The
+        # increment happens at the call site; the dfs_failed short-circuit below
+        # prevents counting children after a sibling already terminated the DFS.
         for child in dep.assumption_dependency_ids:
-            _dfs(child, is_top_level=False)
             if dfs_failed:
                 break
+            work.dep_edges += 1
+            _dfs(child, is_top_level=False)
         if not dfs_failed:
             dfs_stack.pop()
             del dfs_stack_index[node]
@@ -1879,11 +1891,18 @@ def _evaluate_one_use_assumption(
     for dep_id in assumption.assumption_dependency_ids:
         if dfs_failed:
             break
+        # Defect #2b (fixed): each top-level dependency edge from the root is
+        # counted before the _dfs invocation, matching production.
+        work.dep_edges += 1
         _dfs(dep_id, is_top_level=False)
 
     if dfs_failed:
         # Record the self node as a work-counter node (it passed self-gates).
         _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
+        # Defect #2a (fixed): record every traversed dependency node collected
+        # before the DFS terminated. Production counts all unique traversed
+        # nodes, including the terminal one (missing/gate-failed/cycle target).
+        _record_traversed_nodes(traversed_records, projections, work, shared_visited, shared_nodes)
         return (
             _build_use_evaluation(
                 assumption_id=assumption_id,
@@ -1900,6 +1919,9 @@ def _evaluate_one_use_assumption(
         )
     # DFS passed: record self node for work counters, then evidence phase.
     _record_self_node(assumption, history_event_count, work, shared_visited, shared_nodes)
+    # Defect #2a (fixed): record every traversed dependency node (all PRESENT
+    # in this branch) for work counters, deduplicated cross-evaluation.
+    _record_traversed_nodes(traversed_records, projections, work, shared_visited, shared_nodes)
     # Build the ordered node list (self + traversed, first-discovery order) for
     # evidence evaluation.
     ordered_projections: list[IndependentAssumptionProjection] = [assumption]
@@ -2133,6 +2155,45 @@ def _record_self_node(
     work.events += history_event_count
     work.unique_nodes += 1
     work.challenges += len(assumption.active_challenges)
+
+
+def _record_traversed_nodes(
+    traversed_records: list[dict[str, object]],
+    projections: dict[str, IndependentAssumptionProjection],
+    work: _WorkCounters,
+    shared_visited: set[str],
+    shared_nodes: dict[str, _EvaluatedNode],
+) -> None:
+    """Record every traversed dependency node in the work counters.
+
+    Defect #2a (fixed): production (_assumption_use_admissibility._validate_work_counters
+    and evaluate_assumption_use_admissibility) computes histories / events /
+    unique_nodes / challenges over ALL unique nodes (self_state + every traversed
+    dependency), not just the self node. Each unique node contributes its
+    ``history_event_count`` to total events, its presence to
+    unique_nodes/histories, and its ``active_challenge_ids`` length to the
+    challenge count. Deduplication is by assumption_id, cross-evaluation.
+    """
+    for record in traversed_records:
+        aid = cast(str, record["assumption_id"])
+        if aid in shared_visited:
+            # Already counted (possibly as a self node in this or a prior
+            # evaluation); skip. Repeated-node state consistency was already
+            # enforced when the first occurrence was recorded.
+            continue
+        history_event_count = cast(int, record["history_event_count"])
+        challenges = cast(list[str], record["active_challenge_ids"])
+        shared_visited.add(aid)
+        projection = projections.get(aid)
+        if projection is not None:
+            shared_nodes[aid] = _EvaluatedNode(
+                projection=projection,
+                history_event_count=history_event_count,
+            )
+        work.histories += 1
+        work.events += history_event_count
+        work.unique_nodes += 1
+        work.challenges += len(challenges)
 
 
 def _evaluate_evidence_dependency(

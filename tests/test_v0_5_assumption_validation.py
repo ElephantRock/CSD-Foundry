@@ -53,7 +53,7 @@ def test_committed_assumption_vectors_validate_independently() -> None:
     assert len(report.accepted_decision_digests) == 18
     assert len(report.rejected_failure_codes) == 12
     assert report.vector_catalog_digest == (
-        "sha256:6fffd127749eab421f01f6ff6092ce65ce32107ddc8d309917b1d1110412c360"
+        "sha256:d9b2e8e8ffd9c905b8bdc9a17d9f6f0edfe11ae9631b1c01791bbb82679990c8"
     )
     # Import boundary: the validator must not import any production governance
     # module other than canonicalization, contracts, and resources. The check
