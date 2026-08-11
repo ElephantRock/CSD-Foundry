@@ -7,6 +7,7 @@ for the assumption lifecycle.
 
 from csd_foundry.governance.v0_5._assumption_projection import (
     AssumptionExpiryAuthority,
+    AssumptionExpiryAuthorization,
     AssumptionExpiryPlan,
     AssumptionExpiryPlanner,
     AssumptionImpactReceipt,
@@ -21,6 +22,7 @@ from csd_foundry.governance.v0_5._assumption_projection import (
 
 __all__ = [
     "AssumptionExpiryAuthority",
+    "AssumptionExpiryAuthorization",
     "AssumptionExpiryPlan",
     "AssumptionExpiryPlanner",
     "AssumptionImpactReceipt",

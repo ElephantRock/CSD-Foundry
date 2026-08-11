@@ -4,14 +4,37 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import cast
 
 import pytest
 
+from csd_foundry.governance.v0_5._assumption_dependency_validator import (
+    DependencyValidationReceipt,
+)
+from csd_foundry.governance.v0_5._assumption_policy_activation_common import (
+    AssumptionChallengeClassificationPolicy,
+    AssumptionChallengeClassificationRule,
+    AssumptionPolicyAlgorithmProfile,
+    AssumptionPolicySignatureProfile,
+)
+from csd_foundry.governance.v0_5._assumption_policy_activation_envelope import (
+    AssumptionAuthorityPolicyCommitV3,
+    AssumptionPolicyActivationProofV2,
+    AssumptionPolicyLedgerEntryV3,
+    AssumptionPolicyLedgerV3,
+    AssumptionPolicySigningPayload,
+)
 from csd_foundry.governance.v0_5._assumption_projection import (
+    AssumptionExpiryAuthorization,
     AssumptionExpiryPlanner,
     AssumptionProjectionError,
+    AssumptionProjectionPlan,
     StagedAssumptionProjectionAdapter,
+)
+from csd_foundry.governance.v0_5._governed_admit_append import (
+    GovernedAdmitAuthorization,
+    append_governed_admit_assumption,
 )
 from csd_foundry.governance.v0_5.assumption import (
     DERIVED_CHALLENGED,
@@ -20,6 +43,14 @@ from csd_foundry.governance.v0_5.assumption import (
     Assumption,
     AssumptionRegistry,
     build_assumption_event,
+)
+from csd_foundry.governance.v0_5.assumption_governance_contracts import (
+    AssumptionAuthorityGrant,
+    AssumptionAuthorityPolicy,
+)
+from csd_foundry.governance.v0_5.assumption_governance_execution_contracts import (
+    AssumptionPolicyApprovalPolicy,
+    AssumptionPolicyApprovalRule,
 )
 from csd_foundry.governance.v0_5.contracts import (
     ClockClaim,
@@ -172,7 +203,11 @@ def _challenge(
 
 
 class _StaticExpiryAuthority:
-    """Deterministic expiry authority for tests."""
+    """Deterministic expiry authority for tests.
+
+    Returns a self-digesting :class:`AssumptionExpiryAuthorization` per
+    assumption so the planner never invents authority/receipt strings.
+    """
 
     def __init__(self, *, authority_id: str = "authority:clock") -> None:
         self._authority_id = authority_id
@@ -181,8 +216,15 @@ class _StaticExpiryAuthority:
     def expiry_authority_id(self) -> str:
         return self._authority_id
 
-    def expiry_receipt_digest(self, *, assumption_id: str, clock_sequence: int) -> str:
-        return _digest(f"expiry:{assumption_id}:{clock_sequence}")
+    def expiry_authorization(
+        self, *, assumption_id: str, clock_sequence: int
+    ) -> AssumptionExpiryAuthorization | None:
+        return AssumptionExpiryAuthorization.build(
+            assumption_id=assumption_id,
+            clock_sequence=clock_sequence,
+            expiry_authority_id=self._authority_id,
+            expiry_receipt_digest=_digest(f"expiry:{assumption_id}:{clock_sequence}"),
+        )
 
 
 def _context(
@@ -215,6 +257,104 @@ def _adapter() -> StagedAssumptionProjectionAdapter:
     return StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
     )
+
+
+def _assumption_policy_ledger(
+    *,
+    authority_id: str,
+    scope_ids: tuple[str, ...],
+) -> AssumptionPolicyLedgerV3:
+    """Build a minimal V3 policy ledger that grants one authority an ADMIT grant
+    over the supplied scopes.
+
+    Reuses the scaffolding from ``test_v0_5_governed_admit_append`` so a real
+    governed ADMIT append (I1-A/I1-B/I1-C) can run in-projection tests.
+    """
+
+    approval_policy = AssumptionPolicyApprovalPolicy.build(
+        approval_policy_id="approval:assumptions:1",
+        authority_root_digest=_digest("root"),
+        rules=(
+            AssumptionPolicyApprovalRule.build(
+                approval_class="STANDARD",
+                eligible_signer_ids=("authority:a", "authority:b", "authority:c"),
+                required_signature_count=2,
+                required_signer_ids=("authority:a",),
+            ),
+            AssumptionPolicyApprovalRule.build(
+                approval_class="DUTY_EXCEPTION",
+                eligible_signer_ids=("authority:a", "authority:b", "authority:c"),
+                required_signature_count=3,
+                required_signer_ids=("authority:a",),
+            ),
+        ),
+    )
+    signature_profile = AssumptionPolicySignatureProfile.build(
+        algorithm_profiles=(
+            AssumptionPolicyAlgorithmProfile(
+                algorithm="ed25519",
+                verification_profile="ed25519-rfc8032-strict/1",
+            ),
+        ),
+        required_authority_scope="ASSUMPTION_POLICY_APPROVAL",
+        key_authority_root_digest=_digest("root"),
+    )
+    challenge_policy = AssumptionChallengeClassificationPolicy.build(
+        reason_rules=(
+            AssumptionChallengeClassificationRule(
+                reason_code="PROVENANCE_CONFLICT",
+                materiality="MATERIAL",
+            ),
+        )
+    )
+    grant = AssumptionAuthorityGrant.build(
+        grant_id="grant:admit",
+        action="ADMIT",
+        authority_id=authority_id,
+        scope_ids=scope_ids,
+        assumption_materialities=("MATERIAL",),
+        effective_from_sequence=1,
+    )
+    policy = AssumptionAuthorityPolicy.build(
+        policy_id="policy:assumptions:1",
+        authority_root_digest=_digest("root"),
+        grants=(grant,),
+    )
+    payload = AssumptionPolicySigningPayload.build(
+        policy=policy,
+        predecessor_policy_digest=None,
+        predecessor_commit_receipt_digest=None,
+        effective_from_sequence=1,
+        approval_policy=approval_policy,
+        signature_profile=signature_profile,
+        challenge_policy=challenge_policy,
+    )
+    commit = AssumptionAuthorityPolicyCommitV3.build(
+        signing_payload_digest=payload.signing_payload_digest,
+        signature_set_digest=_digest("sigset"),
+    )
+    rule = approval_policy.rule_for(payload.approval_class)
+    proof = AssumptionPolicyActivationProofV2.build(
+        signing_payload_digest=payload.signing_payload_digest,
+        policy_commit_receipt_digest=commit.commit_receipt_digest,
+        approval_policy_digest=approval_policy.approval_policy_digest,
+        approval_rule_digest=rule.rule_digest,
+        signature_profile_digest=signature_profile.profile_digest,
+        challenge_classification_policy_digest=challenge_policy.policy_digest,
+        authority_root_digest=payload.authority_root_digest,
+        signature_set_digest=commit.signature_set_digest,
+        valid_signer_ids=("authority:a", "authority:b"),
+    )
+    entry = AssumptionPolicyLedgerEntryV3.build(
+        policy=policy,
+        signing_payload=payload,
+        policy_commit=commit,
+        approval_policy=approval_policy,
+        signature_profile=signature_profile,
+        challenge_classification_policy=challenge_policy,
+        activation_proof=proof,
+    )
+    return AssumptionPolicyLedgerV3.build((entry,))
 
 
 class _IntentResolver:
@@ -823,41 +963,60 @@ def test_committed_root_unchanged_after_context_failure() -> None:
     assert store.snapshot("ASSUMPTION").root_digest == original_root
 
 
-def test_committed_root_unchanged_after_binding_failure() -> None:
+def test_committed_root_unchanged_after_admit_binding_failure() -> None:
+    """A staged ADMIT event whose source/admission digest does not match the
+    supplied governed authorization is rejected fail-closed, leaving the
+    committed store byte-identical.
+
+    Production ADMIT events bind ``source_receipt_digest`` to the
+    :class:`DependencyValidationReceipt` digest and
+    ``payload.admission_receipt_digest`` to the ``GovernedAdmitAuthorization``
+    digest. The adapter validates both cross-bindings and raises if either is
+    substituted.
+    """
+
+    governed = _build_governed_admit_evidence(
+        InMemoryRegistryStore(),
+        candidate_id="assumption:1",
+        clock=1,
+        admit_clock=2,
+    )
     store = InMemoryRegistryStore()
     proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=10)
-    admitted = _admit(store, proposed, clock=2)
     original_root = store.snapshot("ASSUMPTION").root_digest
 
-    wrong_event = build_assumption_event(
-        assumption_id=admitted.assumption_id,
-        entity_sequence=admitted.current_entity_sequence + 1,
-        previous_entity_event_digest=admitted.current_event_digest,
+    # Build an ADMIT event against the *real* PROPOSE predecessor but with a
+    # tampered source digest (not the dependency-validation receipt digest).
+    tampered_admit = build_assumption_event(
+        assumption_id="assumption:1",
+        entity_sequence=proposed.current_entity_sequence + 1,
+        previous_entity_event_digest=proposed.current_event_digest,
         clock_sequence=20,
-        source_receipt_digest=_digest("wrong-source"),
+        source_receipt_digest=_digest("tampered-source"),
         payload={
-            "operation": "CONFIRM",
-            "confirming_authority_id": "authority:confirmer",
-            "confirmation_receipt_digest": _digest("confirm-receipt"),
+            "operation": "ADMIT",
+            "admitting_authority_id": governed.authorization.admitting_authority_id,
+            "admission_receipt_digest": governed.authorization.authorization_digest,
         },
     )
 
     claim, validated_event, semantic = _context(20)
     adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
-        intent_resolver=_IntentResolver(wrong_event),
+        intent_resolver=_IntentResolver(tampered_admit),
     )
 
     with pytest.raises(
         AssumptionProjectionError,
-        match="ASSUMPTION_PROJECTION_EVENT_SOURCE_MISMATCH",
+        match="ASSUMPTION_PROJECTION_ADMIT_SOURCE_MISMATCH",
     ):
         adapter.project(
             claim=claim,
             validated_event=validated_event,
             semantic_receipt=semantic,
             committed_store=store,
-            evidence_root_digest=store.snapshot("EVIDENCE_UNIT").root_digest,
+            evidence_root_digest=governed.evidence_root,
+            governed_evidence=(governed.authorization,),
         )
 
     assert store.snapshot("ASSUMPTION").root_digest == original_root
@@ -975,36 +1134,329 @@ def test_canonical_impact_event_ordering() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Governed-ADMIT binding preservation
+# Governed-ADMIT binding preservation (production-shaped)
 # ---------------------------------------------------------------------------
 
 
-def test_governed_admit_bindings_preserved_on_staged_admit() -> None:
-    """A staged ADMIT event preserves source_receipt_digest and
-    admission_receipt_digest exactly as supplied by the intent resolver."""
+@dataclass(frozen=True)
+class _GovernedAdmitEvidence:
+    """Real production evidence produced by a governed ADMIT append."""
 
+    authorization: GovernedAdmitAuthorization
+    dependency_receipt: DependencyValidationReceipt
+    evidence_root: str
+    assumption_root_pre_admit: str
+    predecessor_event_digest: str
+    assumption_id: str
+
+
+def _build_governed_admit_evidence(
+    store: RegistryStore,
+    *,
+    candidate_id: str,
+    clock: int,
+    admit_clock: int,
+    proposition_id: str = "proposition:control-connected",
+    scope_ids: tuple[str, ...] = ("scope:control-17",),
+    proposer_authority_id: str = "authority:proposer",
+    admitting_authority_id: str = "authority:admitter",
+) -> _GovernedAdmitEvidence:
+    """Run a real governed ADMIT append and return its production evidence.
+
+    Seeds the candidate PROPOSE against the supplied store, runs the full
+    governed ADMIT orchestrator (I1-A/I1-B/I1-C), and returns the resulting
+    :class:`GovernedAdmitAuthorization` plus its embedded
+    :class:`DependencyValidationReceipt`, plus the snapshot roots observed at
+    admission time. The projection adapter uses these to validate production-
+    shaped ADMIT bindings.
+    """
+
+    # Seed the PROPOSE against the caller's store so its assumption root and
+    # candidate predecessor are observable to the orchestrator.
+    propose = build_assumption_event(
+        assumption_id=candidate_id,
+        entity_sequence=1,
+        previous_entity_event_digest=None,
+        clock_sequence=clock,
+        source_receipt_digest=_digest(f"propose:{candidate_id}"),
+        payload={
+            "operation": "PROPOSE",
+            "proposition_id": proposition_id,
+            "scope_ids": list(scope_ids),
+            "materiality": "MATERIAL",
+            "proposer_authority_id": proposer_authority_id,
+            "proposed_at_sequence": clock,
+            "valid_from_sequence": clock,
+            "expires_at_sequence": 100,
+            "assumption_dependency_ids": [],
+            "evidence_dependency_ids": [],
+            "limitations": ["limitation:declared-model"],
+            "maximum_reuse_class": "D2",
+        },
+    )
+    AssumptionRegistry(store).apply(propose)
+    propose_state = AssumptionRegistry(store).current(candidate_id)
+    assert propose_state is not None
+
+    assumption_root_pre_admit = store.snapshot("ASSUMPTION").root_digest
+
+    ledger = _assumption_policy_ledger(
+        authority_id=admitting_authority_id,
+        scope_ids=scope_ids,
+    )
+    result = append_governed_admit_assumption(
+        store=store,
+        ledger=ledger,
+        assumption_id=candidate_id,
+        admitting_authority_id=admitting_authority_id,
+        event_sequence=admit_clock,
+    )
+    assert result.applied is True
+    return _GovernedAdmitEvidence(
+        authorization=result.authorization,
+        dependency_receipt=result.authorization.dependency_validation_receipt,
+        evidence_root=result.evidence_registry_root,
+        assumption_root_pre_admit=assumption_root_pre_admit,
+        predecessor_event_digest=propose_state.current_event_digest,
+        assumption_id=candidate_id,
+    )
+
+
+def test_governed_admit_bindings_preserved_on_staged_admit() -> None:
+    """A staged ADMIT event built from a real :class:`GovernedAdmitAuthorization`
+    is validated against the production cross-bindings and preserved exactly in
+    the staged plan.
+
+    Production shape:
+
+    * ``event.source_receipt_digest == dependency_receipt.receipt_digest``
+    * ``payload.admission_receipt_digest == authorization.authorization_digest``
+    """
+
+    seed_store = InMemoryRegistryStore()
+    governed = _build_governed_admit_evidence(
+        seed_store,
+        candidate_id="assumption:1",
+        clock=1,
+        admit_clock=2,
+    )
+    auth = governed.authorization
+    dep_receipt = governed.dependency_receipt
+
+    # Production-shaped committed store: only the PROPOSE is present.
     store = InMemoryRegistryStore()
     proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=100)
 
-    claim, validated_event, semantic = _context(20)
-    source_digest = _projection_source(claim, validated_event, semantic)
-    governed_admission = _digest("governed:authorization")
     admit_event = build_assumption_event(
         assumption_id="assumption:1",
         entity_sequence=proposed.current_entity_sequence + 1,
         previous_entity_event_digest=proposed.current_event_digest,
         clock_sequence=20,
-        source_receipt_digest=source_digest,
+        source_receipt_digest=dep_receipt.receipt_digest,
         payload={
             "operation": "ADMIT",
-            "admitting_authority_id": "authority:admitter",
-            "admission_receipt_digest": governed_admission,
+            "admitting_authority_id": auth.admitting_authority_id,
+            "admission_receipt_digest": auth.authorization_digest,
         },
     )
 
+    claim, validated_event, semantic = _context(20)
     adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
         intent_resolver=_IntentResolver(admit_event),
+    )
+    plan: AssumptionProjectionPlan = adapter.project(
+        claim=claim,
+        validated_event=validated_event,
+        semantic_receipt=semantic,
+        committed_store=store,
+        evidence_root_digest=governed.evidence_root,
+        governed_evidence=(auth,),
+    )
+
+    assert len(plan.events) == 1
+    staged = plan.events[0]
+    staged_value = staged.to_json_value()
+    assert staged_value["source_receipt_digest"] == dep_receipt.receipt_digest
+    assert staged_value["payload"]["admission_receipt_digest"] == auth.authorization_digest
+    assert staged_value["payload"]["admitting_authority_id"] == auth.admitting_authority_id
+    assert staged.canonical_bytes == admit_event.canonical_bytes
+    assert staged.digest == admit_event.digest
+    # The explicitly-supplied evidence root is bound into the plan receipt.
+    assert plan.evidence_root_digest == governed.evidence_root
+
+
+def test_governed_admit_admission_receipt_tamper_rejected() -> None:
+    """A staged ADMIT whose ``admission_receipt_digest`` does not match the
+    authorization digest is rejected fail-closed."""
+
+    governed = _build_governed_admit_evidence(
+        InMemoryRegistryStore(),
+        candidate_id="assumption:1",
+        clock=1,
+        admit_clock=2,
+    )
+    auth = governed.authorization
+    dep_receipt = governed.dependency_receipt
+
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=100)
+
+    tampered_admit = build_assumption_event(
+        assumption_id="assumption:1",
+        entity_sequence=proposed.current_entity_sequence + 1,
+        previous_entity_event_digest=proposed.current_event_digest,
+        clock_sequence=20,
+        source_receipt_digest=dep_receipt.receipt_digest,
+        payload={
+            "operation": "ADMIT",
+            "admitting_authority_id": auth.admitting_authority_id,
+            "admission_receipt_digest": _digest("forged-admission"),
+        },
+    )
+
+    claim, validated_event, semantic = _context(20)
+    adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(tampered_admit),
+    )
+    with pytest.raises(
+        AssumptionProjectionError,
+        match="ASSUMPTION_PROJECTION_ADMISSION_RECEIPT_MISMATCH",
+    ):
+        adapter.project(
+            claim=claim,
+            validated_event=validated_event,
+            semantic_receipt=semantic,
+            committed_store=store,
+            evidence_root_digest=governed.evidence_root,
+            governed_evidence=(auth,),
+        )
+
+
+def test_governed_admit_without_evidence_rejected() -> None:
+    """A staged ADMIT with no matching governed authorization is rejected
+    fail-closed (the adapter does not invent production bindings)."""
+
+    governed = _build_governed_admit_evidence(
+        InMemoryRegistryStore(),
+        candidate_id="assumption:1",
+        clock=1,
+        admit_clock=2,
+    )
+    auth = governed.authorization
+    dep_receipt = governed.dependency_receipt
+
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=100)
+
+    admit_event = build_assumption_event(
+        assumption_id="assumption:1",
+        entity_sequence=proposed.current_entity_sequence + 1,
+        previous_entity_event_digest=proposed.current_event_digest,
+        clock_sequence=20,
+        source_receipt_digest=dep_receipt.receipt_digest,
+        payload={
+            "operation": "ADMIT",
+            "admitting_authority_id": auth.admitting_authority_id,
+            "admission_receipt_digest": auth.authorization_digest,
+        },
+    )
+
+    claim, validated_event, semantic = _context(20)
+    adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(admit_event),
+    )
+    with pytest.raises(
+        AssumptionProjectionError,
+        match="ASSUMPTION_PROJECTION_ADMIT_EVIDENCE_MISSING",
+    ):
+        adapter.project(
+            claim=claim,
+            validated_event=validated_event,
+            semantic_receipt=semantic,
+            committed_store=store,
+            evidence_root_digest=governed.evidence_root,
+        )
+
+
+def test_governed_admit_evidence_root_mismatch_rejected() -> None:
+    """If a governed authorization's ``evidence_registry_root`` does not equal
+    the explicitly-supplied ``evidence_root_digest`` the projection is rejected."""
+
+    governed = _build_governed_admit_evidence(
+        InMemoryRegistryStore(),
+        candidate_id="assumption:1",
+        clock=1,
+        admit_clock=2,
+    )
+    auth = governed.authorization
+    dep_receipt = governed.dependency_receipt
+
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=100)
+
+    admit_event = build_assumption_event(
+        assumption_id="assumption:1",
+        entity_sequence=proposed.current_entity_sequence + 1,
+        previous_entity_event_digest=proposed.current_event_digest,
+        clock_sequence=20,
+        source_receipt_digest=dep_receipt.receipt_digest,
+        payload={
+            "operation": "ADMIT",
+            "admitting_authority_id": auth.admitting_authority_id,
+            "admission_receipt_digest": auth.authorization_digest,
+        },
+    )
+
+    claim, validated_event, semantic = _context(20)
+    adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(admit_event),
+    )
+    with pytest.raises(
+        AssumptionProjectionError,
+        match="ASSUMPTION_PROJECTION_EVIDENCE_ROOT_MISMATCH",
+    ):
+        adapter.project(
+            claim=claim,
+            validated_event=validated_event,
+            semantic_receipt=semantic,
+            committed_store=store,
+            evidence_root_digest=_digest("mismatched-evidence-root"),
+            governed_evidence=(auth,),
+        )
+
+
+def test_non_admit_event_does_not_require_governed_evidence() -> None:
+    """Non-ADMIT explicit events skip the ADMIT-specific binding validation
+    even when no governed evidence is supplied (and even with a non-projection
+    source digest, mirroring production operation-specific receipts)."""
+
+    store = InMemoryRegistryStore()
+    proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=100)
+    admitted = _admit(store, proposed, clock=2)
+
+    # Source digest is the operation-specific confirmation receipt, not the
+    # generic ASSUMPTION_PROJECTION_SOURCE — the adapter no longer requires that.
+    confirm_event = build_assumption_event(
+        assumption_id=admitted.assumption_id,
+        entity_sequence=admitted.current_entity_sequence + 1,
+        previous_entity_event_digest=admitted.current_event_digest,
+        clock_sequence=20,
+        source_receipt_digest=_digest("confirm:operation-specific"),
+        payload={
+            "operation": "CONFIRM",
+            "confirming_authority_id": "authority:confirmer",
+            "confirmation_receipt_digest": _digest("confirm-receipt"),
+        },
+    )
+
+    claim, validated_event, semantic = _context(20)
+    adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        intent_resolver=_IntentResolver(confirm_event),
     )
     plan = adapter.project(
         claim=claim,
@@ -1014,13 +1466,102 @@ def test_governed_admit_bindings_preserved_on_staged_admit() -> None:
         evidence_root_digest=store.snapshot("EVIDENCE_UNIT").root_digest,
     )
 
-    assert len(plan.events) == 1
-    staged = plan.events[0]
-    staged_value = staged.to_json_value()
-    assert staged_value["source_receipt_digest"] == source_digest
-    assert staged_value["payload"]["admission_receipt_digest"] == governed_admission
-    assert staged.canonical_bytes == admit_event.canonical_bytes
-    assert staged.digest == admit_event.digest
+    confirm_events = [
+        event for event in plan.events if event.to_json_value()["payload"]["operation"] == "CONFIRM"
+    ]
+    assert len(confirm_events) == 1
+    assert confirm_events[0].digest == confirm_event.digest
+
+
+# ---------------------------------------------------------------------------
+# Fault-injection / staging-store isolation
+# ---------------------------------------------------------------------------
+
+
+class _FaultingStore:
+    """Wrap an :class:`InMemoryRegistryStore` and fail on the Nth append.
+
+    Used to prove that a mid-projection fault leaves the committed store
+    byte-identical and yields no projection plan (the staged clone is discarded
+    and the committed store is never touched).
+    """
+
+    def __init__(self, *, fail_on_append: int) -> None:
+        self._inner = InMemoryRegistryStore()
+        self._append_count = 0
+        self._fail_on_append = fail_on_append
+
+    def append(self, event: RegistryEvent) -> object:
+        self._append_count += 1
+        if self._append_count == self._fail_on_append:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_STAGING_APPEND_FAULT")
+        return self._inner.append(event)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
+def test_staging_append_fault_leaves_committed_store_byte_identical() -> None:
+    """A fault on the Nth staging append raises, leaves the committed store
+    byte-identical, and produces no projection plan. Rerunning from the same
+    predecessor without the fault yields the canonical successful plan.
+
+    Two expirable assumptions produce two planned EXPIRE appends to the staging
+    clone; the fault store fails on the 2nd append (so the 1st EXPIRE partially
+    applies to the staged clone but never to the committed store).
+    """
+
+    store = InMemoryRegistryStore()
+    p_a = _propose(store, assumption_id="assumption:a", clock=1, expires=10)
+    _admit(store, p_a, clock=2)
+    p_b = _propose(store, assumption_id="assumption:b", clock=3, expires=10)
+    _admit(store, p_b, clock=4)
+
+    original_root = store.snapshot("ASSUMPTION").root_digest
+    original_snapshot = store.snapshot("ASSUMPTION")
+
+    claim, validated_event, semantic = _context(20)
+
+    def _factory() -> RegistryStore:
+        return _FaultingStore(fail_on_append=2)
+
+    faulting_adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+        staging_store_factory=_factory,
+    )
+
+    with pytest.raises(
+        AssumptionProjectionError,
+        match="ASSUMPTION_PROJECTION_STAGING_APPEND_FAULT",
+    ):
+        faulting_adapter.project(
+            claim=claim,
+            validated_event=validated_event,
+            semantic_receipt=semantic,
+            committed_store=store,
+            evidence_root_digest=store.snapshot("EVIDENCE_UNIT").root_digest,
+        )
+
+    # Committed head/root is byte-identical before and after.
+    assert store.snapshot("ASSUMPTION").root_digest == original_root
+    assert store.snapshot("ASSUMPTION").heads == original_snapshot.heads
+
+    # Rerun from the same predecessor without the fault: canonical success.
+    healthy_adapter = StagedAssumptionProjectionAdapter(
+        expiry_authority=_StaticExpiryAuthority(),
+    )
+    plan = healthy_adapter.project(
+        claim=claim,
+        validated_event=validated_event,
+        semantic_receipt=semantic,
+        committed_store=store,
+        evidence_root_digest=store.snapshot("EVIDENCE_UNIT").root_digest,
+    )
+
+    assert len(plan.events) == 2
+    operations = [event.to_json_value()["payload"]["operation"] for event in plan.events]
+    assert operations == ["EXPIRE", "EXPIRE"]
+    assert plan.predecessor_root_digest == original_root
 
 
 # ---------------------------------------------------------------------------
