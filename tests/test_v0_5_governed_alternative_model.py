@@ -1188,3 +1188,68 @@ def test_facade_reexports_governed_error() -> None:
     )
 
     assert FacadeUseAuthorityDecision is UseAuthorityDecision
+
+
+def test_array_authority_member_change_classified_as_authority() -> None:
+    """A change inside a list element's authority_id field is classified as AUTHORITY."""
+    primary = _canonical_json({"nodes": [{"authority_id": "authority:a"}]})
+    shadow = _canonical_json({"nodes": [{"authority_id": "authority:b"}]})
+    primary_digest = _graph_digest_of(primary)
+    shadow_digest = _graph_digest_of(shadow)
+    diff_digest = compute_structural_difference_digest(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+    )
+    receipt = detect_structural_difference(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+        primary_graph_digest=primary_digest,
+        shadow_graph_digest=shadow_digest,
+        declared_difference_digest=diff_digest,
+    )
+    assert "AUTHORITY" in receipt.difference_families
+    assert receipt.has_material_difference is True
+    assert any("authority_id" in p for p in receipt.difference_paths)
+
+
+def test_array_member_added_classified_as_added_removed() -> None:
+    """A list member present on one side only is classified as ADDED_REMOVED."""
+    primary = _canonical_json({"nodes": [{"id": "a"}]})
+    shadow = _canonical_json({"nodes": [{"id": "a"}, {"id": "b"}]})
+    primary_digest = _graph_digest_of(primary)
+    shadow_digest = _graph_digest_of(shadow)
+    diff_digest = compute_structural_difference_digest(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+    )
+    receipt = detect_structural_difference(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+        primary_graph_digest=primary_digest,
+        shadow_graph_digest=shadow_digest,
+        declared_difference_digest=diff_digest,
+    )
+    assert "ADDED_REMOVED" in receipt.difference_families
+    assert receipt.has_material_difference is True
+    assert any("[1]" in p for p in receipt.difference_paths)
+
+
+def test_nested_list_scope_key_classified_as_scope() -> None:
+    """A change in a nested list element's scope_id field is classified as SCOPE."""
+    primary = _canonical_json({"layers": [{"scope_ids": ["scope:alpha"]}]})
+    shadow = _canonical_json({"layers": [{"scope_ids": ["scope:beta"]}]})
+    primary_digest = _graph_digest_of(primary)
+    shadow_digest = _graph_digest_of(shadow)
+    diff_digest = compute_structural_difference_digest(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+    )
+    receipt = detect_structural_difference(
+        primary_graph_bytes=primary,
+        shadow_graph_bytes=shadow,
+        primary_graph_digest=primary_digest,
+        shadow_graph_digest=shadow_digest,
+        declared_difference_digest=diff_digest,
+    )
+    assert "SCOPE" in receipt.difference_families
+    assert receipt.has_material_difference is True

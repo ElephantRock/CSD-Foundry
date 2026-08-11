@@ -181,12 +181,11 @@ def _collect_differences(
 ) -> None:
     """Recursively walk two JSON object graphs recording differing paths.
 
-    Both inputs are JSON objects (validated by the caller). Two sub-values are
-    recursed into only when both are objects. When a key exists on only one
-    side the path is recorded as ADDED_REMOVED. When both sides have the key but
-    the JSON-type-aware values differ the path is recorded as RELABELED (or the
-    keyword family matching the full path). JSON-type-aware comparison treats
-    ``true`` and ``1`` as distinct even though Python compares them equal.
+    Both inputs are JSON objects (validated by the caller). Recurses into both
+    dict-dict and list-list pairs. When a key/index exists on only one side the
+    path is recorded as ADDED_REMOVED. When both sides have the key/index but the
+    JSON-type-aware values differ the path is recorded as RELABELED (or the
+    keyword family matching the full path).
     """
     all_keys = set(primary) | set(shadow)
     for key in sorted(all_keys):
@@ -198,6 +197,36 @@ def _collect_differences(
             shadow_value = shadow[key]
             if type(primary_value) is dict and type(shadow_value) is dict:
                 _collect_differences(primary_value, shadow_value, path, paths, families)
+            elif type(primary_value) is list and type(shadow_value) is list:
+                _collect_list_differences(primary_value, shadow_value, path, paths, families)
+            elif type(primary_value) is not type(shadow_value) or primary_value != shadow_value:
+                paths.append(path)
+                families.append(_classify_difference(path, present_both_sides=True))
+        else:
+            paths.append(path)
+            families.append(_classify_difference(path, present_both_sides=False))
+
+
+def _collect_list_differences(
+    primary: list[Any],
+    shadow: list[Any],
+    prefix: str,
+    paths: list[str],
+    families: list[str],
+) -> None:
+    """Recursively walk two JSON arrays by canonical index."""
+    max_len = max(len(primary), len(shadow))
+    for i in range(max_len):
+        path = f"{prefix}[{i}]"
+        in_primary = i < len(primary)
+        in_shadow = i < len(shadow)
+        if in_primary and in_shadow:
+            primary_value = primary[i]
+            shadow_value = shadow[i]
+            if type(primary_value) is dict and type(shadow_value) is dict:
+                _collect_differences(primary_value, shadow_value, path, paths, families)
+            elif type(primary_value) is list and type(shadow_value) is list:
+                _collect_list_differences(primary_value, shadow_value, path, paths, families)
             elif type(primary_value) is not type(shadow_value) or primary_value != shadow_value:
                 paths.append(path)
                 families.append(_classify_difference(path, present_both_sides=True))
