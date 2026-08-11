@@ -558,7 +558,9 @@ class StagedAssumptionProjectionAdapter:
             )
         )
         _verify_event_bindings(explicit, sequence)
-        _verify_governed_admit_bindings(explicit, governed_evidence, evidence_root_digest)
+        _verify_governed_admit_bindings(
+            explicit, governed_evidence, evidence_root_digest, predecessor_root
+        )
         impacts: list[AssumptionImpactReceipt] = []
         _apply_events(
             explicit,
@@ -718,21 +720,13 @@ def _verify_governed_admit_bindings(
     events: tuple[RegistryEvent, ...],
     governed_evidence: tuple[GovernedAdmitAuthorization, ...],
     evidence_root_digest: str,
+    predecessor_root_digest: str,
 ) -> None:
     """Validate the real production binding for each explicit ADMIT event.
 
-    For an ADMIT event whose assumption_id has a matching
-    :class:`GovernedAdmitAuthorization`:
-
-    * ``event.source_receipt_digest`` must equal the authorization's
-      :class:`DependencyValidationReceipt` ``receipt_digest``.
-    * ``payload.admission_receipt_digest`` must equal the authorization's
-      ``authorization_digest``.
-
-    An ADMIT event with no matching authorization is rejected fail-closed.
-    Non-ADMIT events skip ADMIT-specific validation.
+    Cross-binds the event against the authorization's identity, predecessor,
+    sequence, authority, roots, and receipt digests.
     """
-    del evidence_root_digest  # root cross-bind is enforced by _verify_governed_evidence_shape
     auth_by_id: dict[str, GovernedAdmitAuthorization] = {
         auth.assumption_id: auth for auth in governed_evidence
     }
@@ -748,6 +742,22 @@ def _verify_governed_admit_bindings(
             raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_EVIDENCE_MISSING")
         value = event.to_json_value()
         dep_receipt: DependencyValidationReceipt = auth.dependency_validation_receipt
+
+        # Full cross-binding per frozen P3.2 requirement.
+        if assumption_id != auth.assumption_id:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_IDENTITY_MISMATCH")
+        if value.get("entity_sequence") != auth.candidate_entity_sequence:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_SEQUENCE_MISMATCH")
+        if value.get("previous_entity_event_digest") != auth.candidate_predecessor_event_digest:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_PREDECESSOR_MISMATCH")
+        if value.get("clock_sequence") != auth.event_sequence:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_CLOCK_MISMATCH")
+        if payload.get("admitting_authority_id") != auth.admitting_authority_id:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_AUTHORITY_MISMATCH")
+        if predecessor_root_digest != auth.assumption_registry_root:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_ROOT_MISMATCH")
+        if evidence_root_digest != auth.evidence_registry_root:
+            raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_EVIDENCE_ROOT_MISMATCH")
         if value.get("source_receipt_digest") != dep_receipt.receipt_digest:
             raise AssumptionProjectionError("ASSUMPTION_PROJECTION_ADMIT_SOURCE_MISMATCH")
         if payload.get("admission_receipt_digest") != auth.authorization_digest:

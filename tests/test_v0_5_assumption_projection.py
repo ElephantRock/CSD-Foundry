@@ -968,30 +968,30 @@ def test_committed_root_unchanged_after_admit_binding_failure() -> None:
     supplied governed authorization is rejected fail-closed, leaving the
     committed store byte-identical.
 
-    Production ADMIT events bind ``source_receipt_digest`` to the
-    :class:`DependencyValidationReceipt` digest and
-    ``payload.admission_receipt_digest`` to the ``GovernedAdmitAuthorization``
-    digest. The adapter validates both cross-bindings and raises if either is
-    substituted.
+    Uses the SAME store that generated the governed evidence, so that the
+    predecessor binding is correct; only the source receipt is tampered.
     """
 
+    store = InMemoryRegistryStore()
     governed = _build_governed_admit_evidence(
-        InMemoryRegistryStore(),
+        store,
         candidate_id="assumption:1",
         clock=1,
         admit_clock=2,
     )
-    store = InMemoryRegistryStore()
-    proposed = _propose(store, assumption_id="assumption:1", clock=1, expires=10)
-    original_root = store.snapshot("ASSUMPTION").root_digest
+    # The governed ADMIT was already applied to the seed store. We need to
+    # work against a store with only the PROPOSE. Clone a fresh store with
+    # just the PROPOSE event from the governed evidence.
+    propose_store = InMemoryRegistryStore()
+    proposed = _propose(propose_store, assumption_id="assumption:1", clock=1, expires=100)
+    original_root = propose_store.snapshot("ASSUMPTION").root_digest
 
-    # Build an ADMIT event against the *real* PROPOSE predecessor but with a
-    # tampered source digest (not the dependency-validation receipt digest).
+    # Build an ADMIT event with a tampered source digest.
     tampered_admit = build_assumption_event(
         assumption_id="assumption:1",
         entity_sequence=proposed.current_entity_sequence + 1,
         previous_entity_event_digest=proposed.current_event_digest,
-        clock_sequence=20,
+        clock_sequence=2,
         source_receipt_digest=_digest("tampered-source"),
         payload={
             "operation": "ADMIT",
@@ -1000,7 +1000,7 @@ def test_committed_root_unchanged_after_admit_binding_failure() -> None:
         },
     )
 
-    claim, validated_event, semantic = _context(20)
+    claim, validated_event, semantic = _context(2)
     adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
         intent_resolver=_IntentResolver(tampered_admit),
@@ -1014,12 +1014,12 @@ def test_committed_root_unchanged_after_admit_binding_failure() -> None:
             claim=claim,
             validated_event=validated_event,
             semantic_receipt=semantic,
-            committed_store=store,
+            committed_store=propose_store,
             evidence_root_digest=governed.evidence_root,
             governed_evidence=(governed.authorization,),
         )
 
-    assert store.snapshot("ASSUMPTION").root_digest == original_root
+    assert propose_store.snapshot("ASSUMPTION").root_digest == original_root
 
 
 def test_committed_root_unchanged_after_reduction_failure() -> None:
@@ -1038,7 +1038,7 @@ def test_committed_root_unchanged_after_reduction_failure() -> None:
         assumption_id="assumption:1",
         entity_sequence=challenged.current_entity_sequence + 1,
         previous_entity_event_digest=challenged.current_event_digest,
-        clock_sequence=20,
+        clock_sequence=2,
         source_receipt_digest=source_digest,
         payload={
             "operation": "CONFIRM",
@@ -1251,7 +1251,7 @@ def test_governed_admit_bindings_preserved_on_staged_admit() -> None:
         assumption_id="assumption:1",
         entity_sequence=proposed.current_entity_sequence + 1,
         previous_entity_event_digest=proposed.current_event_digest,
-        clock_sequence=20,
+        clock_sequence=2,  # MUST match auth.event_sequence
         source_receipt_digest=dep_receipt.receipt_digest,
         payload={
             "operation": "ADMIT",
@@ -1260,7 +1260,7 @@ def test_governed_admit_bindings_preserved_on_staged_admit() -> None:
         },
     )
 
-    claim, validated_event, semantic = _context(20)
+    claim, validated_event, semantic = _context(2)  # same clock as auth
     adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
         intent_resolver=_IntentResolver(admit_event),
@@ -1306,7 +1306,7 @@ def test_governed_admit_admission_receipt_tamper_rejected() -> None:
         assumption_id="assumption:1",
         entity_sequence=proposed.current_entity_sequence + 1,
         previous_entity_event_digest=proposed.current_event_digest,
-        clock_sequence=20,
+        clock_sequence=2,
         source_receipt_digest=dep_receipt.receipt_digest,
         payload={
             "operation": "ADMIT",
@@ -1315,7 +1315,7 @@ def test_governed_admit_admission_receipt_tamper_rejected() -> None:
         },
     )
 
-    claim, validated_event, semantic = _context(20)
+    claim, validated_event, semantic = _context(2)
     adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
         intent_resolver=_IntentResolver(tampered_admit),
@@ -1354,7 +1354,7 @@ def test_governed_admit_without_evidence_rejected() -> None:
         assumption_id="assumption:1",
         entity_sequence=proposed.current_entity_sequence + 1,
         previous_entity_event_digest=proposed.current_event_digest,
-        clock_sequence=20,
+        clock_sequence=2,
         source_receipt_digest=dep_receipt.receipt_digest,
         payload={
             "operation": "ADMIT",
@@ -1363,7 +1363,7 @@ def test_governed_admit_without_evidence_rejected() -> None:
         },
     )
 
-    claim, validated_event, semantic = _context(20)
+    claim, validated_event, semantic = _context(2)
     adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
         intent_resolver=_IntentResolver(admit_event),
@@ -1401,7 +1401,7 @@ def test_governed_admit_evidence_root_mismatch_rejected() -> None:
         assumption_id="assumption:1",
         entity_sequence=proposed.current_entity_sequence + 1,
         previous_entity_event_digest=proposed.current_event_digest,
-        clock_sequence=20,
+        clock_sequence=2,
         source_receipt_digest=dep_receipt.receipt_digest,
         payload={
             "operation": "ADMIT",
@@ -1410,7 +1410,7 @@ def test_governed_admit_evidence_root_mismatch_rejected() -> None:
         },
     )
 
-    claim, validated_event, semantic = _context(20)
+    claim, validated_event, semantic = _context(2)
     adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
         intent_resolver=_IntentResolver(admit_event),
@@ -1479,21 +1479,28 @@ def test_non_admit_event_does_not_require_governed_evidence() -> None:
 
 
 class _FaultingStore:
-    """Wrap an :class:`InMemoryRegistryStore` and fail on the Nth append.
+    """Wrap an :class:`InMemoryRegistryStore` and fail on the Nth append AFTER
+    a specified clone-load count.
 
-    Used to prove that a mid-projection fault leaves the committed store
-    byte-identical and yields no projection plan (the staged clone is discarded
-    and the committed store is never touched).
+    Used to prove that a mid-staging fault leaves the committed store
+    byte-identical and yields no projection plan. The ``skip_clone_appends``
+    parameter specifies how many appends are clone-loading (pre-staging) and
+    should not be faulted.
     """
 
-    def __init__(self, *, fail_on_append: int) -> None:
+    def __init__(self, *, fail_on_append: int, skip_clone_appends: int = 0) -> None:
         self._inner = InMemoryRegistryStore()
         self._append_count = 0
         self._fail_on_append = fail_on_append
+        self._skip_clone_appends = skip_clone_appends
+        self._staging_append_count = 0
 
     def append(self, event: RegistryEvent) -> object:
         self._append_count += 1
-        if self._append_count == self._fail_on_append:
+        if self._append_count <= self._skip_clone_appends:
+            return self._inner.append(event)
+        self._staging_append_count += 1
+        if self._staging_append_count == self._fail_on_append:
             raise AssumptionProjectionError("ASSUMPTION_PROJECTION_STAGING_APPEND_FAULT")
         return self._inner.append(event)
 
@@ -1502,13 +1509,13 @@ class _FaultingStore:
 
 
 def test_staging_append_fault_leaves_committed_store_byte_identical() -> None:
-    """A fault on the Nth staging append raises, leaves the committed store
-    byte-identical, and produces no projection plan. Rerunning from the same
-    predecessor without the fault yields the canonical successful plan.
+    """A fault on the Nth post-clone staging append raises, leaves the committed
+    store byte-identical, and produces no projection plan. Rerunning from the
+    same predecessor without the fault yields the canonical successful plan.
 
-    Two expirable assumptions produce two planned EXPIRE appends to the staging
-    clone; the fault store fails on the 2nd append (so the 1st EXPIRE partially
-    applies to the staged clone but never to the committed store).
+    Four committed events are cloned first (PROPOSE+ADMIT x2). Then two planned
+    EXPIRE events are staged. The fault fires on the 2nd staging append (the
+    2nd EXPIRE), proving one staged event succeeded before the fault.
     """
 
     store = InMemoryRegistryStore()
@@ -1522,8 +1529,12 @@ def test_staging_append_fault_leaves_committed_store_byte_identical() -> None:
 
     claim, validated_event, semantic = _context(20)
 
+    faulting_store_holder: list[_FaultingStore | None] = [None]
+
     def _factory() -> RegistryStore:
-        return _FaultingStore(fail_on_append=2)
+        fs = _FaultingStore(fail_on_append=2, skip_clone_appends=4)
+        faulting_store_holder[0] = fs
+        return fs
 
     faulting_adapter = StagedAssumptionProjectionAdapter(
         expiry_authority=_StaticExpiryAuthority(),
@@ -1545,6 +1556,12 @@ def test_staging_append_fault_leaves_committed_store_byte_identical() -> None:
     # Committed head/root is byte-identical before and after.
     assert store.snapshot("ASSUMPTION").root_digest == original_root
     assert store.snapshot("ASSUMPTION").heads == original_snapshot.heads
+
+    # The faulting store must have observed at least one successful staging
+    # append before the fault (proving the fault is post-clone, during staging).
+    assert faulting_store_holder[0] is not None
+    assert faulting_store_holder[0]._staging_append_count == 2  # faulted on 2nd
+    assert faulting_store_holder[0]._append_count == 6  # 4 clone + 2 staging
 
     # Rerun from the same predecessor without the fault: canonical success.
     healthy_adapter = StagedAssumptionProjectionAdapter(
