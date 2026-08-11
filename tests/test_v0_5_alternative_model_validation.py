@@ -47,7 +47,7 @@ def test_committed_alternative_model_vectors_validate_independently() -> None:
     assert len(report.accepted_registry_roots) == 11
     assert len(report.rejected_failure_codes) == 10
     assert report.vector_catalog_digest == (
-        "sha256:ff521c8095c662a07be5e7dc798e37cc6be73964e2b489dfabcaa1e3e26b3b3f"
+        "sha256:2cddb291e1b3ecd620f49d2372a001acb1ecf0571c3d2e6c045aa77669a1a0d6"
     )
     # Import boundary: the validator must not import any production governance
     # module other than canonicalization, contracts, and resources.

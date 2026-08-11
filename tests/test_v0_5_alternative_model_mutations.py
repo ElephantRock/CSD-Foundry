@@ -17,7 +17,7 @@ def test_alternative_model_mutation_campaign_kills_every_declared_mutation() -> 
     assert report.invalid_mutation_count == 0
     assert report.unexplained_escape_count == 0
     assert report.mutation_catalog_digest == (
-        "sha256:48f109da5d56e3034a7a4e3a9450126ed19d609d5344440aeeea5523eac3c3d9"
+        "sha256:2578c566204a4c6d6ecc5e0ef0217a1a6e56c71c0dd277765a35b414cc816380"
     )
     assert all(item.observed_classification == "KILLED" for item in report.results)
     assert all(item.observed_detector == item.expected_detector for item in report.results)

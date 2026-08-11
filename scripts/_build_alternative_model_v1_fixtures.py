@@ -1532,23 +1532,45 @@ def _r_admission_evidence_missing() -> dict[str, Any]:
 def _r_structural_difference_declared_mismatch() -> dict[str, Any]:
     """AMV-R08: structural-difference receipt declared_difference_digest corrupted.
 
-    The receipt's ``declared_difference_digest`` no longer matches its
-    ``computed_difference_digest``, so the independent structural-difference
-    detector rejects it during the governed ADMIT authorization reconstruction
-    (and again at the STRUCTURAL_DIFFERENCE stage dispatcher).
+    Uses a PROPOSE-only history (no governed ADMIT) so that history validation
+    succeeds and the dispatcher reaches the ``STRUCTURAL_DIFFERENCE`` stage
+    branch. The standalone admission's structural-difference receipt has a
+    corrupted ``declared_difference_digest`` so the structural-difference
+    validator fires ``STRUCTURAL_DIFFERENCE_DECLARED_MISMATCH``.
     """
-    base = _v_basic_governed_admit()
-    admissions = deepcopy(base["admissions"])
-    receipt = admissions[0]["structural_difference_receipt"]
+    model_id = "alt-model:r08"
+    primary = _primary_graph()
+    shadow = _shadow_graph("shadow-r08")
+    receipt, _, _ = _build_structural_difference_receipt(primary, shadow)
     # Corrupt only declared_difference_digest (still a syntactically valid digest)
     # so the computed-vs-declared check fires before the self-digest check.
     receipt["declared_difference_digest"] = _literal_digest("corrupted-declared-difference")
+    propose = _ev(
+        model_id=model_id,
+        entity_sequence=1,
+        previous=None,
+        clock=1,
+        source_receipt=_receipt(f"{model_id}:propose"),
+        payload=_propose_payload(
+            graph_digest=receipt["shadow_graph_digest"],
+            declared_difference_digest=receipt["declared_difference_digest"],
+            valid_from=1,
+            expires_at=100,
+        ),
+    )
+    propose = _rebuild_chain([propose])[0]
+    admission = {
+        "model_id": model_id,
+        "structural_difference_receipt": receipt,
+        "primary_graph": primary,
+        "shadow_graph": shadow,
+    }
     return {
         "vector_id": "AMV-R08",
-        "description": "structural-difference declared_difference_digest corrupted.",
-        "events": deepcopy(base["events"]),
-        "admissions": admissions,
-        "expected_authorization_digests": deepcopy(base["expected_authorization_digests"]),
+        "description": "structural-difference declared_difference_digest corrupted (PROPOSE-only).",
+        "events": [propose],
+        "admissions": [admission],
+        "expected_authorization_digests": {},
         "expected_error": "STRUCTURAL_DIFFERENCE_DECLARED_MISMATCH",
         "stage": "STRUCTURAL_DIFFERENCE",
     }
