@@ -23,7 +23,6 @@ from pathlib import Path
 import pytest
 
 from csd_foundry.governance.v0_5.alternative_model import (
-    STANDING_ADMITTED,
     STANDING_CHALLENGED,
     STANDING_CONFIRMED,
     STANDING_EXPIRED,
@@ -757,27 +756,22 @@ def test_order_sensitive_history_rejects_swapped_events() -> None:
 
 
 def test_uphold_preserves_confirmed_standing() -> None:
-    """CONFIRMED → CHALLENGE → UPHOLD (all resolved) → CONFIRMED, not ADMITTED."""
+    """CONFIRMED → CHALLENGE → UPHOLD (all resolved) → CONFIRMED, not downgraded."""
     store = InMemoryRegistryStore()
     registry = AlternativeModelRegistry(store)
     _, unverified = _propose_and_admit(store)
-    # ADMIT produces UNVERIFIED; we need to reach CONFIRMED via challenge resolution
-    challenged = registry.apply(_challenge(unverified, "challenge:c1", 3))
-    resolved = registry.apply(
-        _resolve(challenged, clock=4, outcome="UPHOLD", challenge_ids=["challenge:c1"])
-    )
-    assert resolved.separation_status == STANDING_UNVERIFIED  # preserved
+    confirmed = registry.apply(_confirm(unverified, clock=3))
+    assert confirmed.separation_status == STANDING_CONFIRMED
 
-    # Now CONFIRM from UNVERIFIED is not legal (CONFIRM requires ADMITTED/CONFIRMED)
-    # So we test via the direct CONFIRM path from ADMITTED which requires a prior
-    # all-resolved UPHOLD cycle. Instead, test CONFIRMED preservation:
-    # Use _propose_and_admit to get UNVERIFIED, challenge, uphold, then check
-    # that a second challenge+uphold cycle also preserves UNVERIFIED.
-    challenged2 = registry.apply(_challenge(resolved, "challenge:c2", 5))
-    restored2 = registry.apply(
-        _resolve(challenged2, clock=6, outcome="UPHOLD", challenge_ids=["challenge:c2"])
+    challenged = registry.apply(_challenge(confirmed, "challenge:c1", 4))
+    assert challenged.standing == STANDING_CHALLENGED
+
+    restored = registry.apply(
+        _resolve(challenged, clock=5, outcome="UPHOLD", challenge_ids=["challenge:c1"])
     )
-    assert restored2.separation_status == STANDING_UNVERIFIED
+    assert restored.separation_status == STANDING_CONFIRMED
+    assert restored.standing == STANDING_CONFIRMED
+    assert restored.active_challenges == ()
 
 
 def test_uphold_with_replacement_model_id_rejected() -> None:
