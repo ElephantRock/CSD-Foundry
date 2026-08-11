@@ -27,6 +27,8 @@ csd-foundry = "csd_foundry.cli:main"
 csd-foundry-admission = "csd_foundry.governance.v0_5.admission_cli:main"
 csd-foundry-assumption-mutations-v0-5 = "csd_foundry.governance.v0_5.assumption_mutation_cli:main"
 csd-foundry-assumption-v0-5 = "csd_foundry.governance.v0_5.assumption_cli:main"
+csd-foundry-alternative-model-mutations-v0-5 = "csd_foundry.governance.v0_5.alternative_model_mutation_cli:main"
+csd-foundry-alternative-model-v0-5 = "csd_foundry.governance.v0_5.alternative_model_validation_cli:main"
 csd-foundry-evidence-v0-5 = "csd_foundry.governance.v0_5.evidence_cli:main"
 csd-foundry-evidence-mutations-v0-5 = "csd_foundry.governance.v0_5.evidence_mutation_cli:main"
 csd-foundry-governance = "csd_foundry.governance.v0_5.cli:main"
@@ -45,6 +47,8 @@ where = ["src"]
 "share/csd-foundry/data/canary/v0.5/evidence-mutations-v1" = ["data/canary/v0.5/evidence-mutations-v1/*.json"]
 "share/csd-foundry/data/canary/v0.5/assumption-v1" = ["data/canary/v0.5/assumption-v1/*.json"]
 "share/csd-foundry/data/canary/v0.5/assumption-mutations-v1" = ["data/canary/v0.5/assumption-mutations-v1/*.json"]
+"share/csd-foundry/data/canary/v0.5/alternative-model-v1" = ["data/canary/v0.5/alternative-model-v1/*.json"]
+"share/csd-foundry/data/canary/v0.5/alternative-model-mutations-v1" = ["data/canary/v0.5/alternative-model-mutations-v1/*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
