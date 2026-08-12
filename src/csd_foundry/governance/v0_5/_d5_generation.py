@@ -37,11 +37,11 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from csd_foundry._platform import advisory_lock, fsync_directory
 from csd_foundry.governance.v0_5._alternative_model_projection import (
@@ -51,6 +51,10 @@ from csd_foundry.governance.v0_5._alternative_model_projection import (
 from csd_foundry.governance.v0_5._assumption_projection import (
     AssumptionProjectionPlan,
     StagedAssumptionProjectionAdapter,
+)
+from csd_foundry.governance.v0_5._governed_alternative_model import (
+    ComparisonReceipt,
+    GovernedAlternativeModelAuthorization,
 )
 from csd_foundry.governance.v0_5.contracts import (
     ClockClaim,
@@ -76,7 +80,7 @@ from csd_foundry.governance.v0_5.registry import (
 MANIFEST_SCHEMA_VERSION = "d5-generation-manifest/1"
 CURRENT_POINTER_SCHEMA_VERSION = "current-d5-generation/1"
 ACTIVE_MARKER_SCHEMA_VERSION = "active-d5-generation/1"
-PREPARED_BUNDLE_SCHEMA_VERSION = "prepared-d5-generation/1"
+PREPARED_BUNDLE_SCHEMA_VERSION = "prepared-d5-generation/2"
 
 _GENESIS_GENERATION_DIGEST = "sha256:" + hashlib.sha256(b"D5_GENERATION_GENESIS").hexdigest()
 _DISPOSITION_POLICY_DIGEST = (
@@ -387,6 +391,45 @@ class ReferenceQuarantineAdapter:
 
 
 # --------------------------------------------------------------------------- #
+# Injectable adapter protocols (phase-failure isolation)
+# --------------------------------------------------------------------------- #
+
+
+class DispositionProjector(Protocol):
+    """Structural protocol for disposition adapters used by the D5 layer.
+
+    ``ReferenceDispositionAdapter`` satisfies this structurally. Test code can
+    inject a failing implementation via :class:`D5GenerationStore`'s factory hook
+    to exercise DISPOSITION-phase failure isolation.
+    """
+
+    def project(
+        self,
+        *,
+        semantic_receipt: SemanticProjectionReceipt,
+        clock_sequence: int,
+        evidence_root: str,
+        assumption_root: str,
+        alt_model_root: str,
+    ) -> DispositionReceipt: ...
+
+
+class QuarantineProjector(Protocol):
+    """Structural protocol for quarantine adapters used by the D5 layer.
+
+    ``ReferenceQuarantineAdapter`` satisfies this structurally. Test code can
+    inject a failing implementation to exercise QUARANTINE_COMMIT-phase failure
+    isolation.
+    """
+
+    def project(self) -> ReferenceQuarantineProjection: ...
+
+
+DispositionAdapterFactory = Callable[[], DispositionProjector]
+QuarantineAdapterFactory = Callable[[], QuarantineProjector]
+
+
+# --------------------------------------------------------------------------- #
 # Generation registry view (read-only)
 # --------------------------------------------------------------------------- #
 
@@ -489,13 +532,30 @@ _REGISTRY_TYPES = {
     "alt_model": "ALTERNATIVE_MODEL",
 }
 
+# Domain prefixes used by the three projection plans' self-digests. D5
+# recomputes these to verify persisted plan JSON is intact without needing
+# ``from_json`` round-tripping of every nested receipt type.
+_PLAN_DIGEST_DOMAINS = {
+    "evidence": "EVIDENCE_PROJECTION_PLAN",
+    "assumption": "ASSUMPTION_PROJECTION_PLAN",
+    "alt_model": "ALTERNATIVE_MODEL_PROJECTION_PLAN",
+}
+
+# Domain prefix used by the alternative-model comparison receipt self-digest.
+_COMPARISON_RECEIPT_DOMAIN = "ALTERNATIVE_MODEL_COMPARISON_RECEIPT"
+
 
 class D5GenerationStore:
     """Integrated atomic store coordinating three registry projection adapters.
 
-    Wraps three :class:`FilesystemRegistryStore` instances (one per registry
-    type) and a generations directory for manifests. The single
-    current-generation pointer is the atomic commit point.
+    The three :class:`FilesystemRegistryStore` instances serve ONLY as the
+    content-addressed object store for :class:`RegistryEvent` bytes (and remain
+    available for their own head-advancement gates by other consumers). D5
+    authority is defined by the manifest's canonical head sets plus the single
+    current-generation pointer; D5 never advances the standalone per-entity
+    heads. ``_prepare`` reads from generation-bound views (current
+    generation's head sets), and ``_commit`` advances only the generation
+    pointer via ``os.replace`` — never the live registry heads.
     """
 
     def __init__(
@@ -507,6 +567,8 @@ class D5GenerationStore:
         generations_dir: Path,
         completion_policy_digest: str = _DEFAULT_COMPLETION_POLICY_DIGEST,
         disposition_policy_digest: str = _DISPOSITION_POLICY_DIGEST,
+        disposition_adapter_factory: DispositionAdapterFactory | None = None,
+        quarantine_adapter_factory: QuarantineAdapterFactory | None = None,
     ) -> None:
         if not isinstance(generations_dir, Path):
             raise D5GenerationError("D5_GENERATIONS_DIR_NOT_PATH")
@@ -520,6 +582,10 @@ class D5GenerationStore:
         self.objects = generations_dir / "objects"
         self.manifests = self.objects / "d5-generation-manifest"
         self.completions = self.objects / "clock-completion-receipt"
+        self.semantic_receipts = self.objects / "semantic-projection-receipt"
+        self.projection_plans = self.objects / "projection-plan"
+        self.disposition_receipts = self.objects / "disposition-receipt"
+        self.comparison_receipts = self.objects / "comparison-receipt"
         self.state = generations_dir / "state"
         self.temporary = generations_dir / ".tmp"
         self.lock_path = self.state / "d5.lock"
@@ -529,21 +595,41 @@ class D5GenerationStore:
         self.completion_policy_digest = _require_digest(
             completion_policy_digest, "D5_COMPLETION_POLICY_INVALID"
         )
-        self._disposition_adapter = ReferenceDispositionAdapter(
-            disposition_policy_digest=disposition_policy_digest
+        self._disposition_policy_digest = _require_digest(
+            disposition_policy_digest, "D5_DISPOSITION_POLICY_INVALID"
         )
-        self._quarantine_adapter = ReferenceQuarantineAdapter()
+        # Defect 5: disposition/quarantine adapters are created fresh per
+        # prepare via an injectable factory so test code can raise at the
+        # DISPOSITION / QUARANTINE_COMMIT phase boundary.
+        self._disposition_adapter_factory: DispositionAdapterFactory = (
+            disposition_adapter_factory or self._default_disposition_factory
+        )
+        self._quarantine_adapter_factory: QuarantineAdapterFactory = (
+            quarantine_adapter_factory or self._default_quarantine_factory
+        )
         for directory in (
             generations_dir,
             self.objects,
             self.manifests,
             self.completions,
+            self.semantic_receipts,
+            self.projection_plans,
+            self.disposition_receipts,
+            self.comparison_receipts,
             self.state,
             self.temporary,
         ):
             directory.mkdir(parents=True, exist_ok=True)
             _fsync_directory(directory)
         self.lock_path.touch(exist_ok=True)
+
+    def _default_disposition_factory(self) -> DispositionProjector:
+        return ReferenceDispositionAdapter(
+            disposition_policy_digest=self._disposition_policy_digest
+        )
+
+    def _default_quarantine_factory(self) -> QuarantineProjector:
+        return ReferenceQuarantineAdapter()
 
     # ------------------------------------------------------------------ #
     # Public API: prepare / commit
@@ -558,6 +644,9 @@ class D5GenerationStore:
         evidence_adapter: StagedEvidenceProjectionAdapter,
         assumption_adapter: StagedAssumptionProjectionAdapter,
         alt_model_adapter: StagedAlternativeModelProjectionAdapter,
+        governed_admit_evidence: tuple[
+            tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt], ...
+        ] = (),
     ) -> D5GenerationManifest:
         with self._lock():
             return self._prepare(
@@ -567,6 +656,7 @@ class D5GenerationStore:
                 evidence_adapter=evidence_adapter,
                 assumption_adapter=assumption_adapter,
                 alt_model_adapter=alt_model_adapter,
+                governed_admit_evidence=governed_admit_evidence,
             )
 
     def commit_generation(self, manifest: D5GenerationManifest) -> None:
@@ -646,25 +736,73 @@ class D5GenerationStore:
     # ------------------------------------------------------------------ #
 
     def evidence_view(self) -> GenerationRegistryView:
-        return self._view("evidence", self._evidence_store)
+        with self._lock():
+            return self._generation_view("evidence")
 
     def assumption_view(self) -> GenerationRegistryView:
-        return self._view("assumption", self._assumption_store)
+        with self._lock():
+            return self._generation_view("assumption")
 
     def alt_model_view(self) -> GenerationRegistryView:
-        return self._view("alt_model", self._alt_model_store)
+        with self._lock():
+            return self._generation_view("alt_model")
 
-    def _view(self, registry: str, store: FilesystemRegistryStore) -> GenerationRegistryView:
-        manifest = self.current_generation()
-        if manifest is None:
-            heads: tuple[RegistryEntityHead, ...] = ()
-        else:
+    def _store_for(self, registry: str) -> FilesystemRegistryStore:
+        if registry == "evidence":
+            return self._evidence_store
+        if registry == "assumption":
+            return self._assumption_store
+        return self._alt_model_store
+
+    def _generation_view(self, registry: str) -> GenerationRegistryView:
+        """Construct a read-only view bound to the current generation's heads.
+
+        Lock-free: the caller must already hold ``self._lock()``. Reads from the
+        current generation's manifest head set (not the live mutable registry
+        heads), satisfying the defect-1 isolation requirement.
+        """
+
+        _require_registry_type(_REGISTRY_TYPES[registry])
+        manifest = self._read_current_manifest()
+        heads: tuple[RegistryEntityHead, ...] = ()
+        if manifest is not None:
             heads = manifest.head_entities(registry)
         return GenerationRegistryView(
-            store=store,
+            store=self._store_for(registry),
             registry_type=_REGISTRY_TYPES[registry],
             heads=heads,
         )
+
+    # ------------------------------------------------------------------ #
+    # Public API: durable projection-artifact queries
+    # ------------------------------------------------------------------ #
+
+    def read_semantic_receipt(self, semantic_digest: str) -> dict[str, Any] | None:
+        with self._lock():
+            return self._read_artifact(
+                self._semantic_receipt_path(semantic_digest), "semantic projection receipt"
+            )
+
+    def read_projection_plan(self, plan_digest: str) -> dict[str, Any] | None:
+        with self._lock():
+            return self._read_artifact(self._projection_plan_path(plan_digest), "projection plan")
+
+    def read_disposition_receipt(self, disposition_digest: str) -> dict[str, Any] | None:
+        with self._lock():
+            return self._read_artifact(
+                self._disposition_receipt_path(disposition_digest), "disposition receipt"
+            )
+
+    def read_comparison_receipt(self, comparison_digest: str) -> dict[str, Any] | None:
+        with self._lock():
+            return self._read_artifact(
+                self._comparison_receipt_path(comparison_digest), "comparison receipt"
+            )
+
+    def _read_artifact(self, path: Path, label: str) -> dict[str, Any] | None:
+        if not path.is_file():
+            return None
+        return _json_object(path.read_bytes(), label)
 
     # ------------------------------------------------------------------ #
     # Internal: prepare
@@ -679,15 +817,30 @@ class D5GenerationStore:
         evidence_adapter: StagedEvidenceProjectionAdapter,
         assumption_adapter: StagedAssumptionProjectionAdapter,
         alt_model_adapter: StagedAlternativeModelProjectionAdapter,
+        governed_admit_evidence: tuple[
+            tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt], ...
+        ] = (),
     ) -> D5GenerationManifest:
         claim_value = claim.to_json_value()
         proposed_sequence = cast(int, claim_value["proposed_sequence"])
         previous_sequence = cast(int, claim_value["previous_committed_sequence"])
+        claim_previous_completion = cast(str | None, claim_value["previous_completion_digest"])
 
         pointer = self._read_current_pointer()
         current_sequence = 0 if pointer is None else pointer[0]
         if previous_sequence != current_sequence or proposed_sequence != current_sequence + 1:
             raise D5GenerationConflictError("D5_CLAIM_NOT_SUCCESSOR_OF_CURRENT")
+
+        # Defect 2: bind the temporal predecessor identity. The claim's
+        # previous_completion_digest must equal the current generation's
+        # clock_completion_digest (None for the genesis predecessor).
+        if pointer is None:
+            expected_previous_completion: str | None = None
+        else:
+            current_manifest = self._read_manifest(pointer[1])
+            expected_previous_completion = current_manifest.clock_completion_digest
+        if claim_previous_completion != expected_previous_completion:
+            raise D5GenerationError("PREDECESSOR_COMPLETION_MISMATCH")
 
         active = self._read_active_marker()
         if active is not None and active[0] != claim.digest:
@@ -695,40 +848,45 @@ class D5GenerationStore:
 
         previous_generation_digest = _GENESIS_GENERATION_DIGEST if pointer is None else pointer[1]
 
-        evidence_predecessor = self._evidence_store.snapshot("EVIDENCE_UNIT").root_digest
-        assumption_predecessor = self._assumption_store.snapshot("ASSUMPTION").root_digest
-        alt_model_predecessor = self._alt_model_store.snapshot("ALTERNATIVE_MODEL").root_digest
+        # Defect 1: read predecessor roots from generation-bound views (the
+        # current generation's canonical head sets), NOT from the live mutable
+        # registry heads. The views also serve as the committed-store inputs to
+        # the three staging adapters.
+        evidence_view = self._generation_view("evidence")
+        assumption_view = self._generation_view("assumption")
+        alt_model_view = self._generation_view("alt_model")
 
-        if pointer is not None:
-            prior_manifest = self._read_manifest(pointer[1])
-            if (
-                prior_manifest.evidence_projected_root != evidence_predecessor
-                or prior_manifest.assumption_projected_root != assumption_predecessor
-                or prior_manifest.alt_model_projected_root != alt_model_predecessor
-            ):
-                raise D5GenerationConflictError("D5_COMMITTED_STORES_DIVERGED_FROM_GENERATION")
+        evidence_predecessor = evidence_view.snapshot("EVIDENCE_UNIT").root_digest
+        assumption_predecessor = assumption_view.snapshot("ASSUMPTION").root_digest
+        alt_model_predecessor = alt_model_view.snapshot("ALTERNATIVE_MODEL").root_digest
 
         evidence_plan = evidence_adapter.project(
             claim=claim,
             validated_event=validated_event,
             semantic_receipt=semantic_receipt,
-            committed_store=self._evidence_store,
+            committed_store=evidence_view,
         )
         assumption_plan = assumption_adapter.project(
             claim=claim,
             validated_event=validated_event,
             semantic_receipt=semantic_receipt,
-            committed_store=self._assumption_store,
+            committed_store=assumption_view,
             evidence_root_digest=evidence_plan.projected_root_digest,
         )
         alt_model_plan = alt_model_adapter.project(
             claim=claim,
             validated_event=validated_event,
             semantic_receipt=semantic_receipt,
-            committed_store=self._alt_model_store,
+            committed_store=alt_model_view,
             evidence_root_digest=evidence_plan.projected_root_digest,
             assumption_root_digest=assumption_plan.projected_root_digest,
+            governed_admit_evidence=governed_admit_evidence,
         )
+
+        # Defect 2: every plan must bind the claim's proposed clock sequence.
+        for plan in (evidence_plan, assumption_plan, alt_model_plan):
+            if plan.clock_sequence != proposed_sequence:
+                raise D5GenerationError("CLOCK_SEQUENCE_MISMATCH")
 
         _validate_cross_phase_bindings(
             claim=claim,
@@ -743,17 +901,17 @@ class D5GenerationStore:
         )
 
         evidence_heads = _projected_heads(
-            self._evidence_store.snapshot("EVIDENCE_UNIT").heads,
+            evidence_view.snapshot("EVIDENCE_UNIT").heads,
             evidence_plan.events,
             "EVIDENCE_UNIT",
         )
         assumption_heads = _projected_heads(
-            self._assumption_store.snapshot("ASSUMPTION").heads,
+            assumption_view.snapshot("ASSUMPTION").heads,
             assumption_plan.events,
             "ASSUMPTION",
         )
         alt_model_heads = _projected_heads(
-            self._alt_model_store.snapshot("ALTERNATIVE_MODEL").heads,
+            alt_model_view.snapshot("ALTERNATIVE_MODEL").heads,
             alt_model_plan.events,
             "ALTERNATIVE_MODEL",
         )
@@ -768,23 +926,27 @@ class D5GenerationStore:
         ):
             raise D5GenerationConflictError("D5_ALT_MODEL_PROJECTED_ROOT_MISMATCH")
 
-        disposition = self._disposition_adapter.project(
+        # Defect 5: disposition and quarantine adapters are produced fresh per
+        # prepare through an injectable factory, so the DISPOSITION and
+        # QUARANTINE_COMMIT phases are fault-injectable.
+        disposition_adapter = self._disposition_adapter_factory()
+        disposition = disposition_adapter.project(
             semantic_receipt=semantic_receipt,
             clock_sequence=proposed_sequence,
             evidence_root=evidence_plan.projected_root_digest,
             assumption_root=assumption_plan.projected_root_digest,
             alt_model_root=alt_model_plan.projected_root_digest,
         )
-        quarantine = self._quarantine_adapter.project()
+        quarantine_adapter = self._quarantine_adapter_factory()
+        quarantine = quarantine_adapter.project()
 
-        previous_completion_digest = cast(str | None, claim_value["previous_completion_digest"])
         completion = cast(
             ClockCompletionReceipt,
             ClockCompletionReceipt.build(
                 {
                     "schema_version": "clock-completion-receipt/1",
                     "clock_sequence": proposed_sequence,
-                    "previous_completion_digest": previous_completion_digest,
+                    "previous_completion_digest": claim_previous_completion,
                     "clock_claim_digest": claim.digest,
                     "validated_event_digest": validated_event.digest,
                     "semantic_projection_receipt_digest": semantic_receipt.digest,
@@ -865,17 +1027,35 @@ class D5GenerationStore:
             generation_digest=_compute_generation_digest(manifest_unsigned),
         )
 
+        # Defect 4: durably retain the semantic receipt, three projection plans,
+        # and reference disposition receipt in the content-addressed object
+        # store so they survive commit + restart (not just the ephemeral bundle).
         self._install_manifest(manifest)
         self._install_completion(completion)
+        self._install_semantic_receipt(semantic_receipt)
+        self._install_projection_plan(evidence_plan, "evidence")
+        self._install_projection_plan(assumption_plan, "assumption")
+        self._install_projection_plan(alt_model_plan, "alt_model")
+        self._install_disposition_receipt(disposition)
+        comparison_receipts = self._install_comparison_receipts(
+            governed_admit_evidence, alt_model_plan
+        )
+
         self._install(
             self.prepared_path,
             _prepared_bundle_bytes(
                 manifest=manifest,
                 completion=completion,
                 claim=claim,
+                semantic_receipt=semantic_receipt,
+                evidence_plan=evidence_plan,
+                assumption_plan=assumption_plan,
+                alt_model_plan=alt_model_plan,
+                disposition=disposition,
                 evidence_events=evidence_plan.events,
                 assumption_events=assumption_plan.events,
                 alt_model_events=alt_model_plan.events,
+                comparison_receipts=comparison_receipts,
             ),
         )
         self._replace(
@@ -904,47 +1084,48 @@ class D5GenerationStore:
             if pointer is None or pointer[1] != manifest.previous_generation_digest:
                 raise D5GenerationConflictError("D5_PREDECESSOR_GENERATION_MISMATCH")
 
-        if (
-            self._evidence_store.snapshot("EVIDENCE_UNIT").root_digest
-            != manifest.evidence_predecessor_root
-        ):
-            raise D5GenerationConflictError("D5_STALE_EVIDENCE_PREDECESSOR")
-        if (
-            self._assumption_store.snapshot("ASSUMPTION").root_digest
-            != manifest.assumption_predecessor_root
-        ):
-            raise D5GenerationConflictError("D5_STALE_ASSUMPTION_PREDECESSOR")
-        if (
-            self._alt_model_store.snapshot("ALTERNATIVE_MODEL").root_digest
-            != manifest.alt_model_predecessor_root
-        ):
-            raise D5GenerationConflictError("D5_STALE_ALT_MODEL_PREDECESSOR")
-
         bundle = self._read_prepared_bundle(manifest.generation_digest)
-        self._append_events(self._evidence_store, "EVIDENCE_UNIT", bundle["evidence_events"])
-        self._append_events(self._assumption_store, "ASSUMPTION", bundle["assumption_events"])
-        self._append_events(self._alt_model_store, "ALTERNATIVE_MODEL", bundle["alt_model_events"])
+        evidence_events, assumption_events, alt_model_events = (
+            _deserialize_events(bundle["evidence_events"], "EVIDENCE_UNIT"),
+            _deserialize_events(bundle["assumption_events"], "ASSUMPTION"),
+            _deserialize_events(bundle["alt_model_events"], "ALTERNATIVE_MODEL"),
+        )
+        completion = cast(
+            ClockCompletionReceipt, ClockCompletionReceipt.from_json(bundle["completion"])
+        )
+        claim = cast(ClockClaim, ClockClaim.from_json(bundle["claim"]))
 
-        if (
-            self._evidence_store.snapshot("EVIDENCE_UNIT").root_digest
-            != manifest.evidence_projected_root
-        ):
-            raise D5GenerationConflictError("D5_EVIDENCE_ROOT_COMMIT_MISMATCH")
-        if (
-            self._assumption_store.snapshot("ASSUMPTION").root_digest
-            != manifest.assumption_projected_root
-        ):
-            raise D5GenerationConflictError("D5_ASSUMPTION_ROOT_COMMIT_MISMATCH")
-        if (
-            self._alt_model_store.snapshot("ALTERNATIVE_MODEL").root_digest
-            != manifest.alt_model_projected_root
-        ):
-            raise D5GenerationConflictError("D5_ALT_MODEL_ROOT_COMMIT_MISMATCH")
+        # Defect 3: single authoritative finalization verifier, shared with
+        # recovery. Runs BEFORE any pointer replacement.
+        self._verify_finalization(
+            manifest=manifest,
+            completion=completion,
+            claim=claim,
+            evidence_events=evidence_events,
+            assumption_events=assumption_events,
+            alt_model_events=alt_model_events,
+            evidence_plan_json=cast(dict[str, Any], bundle["evidence_plan"]),
+            assumption_plan_json=cast(dict[str, Any], bundle["assumption_plan"]),
+            alt_model_plan_json=cast(dict[str, Any], bundle["alt_model_plan"]),
+        )
+
+        # Defect 1: install immutable RegistryEvent objects into the
+        # content-addressed object store WITHOUT advancing the live per-entity
+        # heads. The manifest head sets + generation pointer define D5
+        # authority; the standalone FilesystemRegistryStore head advancement is
+        # left untouched.
+        self._install_event_objects(self._evidence_store, "EVIDENCE_UNIT", evidence_events)
+        self._install_event_objects(self._assumption_store, "ASSUMPTION", assumption_events)
+        self._install_event_objects(self._alt_model_store, "ALTERNATIVE_MODEL", alt_model_events)
+
+        # Re-derive the projected roots from the manifest head sets (now that
+        # every event object is installed) and confirm they still match. This is
+        # the post-install analogue of the old live-store projected-root check.
+        _verify_projected_heads(manifest, self._evidence_store, "evidence")
+        _verify_projected_heads(manifest, self._assumption_store, "assumption")
+        _verify_projected_heads(manifest, self._alt_model_store, "alt_model")
 
         self._install_manifest(manifest)
-        completion = self._read_completion(manifest.clock_completion_digest)
-        if completion is None:
-            raise D5GenerationConflictError("D5_COMPLETION_UNAVAILABLE")
         self._install_completion(completion)
 
         self._replace(
@@ -957,17 +1138,25 @@ class D5GenerationStore:
         )
         self._clear_active()
 
-    def _append_events(
+    def _install_event_objects(
         self,
         store: FilesystemRegistryStore,
         registry_type: str,
-        events: list[dict[str, Any]],
+        events: tuple[RegistryEvent, ...],
     ) -> None:
-        for value in events:
+        """Install immutable event bytes into the object store without head advance.
+
+        Content-addressed and idempotent: a re-install of identical bytes is a
+        no-op, and any byte conflict is rejected. The standalone
+        ``FilesystemRegistryStore`` per-entity heads are NOT advanced — D5
+        authority flows from the manifest head sets + generation pointer.
+        """
+
+        for event in events:
+            value = event.to_json_value()
             if value.get("registry_type") != registry_type:
                 raise D5GenerationConflictError("D5_EVENT_REGISTRY_TYPE_MISMATCH")
-            event = cast(RegistryEvent, RegistryEvent.from_json(value))
-            store.append(event)
+            store._install(store._object_path(event.digest), event.canonical_bytes)
 
     # ------------------------------------------------------------------ #
     # Internal: recovery
@@ -979,10 +1168,17 @@ class D5GenerationStore:
         active = self._read_active_marker()
         if active is None:
             return "NO_ACTIVE_GENERATION"
-        claim_digest, generation_digest = active
+        _claim_digest, generation_digest = active
         try:
             bundle = self._read_prepared_bundle(generation_digest)
             manifest = D5GenerationManifest.from_json(cast(dict[str, Any], bundle["manifest"]))
+            evidence_events = _deserialize_events(bundle["evidence_events"], "EVIDENCE_UNIT")
+            assumption_events = _deserialize_events(bundle["assumption_events"], "ASSUMPTION")
+            alt_model_events = _deserialize_events(bundle["alt_model_events"], "ALTERNATIVE_MODEL")
+            completion = cast(
+                ClockCompletionReceipt, ClockCompletionReceipt.from_json(bundle["completion"])
+            )
+            claim = cast(ClockClaim, ClockClaim.from_json(bundle["claim"]))
         except (D5GenerationConflictError, D5GenerationError, KeyError, TypeError):
             self._clear_active()
             return "INCOMPLETE_GENERATION_FAILED"
@@ -993,15 +1189,30 @@ class D5GenerationStore:
             return "IDEMPOTENT_SUCCESS"
 
         try:
-            self._append_events(self._evidence_store, "EVIDENCE_UNIT", bundle["evidence_events"])
-            self._append_events(self._assumption_store, "ASSUMPTION", bundle["assumption_events"])
-            self._append_events(
-                self._alt_model_store, "ALTERNATIVE_MODEL", bundle["alt_model_events"]
+            # Defect 3: same authoritative verifier as ordinary commit.
+            self._verify_finalization(
+                manifest=manifest,
+                completion=completion,
+                claim=claim,
+                evidence_events=evidence_events,
+                assumption_events=assumption_events,
+                alt_model_events=alt_model_events,
+                evidence_plan_json=cast(dict[str, Any], bundle["evidence_plan"]),
+                assumption_plan_json=cast(dict[str, Any], bundle["assumption_plan"]),
+                alt_model_plan_json=cast(dict[str, Any], bundle["alt_model_plan"]),
             )
+
+            # Defect 1: install event objects only, no head advance.
+            self._install_event_objects(self._evidence_store, "EVIDENCE_UNIT", evidence_events)
+            self._install_event_objects(self._assumption_store, "ASSUMPTION", assumption_events)
+            self._install_event_objects(
+                self._alt_model_store, "ALTERNATIVE_MODEL", alt_model_events
+            )
+            _verify_projected_heads(manifest, self._evidence_store, "evidence")
+            _verify_projected_heads(manifest, self._assumption_store, "assumption")
+            _verify_projected_heads(manifest, self._alt_model_store, "alt_model")
+
             self._install_manifest(manifest)
-            completion = self._read_completion(manifest.clock_completion_digest)
-            if completion is None:
-                raise D5GenerationConflictError("D5_COMPLETION_UNAVAILABLE")
             self._install_completion(completion)
             self._replace(
                 self.current_path,
@@ -1016,6 +1227,106 @@ class D5GenerationStore:
             return "INCOMPLETE_GENERATION_FAILED"
         self._clear_active()
         return "PREPARED_GENERATION_PUBLISHED"
+
+    def _verify_finalization(
+        self,
+        *,
+        manifest: D5GenerationManifest,
+        completion: ClockCompletionReceipt,
+        claim: ClockClaim,
+        evidence_events: tuple[RegistryEvent, ...],
+        assumption_events: tuple[RegistryEvent, ...],
+        alt_model_events: tuple[RegistryEvent, ...],
+        evidence_plan_json: dict[str, Any],
+        assumption_plan_json: dict[str, Any],
+        alt_model_plan_json: dict[str, Any],
+    ) -> None:
+        """Single authoritative finalization verifier.
+
+        Used by BOTH ordinary commit and recovery immediately before the
+        generation pointer replacement. Verifies:
+        - claim.digest matches manifest.clock_claim_digest
+        - manifest predecessor matches the current generation pointer
+        - event lists match manifest event-digest inventories
+        - plan digests match manifest plan digests (recomputed from JSON)
+        - completion sequence matches manifest clock_sequence
+        - completion root digests match manifest projected roots
+        - completion-to-generation cross-binding intact
+        """
+
+        # 1. claim.digest matches manifest.clock_claim_digest
+        if claim.digest != manifest.clock_claim_digest:
+            raise D5GenerationConflictError("D5_FINALIZATION_CLAIM_DIGEST_MISMATCH")
+
+        # 2. manifest predecessor matches current generation pointer
+        pointer = self._read_current_pointer()
+        if manifest.previous_generation_digest == _GENESIS_GENERATION_DIGEST:
+            if pointer is not None:
+                raise D5GenerationConflictError("D5_FINALIZATION_PREDECESSOR_NOT_GENESIS")
+        else:
+            if pointer is None or pointer[1] != manifest.previous_generation_digest:
+                raise D5GenerationConflictError("D5_FINALIZATION_PREDECESSOR_MISMATCH")
+
+        # 3. event lists match manifest event-digest inventories
+        if tuple(event.digest for event in evidence_events) != manifest.evidence_event_digests:
+            raise D5GenerationConflictError("D5_FINALIZATION_EVIDENCE_EVENTS_MISMATCH")
+        if tuple(event.digest for event in assumption_events) != manifest.assumption_event_digests:
+            raise D5GenerationConflictError("D5_FINALIZATION_ASSUMPTION_EVENTS_MISMATCH")
+        if tuple(event.digest for event in alt_model_events) != manifest.alt_model_event_digests:
+            raise D5GenerationConflictError("D5_FINALIZATION_ALT_MODEL_EVENTS_MISMATCH")
+
+        # 4. plan digests match manifest plan digests (recompute from stored JSON)
+        _verify_plan_json(
+            evidence_plan_json,
+            _PLAN_DIGEST_DOMAINS["evidence"],
+            manifest.evidence_plan_digest,
+        )
+        _verify_plan_json(
+            assumption_plan_json,
+            _PLAN_DIGEST_DOMAINS["assumption"],
+            manifest.assumption_plan_digest,
+        )
+        _verify_plan_json(
+            alt_model_plan_json,
+            _PLAN_DIGEST_DOMAINS["alt_model"],
+            manifest.alt_model_plan_digest,
+        )
+        # Cross-bind plan projected roots to manifest projected roots.
+        if evidence_plan_json["projected_root_digest"] != manifest.evidence_projected_root:
+            raise D5GenerationConflictError("D5_FINALIZATION_EVIDENCE_PLAN_ROOT_MISMATCH")
+        if assumption_plan_json["projected_root_digest"] != manifest.assumption_projected_root:
+            raise D5GenerationConflictError("D5_FINALIZATION_ASSUMPTION_PLAN_ROOT_MISMATCH")
+        if alt_model_plan_json["projected_root_digest"] != manifest.alt_model_projected_root:
+            raise D5GenerationConflictError("D5_FINALIZATION_ALT_MODEL_PLAN_ROOT_MISMATCH")
+
+        # 5. completion sequence matches manifest clock_sequence
+        completion_value = completion.to_json_value()
+        if completion_value["clock_sequence"] != manifest.clock_sequence:
+            raise D5GenerationConflictError("D5_FINALIZATION_COMPLETION_SEQUENCE_MISMATCH")
+
+        # 6. completion root digests match manifest projected roots
+        roots = cast(dict[str, str], completion_value["registry_root_digests"])
+        if roots["evidence_unit"] != manifest.evidence_projected_root:
+            raise D5GenerationConflictError("D5_FINALIZATION_EVIDENCE_ROOT_MISMATCH")
+        if roots["assumption"] != manifest.assumption_projected_root:
+            raise D5GenerationConflictError("D5_FINALIZATION_ASSUMPTION_ROOT_MISMATCH")
+        if roots["alternative_model"] != manifest.alt_model_projected_root:
+            raise D5GenerationConflictError("D5_FINALIZATION_ALT_MODEL_ROOT_MISMATCH")
+
+        # 7. completion-to-generation cross-binding intact
+        if completion_value["clock_claim_digest"] != manifest.clock_claim_digest:
+            raise D5GenerationConflictError("D5_FINALIZATION_COMPLETION_CLAIM_MISMATCH")
+        if completion_value["validated_event_digest"] != manifest.validated_event_digest:
+            raise D5GenerationConflictError("D5_FINALIZATION_COMPLETION_EVENT_MISMATCH")
+        if (
+            completion_value["semantic_projection_receipt_digest"]
+            != manifest.semantic_projection_receipt_digest
+        ):
+            raise D5GenerationConflictError("D5_FINALIZATION_COMPLETION_SEMANTIC_MISMATCH")
+        if completion_value["clock_claim_digest"] != claim.digest:
+            raise D5GenerationConflictError("D5_FINALIZATION_CLAIM_CROSSBIND_MISMATCH")
+        if completion.digest != manifest.clock_completion_digest:
+            raise D5GenerationConflictError("D5_FINALIZATION_COMPLETION_DIGEST_MISMATCH")
 
     # ------------------------------------------------------------------ #
     # Internal: persistence helpers
@@ -1092,6 +1403,79 @@ class D5GenerationStore:
 
     def _install_completion(self, completion: ClockCompletionReceipt) -> None:
         self._install(self._completion_path(completion.digest), completion.canonical_bytes)
+
+    def _install_semantic_receipt(self, receipt: SemanticProjectionReceipt) -> None:
+        self._install(self._semantic_receipt_path(receipt.digest), receipt.canonical_bytes)
+
+    def _install_projection_plan(
+        self,
+        plan: EvidenceProjectionPlan | AssumptionProjectionPlan | AlternativeModelProjectionPlan,
+        registry: str,
+    ) -> None:
+        del registry  # plan digest is globally unique; registry tag is reserved
+        self._install(
+            self._projection_plan_path(plan.plan_digest), _json_bytes(plan.to_json_value())
+        )
+
+    def _install_disposition_receipt(self, receipt: DispositionReceipt) -> None:
+        self._install(self._disposition_receipt_path(receipt.digest), receipt.canonical_bytes)
+
+    def _install_comparison_receipts(
+        self,
+        governed_admit_evidence: tuple[
+            tuple[GovernedAlternativeModelAuthorization, ComparisonReceipt], ...
+        ],
+        alt_model_plan: AlternativeModelProjectionPlan,
+    ) -> tuple[dict[str, object], ...]:
+        """Install P3.5 comparison receipts cited by the alt-model plan.
+
+        Verifies that each supplied comparison receipt's digest appears in the
+        plan's ``admit_comparison_bindings``, then installs the receipt bytes
+        into the content-addressed object store so they survive commit +
+        restart. Returns the JSON values for inclusion in the prepared bundle.
+        """
+
+        cited = {digest for _model_id, digest in alt_model_plan.admit_comparison_bindings}
+        installed: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for _authorization, comparison in governed_admit_evidence:
+            if type(comparison) is not ComparisonReceipt:
+                raise D5GenerationError("D5_COMPARISON_RECEIPT_TYPE_INVALID")
+            if comparison.comparison_digest not in cited:
+                raise D5GenerationError(
+                    "D5_COMPARISON_RECEIPT_NOT_CITED_BY_PLAN", comparison.comparison_digest
+                )
+            if comparison.comparison_digest in seen:
+                raise D5GenerationError(
+                    "D5_COMPARISON_RECEIPT_DUPLICATE", comparison.comparison_digest
+                )
+            seen.add(comparison.comparison_digest)
+            self._install(
+                self._comparison_receipt_path(comparison.comparison_digest),
+                comparison.canonical_bytes,
+            )
+            installed.append(comparison.to_json_value())
+        # Every binding cited by the plan must have a persisted receipt.
+        missing = cited - seen
+        if missing:
+            raise D5GenerationError("D5_COMPARISON_RECEIPT_MISSING", ",".join(sorted(missing)))
+        return tuple(installed)
+
+    def _semantic_receipt_path(self, semantic_digest: str) -> Path:
+        hex_digest = _digest_hex(semantic_digest)
+        return self.semantic_receipts / hex_digest[:2] / f"{hex_digest[2:]}.json"
+
+    def _projection_plan_path(self, plan_digest: str) -> Path:
+        hex_digest = _digest_hex(plan_digest)
+        return self.projection_plans / hex_digest[:2] / f"{hex_digest[2:]}.json"
+
+    def _disposition_receipt_path(self, disposition_digest: str) -> Path:
+        hex_digest = _digest_hex(disposition_digest)
+        return self.disposition_receipts / hex_digest[:2] / f"{hex_digest[2:]}.json"
+
+    def _comparison_receipt_path(self, comparison_digest: str) -> Path:
+        hex_digest = _digest_hex(comparison_digest)
+        return self.comparison_receipts / hex_digest[:2] / f"{hex_digest[2:]}.json"
 
     def _clear_active(self) -> None:
         self.active_path.unlink(missing_ok=True)
@@ -1265,20 +1649,115 @@ def _prepared_bundle_bytes(
     manifest: D5GenerationManifest,
     completion: ClockCompletionReceipt,
     claim: ClockClaim,
+    semantic_receipt: SemanticProjectionReceipt,
+    evidence_plan: EvidenceProjectionPlan,
+    assumption_plan: AssumptionProjectionPlan,
+    alt_model_plan: AlternativeModelProjectionPlan,
+    disposition: DispositionReceipt,
     evidence_events: tuple[RegistryEvent, ...],
     assumption_events: tuple[RegistryEvent, ...],
     alt_model_events: tuple[RegistryEvent, ...],
+    comparison_receipts: tuple[dict[str, object], ...],
 ) -> bytes:
     value: dict[str, Any] = {
         "schema_version": PREPARED_BUNDLE_SCHEMA_VERSION,
         "manifest": manifest.to_json_value(),
         "completion": completion.to_json_value(),
         "claim": claim.to_json_value(),
+        "semantic_receipt": semantic_receipt.to_json_value(),
+        "evidence_plan": evidence_plan.to_json_value(),
+        "assumption_plan": assumption_plan.to_json_value(),
+        "alt_model_plan": alt_model_plan.to_json_value(),
+        "disposition_receipt": disposition.to_json_value(),
         "evidence_events": [event.to_json_value() for event in evidence_events],
         "assumption_events": [event.to_json_value() for event in assumption_events],
         "alt_model_events": [event.to_json_value() for event in alt_model_events],
+        "comparison_receipts": [dict(item) for item in comparison_receipts],
     }
     return _json_bytes(value)
+
+
+def _deserialize_events(raw_events: list[Any], registry_type: str) -> tuple[RegistryEvent, ...]:
+    """Deserialize a list of JSON event values into typed RegistryEvent objects.
+
+    Each event must target ``registry_type``; a mismatch is a finalization
+    failure. Used by both commit and recovery to reconstruct the event tuples
+    fed into :meth:`D5GenerationStore._verify_finalization`.
+    """
+
+    if type(raw_events) is not list:
+        raise D5GenerationConflictError("D5_PREPARED_BUNDLE_EVENTS_INVALID")
+    events: list[RegistryEvent] = []
+    for value in raw_events:
+        if type(value) is not dict:
+            raise D5GenerationConflictError("D5_PREPARED_BUNDLE_EVENT_INVALID")
+        if value.get("registry_type") != registry_type:
+            raise D5GenerationConflictError("D5_EVENT_REGISTRY_TYPE_MISMATCH")
+        events.append(cast(RegistryEvent, RegistryEvent.from_json(value)))
+    return tuple(events)
+
+
+def _verify_plan_json(plan_json: dict[str, Any], domain: str, expected_digest: str) -> None:
+    """Verify a persisted plan JSON's self-digest matches the manifest citation.
+
+    Recomputes the domain-separated digest from the unsigned fields (every key
+    except ``plan_digest``) using the same canonicalization the projection
+    modules use. This mechanically proves the persisted plan JSON is intact
+    without requiring per-type ``from_json`` constructors for every nested
+    receipt/decision type.
+    """
+
+    if plan_json.get("plan_digest") != expected_digest:
+        raise D5GenerationConflictError("D5_FINALIZATION_PLAN_DIGEST_MISMATCH")
+    unsigned = {key: value for key, value in plan_json.items() if key != "plan_digest"}
+    recomputed = _domain_digest(domain, unsigned)
+    if recomputed != expected_digest:
+        raise D5GenerationConflictError("D5_FINALIZATION_PLAN_DIGEST_CORRUPT")
+
+
+def _domain_digest(domain: str, value: object) -> str:
+    """Domain-separated digest matching the projection modules' canonical form."""
+
+    payload = _json_bytes(value)
+    return "sha256:" + hashlib.sha256(domain.encode("ascii") + b"\0" + payload).hexdigest()
+
+
+def _verify_projected_heads(
+    manifest: D5GenerationManifest,
+    store: FilesystemRegistryStore,
+    registry: str,
+) -> None:
+    """Post-install verification that manifest heads reconstruct from installed objects.
+
+    Walks each entity chain from the manifest head set through the object store
+    (now that every event object has been installed) and recomputes the
+    projected root, confirming it still matches the manifest. This is the
+    defect-1 replacement for the old live-store projected-root check.
+    """
+
+    heads = manifest.head_entities(registry)
+    reconstructed_root = _snapshot_root(_REGISTRY_TYPES[registry], heads)
+    expected_root = _manifest_projected_root(manifest, registry)
+    if reconstructed_root != expected_root:
+        raise D5GenerationConflictError(f"D5_{registry.upper()}_PROJECTED_ROOT_INSTALL_MISMATCH")
+    # Walk each chain to confirm every event object is retrievable.
+    view = GenerationRegistryView(
+        store=store,
+        registry_type=_REGISTRY_TYPES[registry],
+        heads=heads,
+    )
+    for head in heads:
+        chain = view.reconstruct_entity(_REGISTRY_TYPES[registry], head.entity_id)
+        if not chain or chain[-1].digest != head.event_digest:
+            raise D5GenerationConflictError(f"D5_{registry.upper()}_CHAIN_RECONSTRUCTION_FAILED")
+
+
+def _manifest_projected_root(manifest: D5GenerationManifest, registry: str) -> str:
+    if registry == "evidence":
+        return manifest.evidence_projected_root
+    if registry == "assumption":
+        return manifest.assumption_projected_root
+    return manifest.alt_model_projected_root
 
 
 def _require_registry_type(value: object) -> None:
@@ -1375,7 +1854,11 @@ __all__ = [
     "D5GenerationError",
     "D5GenerationManifest",
     "D5GenerationStore",
+    "DispositionAdapterFactory",
+    "DispositionProjector",
     "GenerationRegistryView",
+    "QuarantineAdapterFactory",
+    "QuarantineProjector",
     "ReferenceDispositionAdapter",
     "ReferenceQuarantineAdapter",
     "ReferenceQuarantineProjection",
