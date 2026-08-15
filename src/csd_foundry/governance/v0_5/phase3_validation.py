@@ -24,7 +24,9 @@ independently re-derives every binding:
 * completion-to-disposition receipt binding,
 * D4 comparison receipts with primary/shadow FULL_REPLAY proof references,
 * governed D4 ADMIT authorizations (self-digest, structural-difference
-  comparison binding, ADMIT source-receipt authority binding).
+  comparison binding, ADMIT source-receipt authority binding), each
+  independently re-derived from the serialized predecessor PROPOSE event, the
+  ADMIT event, and the previous generation's canonical alt-model head set.
 
 It MUST NOT call ``D5GenerationStore.prepare_generation``,
 ``D5GenerationStore.commit_generation``, ``D5GenerationStore.recover``,
@@ -76,6 +78,7 @@ _REPLAY_RECEIPT_DOMAIN = "ALTERNATIVE_MODEL_REPLAY_RECEIPT"
 # Domain prefix used by the governed D4 ADMIT authorization self-digest (flat
 # domain form of the governed alternative-model contracts).
 _AUTHORIZATION_DOMAIN = "ALTERNATIVE_MODEL_GOVERNED_ADMIT_AUTHORIZATION"
+_AUTHORIZATION_SCHEMA_VERSION = "alternative-model-governed-admit-authorization/1"
 
 _EMPTY_ROOTS = {key: _snapshot_root(value, ()) for key, value in _REGISTRIES.items()}
 
@@ -322,7 +325,7 @@ def validate_phase3_generations(corpus: dict[str, Any]) -> Phase3ValidationRepor
     _validate_completions(generations, completions, errors)
     _validate_comparison_receipts(comparison_receipts, errors)
     _validate_claims(generations, claims, validated_events, errors)
-    _validate_authorizations(authorizations, comparison_receipts, events, errors)
+    _validate_authorizations(authorizations, comparison_receipts, events, generations, errors)
 
     summaries = tuple(
         Phase3GenerationSummary(
@@ -940,6 +943,7 @@ def _validate_authorizations(
     authorizations: list[dict[str, Any]],
     comparison_receipts: dict[str, Any],
     events: dict[str, Any],
+    generations: list[dict[str, Any]],
     errors: list[str],
 ) -> None:
     """Independently verify every governed D4 ADMIT authorization.
@@ -952,7 +956,9 @@ def _validate_authorizations(
     * the corresponding ADMIT event exists in the alternative-model event
       chain (matching entity identity and ADMIT operation),
     * ``admit_event.source_receipt_digest == authorization.authorization_digest``
-      — the ADMIT's admission authority binding.
+      — the ADMIT's admission authority binding,
+    * the authorization is exactly what the serialized predecessor history
+      derives (see :func:`_validate_authorization_derivation`).
     """
 
     for index, authorization in enumerate(authorizations):
@@ -983,8 +989,188 @@ def _validate_authorizations(
         )
         if admit_event is None:
             errors.append(f"PHASE3_AUTHORIZATION_ADMIT_EVENT_MISSING: index {index}")
-        elif admit_event.get("source_receipt_digest") != authorization.get("authorization_digest"):
-            errors.append(f"PHASE3_AUTHORIZATION_SOURCE_RECEIPT_MISMATCH: index {index}")
+        else:
+            if admit_event.get("source_receipt_digest") != authorization.get(
+                "authorization_digest"
+            ):
+                errors.append(f"PHASE3_AUTHORIZATION_SOURCE_RECEIPT_MISMATCH: index {index}")
+            _validate_authorization_derivation(
+                authorization, admit_event, generations, events, index, errors
+            )
+
+
+def _validate_authorization_derivation(
+    authorization: dict[str, Any],
+    admit_event: dict[str, Any],
+    generations: list[dict[str, Any]],
+    events: dict[str, Any],
+    index: int,
+    errors: list[str],
+) -> None:
+    """Independently re-derive one governed ADMIT authorization from history.
+
+    Reconstructs the expected authorization from the serialized predecessor
+    state only:
+
+    * the PROPOSE event is the ADMIT's immediate entity-chain predecessor and
+      must carry the PROPOSE operation for the same model,
+    * ``candidate_predecessor_event_digest`` must equal the PROPOSE event's
+      digest,
+    * ``event_sequence`` and ``admitting_authority_id`` must equal the ADMIT
+      event's clock sequence and admitting authority,
+    * ``primary_model_id`` and ``shadow_graph_digest`` (plus scope, assumption,
+      evidence, materiality, and declared-difference bindings) must equal the
+      PROPOSE payload's fields,
+    * ``alternative_model_registry_root`` must equal the pre-ADMIT registry
+      root re-rooted from the previous generation's canonical alt-model head
+      set with the admitted model's head replaced by its PROPOSE head,
+    * the recomputed authorization digest from those derived fields must equal
+      the serialized authorization's digest and the ADMIT event's source
+      receipt digest.
+    """
+
+    label = f"index {index}"
+    model_id = authorization.get("model_id")
+    previous_digest = admit_event.get("previous_entity_event_digest")
+    propose = events.get(cast(str, previous_digest)) if _is_digest(previous_digest) else None
+    if (
+        type(propose) is not dict
+        or propose.get("registry_type") != "ALTERNATIVE_MODEL"
+        or propose.get("entity_id") != model_id
+        or type(propose.get("payload")) is not dict
+        or cast(dict[str, Any], propose.get("payload")).get("operation") != "PROPOSE"
+    ):
+        errors.append(f"PHASE3_AUTHORIZATION_ADMIT_PREDECESSOR_MISSING: {label}")
+        return
+    propose_payload = cast(dict[str, Any], propose["payload"])
+    if authorization.get("candidate_predecessor_event_digest") != previous_digest:
+        errors.append(f"PHASE3_AUTHORIZATION_PREDECESSOR_MISMATCH: {label}")
+    admit_payload = admit_event.get("payload")
+    if type(admit_payload) is not dict:
+        errors.append(f"PHASE3_AUTHORIZATION_ADMIT_PAYLOAD_INVALID: {label}")
+        return
+    for field, derived in (
+        ("event_sequence", admit_event.get("clock_sequence")),
+        ("admitting_authority_id", admit_payload.get("admitting_authority_id")),
+        ("primary_model_id", propose_payload.get("primary_model_id")),
+        ("shadow_graph_digest", propose_payload.get("graph_digest")),
+    ):
+        if authorization.get(field) != derived:
+            errors.append(f"PHASE3_AUTHORIZATION_BINDING_MISMATCH: {label} {field}")
+    structural = authorization.get("structural_difference_receipt")
+    if type(structural) is not dict:
+        errors.append(f"PHASE3_AUTHORIZATION_RECEIPT_INVALID: {label}")
+        return
+    if propose_payload.get("declared_difference_digest") != structural.get(
+        "declared_difference_digest"
+    ):
+        errors.append(f"PHASE3_AUTHORIZATION_BINDING_MISMATCH: {label} declared_difference_digest")
+    derived_root = _derive_pre_admit_root(admit_event, propose, generations)
+    if derived_root is None:
+        errors.append(f"PHASE3_AUTHORIZATION_PREDECESSOR_ROOT_MISSING: {label}")
+        return
+    if authorization.get("alternative_model_registry_root") != derived_root:
+        errors.append(f"PHASE3_AUTHORIZATION_PREDECESSOR_ROOT_MISMATCH: {label}")
+    scope_ids = _sorted_token_list(propose_payload.get("scope_ids"))
+    assumption_ids = _sorted_token_list(propose_payload.get("assumption_ids"))
+    evidence_ids = _sorted_token_list(propose_payload.get("evidence_ids"))
+    if scope_ids is None or assumption_ids is None or evidence_ids is None:
+        errors.append(f"PHASE3_AUTHORIZATION_PROPOSE_PAYLOAD_INVALID: {label}")
+        return
+    derived_unsigned = {
+        "schema_version": _AUTHORIZATION_SCHEMA_VERSION,
+        "admitting_authority_id": admit_payload.get("admitting_authority_id"),
+        "alternative_model_registry_root": derived_root,
+        "assumption_ids": assumption_ids,
+        "candidate_entity_sequence": admit_event.get("entity_sequence"),
+        "candidate_predecessor_event_digest": previous_digest,
+        "evidence_ids": evidence_ids,
+        "event_sequence": admit_event.get("clock_sequence"),
+        "materiality": propose_payload.get("materiality"),
+        "model_id": model_id,
+        "primary_graph_digest": structural.get("primary_graph_digest"),
+        "primary_model_id": propose_payload.get("primary_model_id"),
+        "scope_ids": scope_ids,
+        "shadow_graph_digest": propose_payload.get("graph_digest"),
+        "structural_difference_receipt": structural,
+    }
+    derived_digest = _flat_domain_digest(_AUTHORIZATION_DOMAIN, derived_unsigned)
+    if derived_digest != authorization.get("authorization_digest"):
+        errors.append(f"PHASE3_AUTHORIZATION_DERIVED_DIGEST_MISMATCH: {label}")
+    if derived_digest != admit_event.get("source_receipt_digest"):
+        errors.append(f"PHASE3_AUTHORIZATION_SOURCE_RECEIPT_MISMATCH: {label}")
+
+
+def _derive_pre_admit_root(
+    admit_event: dict[str, Any],
+    propose: dict[str, Any],
+    generations: list[dict[str, Any]],
+) -> str | None:
+    """Re-root the predecessor alt-model registry from the previous generation.
+
+    Locates the generation whose alt-model event inventory cites the ADMIT
+    event, then recomputes the snapshot root over the PREVIOUS generation's
+    canonical head set with the admitted model's head replaced by its PROPOSE
+    head — the pre-ADMIT registry root the authorization must bind. Returns
+    ``None`` when the derivation cannot be performed on the serialized state.
+    """
+
+    admit_digest = admit_event.get("registry_event_digest")
+    if not _is_digest(admit_digest):
+        return None
+    for index, manifest in enumerate(generations):
+        digests = _digest_list(manifest.get("alt_model_event_digests"))
+        if digests is None or admit_digest not in digests:
+            continue
+        if index == 0:
+            return None
+        heads = _typed_heads(generations[index - 1], "alt_model")
+        if heads is None:
+            return None
+        model_id = admit_event.get("entity_id")
+        propose_digest = propose.get("registry_event_digest")
+        propose_sequence = propose.get("entity_sequence")
+        if (
+            type(model_id) is not str
+            or not _is_digest(propose_digest)
+            or type(propose_sequence) is not int
+        ):
+            return None
+        typed: list[RegistryEntityHead] = []
+        replaced = False
+        for item in heads:
+            entity_id = item.get("entity_id")
+            sequence = item.get("entity_sequence")
+            digest = item.get("event_digest")
+            if entity_id == model_id:
+                typed.append(
+                    RegistryEntityHead(
+                        "ALTERNATIVE_MODEL",
+                        model_id,
+                        propose_sequence,
+                        cast(str, propose_digest),
+                    )
+                )
+                replaced = True
+            elif type(entity_id) is str and type(sequence) is int and _is_digest(digest):
+                typed.append(
+                    RegistryEntityHead("ALTERNATIVE_MODEL", entity_id, sequence, cast(str, digest))
+                )
+            else:
+                return None
+        if not replaced:
+            return None
+        typed.sort(key=lambda item: item.entity_id)
+        return _snapshot_root("ALTERNATIVE_MODEL", tuple(typed))
+    return None
+
+
+def _sorted_token_list(value: object) -> list[str] | None:
+    """Canonicalize a serialized token list to sorted order, or ``None``."""
+
+    if type(value) is not list or any(type(item) is not str for item in value):
+        return None
+    return sorted(cast(list[str], value))
 
 
 # --------------------------------------------------------------------------- #

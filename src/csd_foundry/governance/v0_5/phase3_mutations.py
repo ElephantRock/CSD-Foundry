@@ -18,12 +18,13 @@ links, event inventory corruption, completion sequence/root/predecessor/
 disposition/quarantine bindings, semantic and disposition reference receipts,
 D4 comparison receipts and their FULL_REPLAY proof bindings (graph / context /
 state / clock / runner / inventory), and the governed D4 ADMIT source-receipt
-authority binding.
+authority binding plus its candidate-predecessor derivation binding.
 """
 
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast
@@ -594,15 +595,16 @@ def _claim_predecessor_rebind(corpus: dict[str, Any]) -> None:
     _rebind_pointer(corpus)
 
 
-def _admit_source_receipt_corrupt(corpus: dict[str, Any]) -> None:
-    """Coherently tamper the governed ADMIT event's source-receipt binding.
+def _rebuild_admit_event_chain(
+    corpus: dict[str, Any],
+    tamper: Callable[[dict[str, Any]], None],
+) -> None:
+    """Rebuild the corpus after tampering the governed ADMIT event.
 
-    Corrupt the ADMIT event's ``source_receipt_digest`` (its admission
-    authority binding), re-finalize the event digest, and rebuild the entire
-    dependent alternative-model entity chain plus every dependent head-set
-    root, temporal artifact, manifest, and pointer digest — so the only
-    binding that breaks is the ADMIT's authority binding to the governed
-    authorization digest.
+    Applies ``tamper`` to the ADMIT event, re-finalizes the event digest, and
+    rebuilds the entire dependent alternative-model entity chain plus every
+    dependent head-set root, temporal artifact, manifest, and pointer digest —
+    so the only binding that breaks is the tampered one.
     """
 
     generations = cast(list[dict[str, Any]], corpus["generations"])
@@ -616,7 +618,7 @@ def _admit_source_receipt_corrupt(corpus: dict[str, Any]) -> None:
     payload = admit_event.get("payload")
     if type(payload) is not dict or payload.get("operation") != "ADMIT":
         raise Phase3MutationError("PHASE3_MUTATION_ADMIT_EVENT_MISSING")
-    admit_event["source_receipt_digest"] = _ZERO_DIGEST
+    tamper(admit_event)
     rebuilt_admit_digest = _rebuild_event(admit_event)
     del events[admit_digests[0]]
     events[rebuilt_admit_digest] = admit_event
@@ -684,6 +686,50 @@ def _admit_source_receipt_corrupt(corpus: dict[str, Any]) -> None:
         _refinalize_generation(corpus, manifest)
 
     _rebind_pointer(corpus)
+
+
+def _admit_source_receipt_corrupt(corpus: dict[str, Any]) -> None:
+    """Coherently tamper the governed ADMIT event's source-receipt binding.
+
+    Corrupt the ADMIT event's ``source_receipt_digest`` (its admission
+    authority binding), re-finalize the event digest, and rebuild the entire
+    dependent alternative-model entity chain plus every dependent head-set
+    root, temporal artifact, manifest, and pointer digest — so the only
+    binding that breaks is the ADMIT's authority binding to the governed
+    authorization digest.
+    """
+
+    def tamper(admit_event: dict[str, Any]) -> None:
+        admit_event["source_receipt_digest"] = _ZERO_DIGEST
+
+    _rebuild_admit_event_chain(corpus, tamper)
+
+
+def _authorization_predecessor_rebind(corpus: dict[str, Any]) -> None:
+    """Coherently rebind the governed authorization's candidate predecessor.
+
+    Tamper the authorization's ``candidate_predecessor_event_digest`` to an
+    arbitrary digest, re-finalize the authorization self-digest, and rebind the
+    ADMIT event's source receipt to the new authorization digest — rebuilding
+    the entire dependent alternative-model entity chain plus every dependent
+    head-set root, temporal artifact, manifest, and pointer digest — so the
+    only binding that breaks is the authorization's derivation from the
+    serialized PROPOSE predecessor.
+    """
+
+    authorizations = cast(list[dict[str, Any]], corpus["authorizations"])
+    if len(authorizations) != 1:
+        raise Phase3MutationError("PHASE3_MUTATION_AUTHORIZATION_COUNT_INVALID")
+    authorization = authorizations[0]
+    authorization["candidate_predecessor_event_digest"] = _ZERO_DIGEST
+    unsigned = {key: value for key, value in authorization.items() if key != "authorization_digest"}
+    new_digest = _flat_domain_digest("ALTERNATIVE_MODEL_GOVERNED_ADMIT_AUTHORIZATION", unsigned)
+    authorization["authorization_digest"] = new_digest
+
+    def tamper(admit_event: dict[str, Any]) -> None:
+        admit_event["source_receipt_digest"] = new_digest
+
+    _rebuild_admit_event_chain(corpus, tamper)
 
 
 # --------------------------------------------------------------------------- #
@@ -983,6 +1029,8 @@ def _apply_operator(
 
     elif operator == "ADMIT_SOURCE_RECEIPT_CORRUPT":
         _admit_source_receipt_corrupt(corpus)
+    elif operator == "AUTHORIZATION_PREDECESSOR_REBIND":
+        _authorization_predecessor_rebind(corpus)
 
     else:
         raise Phase3MutationError("PHASE3_MUTATION_OPERATOR_UNSUPPORTED", operator)
@@ -1318,6 +1366,13 @@ def _declared_mutations() -> list[dict[str, Any]]:
             "governed-admit",
             "ADMIT_SOURCE_RECEIPT_CORRUPT",
             "PHASE3_AUTHORIZATION_SOURCE_RECEIPT_MISMATCH",
+        ),
+        # Governed D4 ADMIT candidate-predecessor derivation binding.
+        _spec(
+            "P3M-080",
+            "governed-admit",
+            "AUTHORIZATION_PREDECESSOR_REBIND",
+            "PHASE3_AUTHORIZATION_PREDECESSOR_MISMATCH",
         ),
     ]
 

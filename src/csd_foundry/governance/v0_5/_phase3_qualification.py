@@ -771,38 +771,36 @@ def _read_all_objects(directory: Path) -> dict[str, dict[str, Any]]:
 
 
 def _serialized_temporal_context(
+    store: D5GenerationStore,
     chain: tuple[D5GenerationManifest, ...],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Serialize every generation's ClockClaim and ValidatedEvent.
+    """Serialize every generation's durably retained ClockClaim and ValidatedEvent.
 
-    The canary temporal context is a pure function of the clock sequence and the
-    predecessor completion digest, so each committed generation's claim and
-    validated event reconstruct exactly. The reconstruction fails closed if a
-    rebuilt claim/validated-event digest does not bind to the committed
-    manifest, guaranteeing the serialized corpus carries the artifacts the
-    committed chain actually cites.
+    Reads the persisted content-addressed objects (installed by
+    ``prepare_generation``) rather than reconstructing the deterministic canary
+    fixture, so the corpus carries the exact bytes the committed chain cites.
+    Missing retained objects fail closed here; corrupt bytes fail closed inside
+    the store's fail-closed readers (the frozen contracts re-verify the
+    self-digests).
     """
 
     claims: list[dict[str, Any]] = []
     validated_events: list[dict[str, Any]] = []
-    previous_completion: str | None = None
     for manifest in chain:
-        claim, validated_event, _semantic = phase3_context(
-            manifest.clock_sequence, previous_completion
-        )
-        if claim.digest != manifest.clock_claim_digest:
+        claim = store.read_clock_claim(manifest.clock_claim_digest)
+        if claim is None:
             raise RuntimeError(
-                "reconstructed canary claim does not bind to committed manifest "
-                f"at clock sequence {manifest.clock_sequence}"
+                "persisted clock claim is missing for committed manifest at "
+                f"clock sequence {manifest.clock_sequence}"
             )
-        if validated_event.digest != manifest.validated_event_digest:
+        validated_event = store.read_validated_event(manifest.validated_event_digest)
+        if validated_event is None:
             raise RuntimeError(
-                "reconstructed canary validated event does not bind to committed "
-                f"manifest at clock sequence {manifest.clock_sequence}"
+                "persisted validated event is missing for committed manifest at "
+                f"clock sequence {manifest.clock_sequence}"
             )
         claims.append(claim.to_json_value())
         validated_events.append(validated_event.to_json_value())
-        previous_completion = manifest.clock_completion_digest
     return claims, validated_events
 
 
@@ -864,7 +862,7 @@ def serialize_phase3_corpus(scenario: Phase3CanaryScenario) -> dict[str, Any]:
     pointer = json.loads(store.current_path.read_text(encoding="utf-8"))
     if type(pointer) is not dict:
         raise RuntimeError("serialized current pointer is not an object")
-    claims, validated_events = _serialized_temporal_context(chain)
+    claims, validated_events = _serialized_temporal_context(store, chain)
     return {
         "schema_version": CORPUS_SCHEMA_VERSION,
         "current_pointer": cast(dict[str, Any], pointer),

@@ -823,6 +823,82 @@ def test_corrupt_completion_semantic_disposition_receipt_fails_closed(
 
 
 # ============================================================================ #
+# Durable ClockClaim / ValidatedEvent retention
+# ============================================================================ #
+
+
+def test_retained_clock_claim_and_validated_event_survive_commit_and_restart(
+    tmp_path: Path,
+) -> None:
+    """(34) Durably retained ClockClaim/ValidatedEvent survive commit + restart."""
+
+    scenario = build_phase3_scenario(tmp_path)
+    reopened = _reopen(scenario)
+    for manifest in scenario.manifests:
+        claim = reopened.read_clock_claim(manifest.clock_claim_digest)
+        assert claim is not None
+        assert claim.digest == manifest.clock_claim_digest
+        assert claim.to_json_value()["proposed_sequence"] == manifest.clock_sequence
+        event = reopened.read_validated_event(manifest.validated_event_digest)
+        assert event is not None
+        assert event.digest == manifest.validated_event_digest
+    # The serialized corpus carries the persisted objects, and they bind.
+    serialized = serialize_phase3_corpus(scenario)
+    claim_digests = {item["clock_claim_digest"] for item in serialized["claims"]}
+    event_digests = {item["validated_event_digest"] for item in serialized["validated_events"]}
+    for manifest in scenario.manifests:
+        assert manifest.clock_claim_digest in claim_digests
+        assert manifest.validated_event_digest in event_digests
+    report = validate_phase3_generations(serialized)
+    assert report.success, report.errors
+
+
+def test_missing_persisted_clock_claim_fails_reconstruction_closed(tmp_path: Path) -> None:
+    """(35) Removing the persisted ClockClaim makes reconstruction fail closed."""
+
+    scenario = build_phase3_scenario(tmp_path)
+    reopened = _reopen(scenario)
+    manifest = scenario.manifests[0]
+    hex_digest = manifest.clock_claim_digest.removeprefix("sha256:")
+    claim_path = reopened.clock_claims / hex_digest[:2] / f"{hex_digest[2:]}.json"
+    assert claim_path.is_file()
+    claim_path.unlink()
+    assert reopened.read_clock_claim(manifest.clock_claim_digest) is None
+    with pytest.raises(RuntimeError, match="persisted clock claim is missing"):
+        serialize_phase3_corpus(scenario)
+
+
+def test_corrupt_persisted_clock_claim_fails_reconstruction_closed(tmp_path: Path) -> None:
+    """(36) Corrupting the persisted ClockClaim makes reconstruction fail closed."""
+
+    scenario = build_phase3_scenario(tmp_path)
+    reopened = _reopen(scenario)
+    manifest = scenario.manifests[0]
+    hex_digest = manifest.clock_claim_digest.removeprefix("sha256:")
+    claim_path = reopened.clock_claims / hex_digest[:2] / f"{hex_digest[2:]}.json"
+    claim_path.write_bytes(b'{"tampered": true}\n')
+    with pytest.raises(D5GenerationConflictError, match="D5_CLOCK_CLAIM_CORRUPT"):
+        reopened.read_clock_claim(manifest.clock_claim_digest)
+    with pytest.raises(D5GenerationConflictError, match="D5_CLOCK_CLAIM_CORRUPT"):
+        serialize_phase3_corpus(scenario)
+
+
+def test_corrupt_persisted_validated_event_fails_reconstruction_closed(tmp_path: Path) -> None:
+    """(37) Corrupting the persisted ValidatedEvent makes reconstruction fail closed."""
+
+    scenario = build_phase3_scenario(tmp_path)
+    reopened = _reopen(scenario)
+    manifest = scenario.manifests[0]
+    hex_digest = manifest.validated_event_digest.removeprefix("sha256:")
+    event_path = reopened.validated_events / hex_digest[:2] / f"{hex_digest[2:]}.json"
+    event_path.write_bytes(b'{"tampered": true}\n')
+    with pytest.raises(D5GenerationConflictError, match="D5_VALIDATED_EVENT_CORRUPT"):
+        reopened.read_validated_event(manifest.validated_event_digest)
+    with pytest.raises(D5GenerationConflictError, match="D5_VALIDATED_EVENT_CORRUPT"):
+        serialize_phase3_corpus(scenario)
+
+
+# ============================================================================ #
 # Historical invariants
 # ============================================================================ #
 

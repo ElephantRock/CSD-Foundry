@@ -56,6 +56,7 @@ from csd_foundry.governance.v0_5._governed_alternative_model import (
     ComparisonReceipt,
     GovernedAlternativeModelAuthorization,
 )
+from csd_foundry.governance.v0_5.canonicalization import GovernanceContractError
 from csd_foundry.governance.v0_5.contracts import (
     ClockClaim,
     ClockCompletionReceipt,
@@ -582,6 +583,8 @@ class D5GenerationStore:
         self.objects = generations_dir / "objects"
         self.manifests = self.objects / "d5-generation-manifest"
         self.completions = self.objects / "clock-completion-receipt"
+        self.clock_claims = self.objects / "clock-claim"
+        self.validated_events = self.objects / "validated-event"
         self.semantic_receipts = self.objects / "semantic-projection-receipt"
         self.projection_plans = self.objects / "projection-plan"
         self.disposition_receipts = self.objects / "disposition-receipt"
@@ -612,6 +615,8 @@ class D5GenerationStore:
             self.objects,
             self.manifests,
             self.completions,
+            self.clock_claims,
+            self.validated_events,
             self.semantic_receipts,
             self.projection_plans,
             self.disposition_receipts,
@@ -798,6 +803,46 @@ class D5GenerationStore:
             return self._read_artifact(
                 self._comparison_receipt_path(comparison_digest), "comparison receipt"
             )
+
+    def read_clock_claim(self, claim_digest: str) -> ClockClaim | None:
+        """Read a durably retained clock claim from the object store.
+
+        Fail closed on corrupt bytes: the frozen contract re-verifies the
+        self-digest, and the parsed identity must match the requested digest.
+        """
+
+        with self._lock():
+            path = self._clock_claim_path(claim_digest)
+            if not path.is_file():
+                return None
+            value = _json_object(path.read_bytes(), "clock claim")
+            try:
+                claim = cast(ClockClaim, ClockClaim.from_json(value))
+            except GovernanceContractError as exc:
+                raise D5GenerationConflictError("D5_CLOCK_CLAIM_CORRUPT") from exc
+            if claim.digest != claim_digest:
+                raise D5GenerationConflictError("D5_CLOCK_CLAIM_IDENTITY_MISMATCH")
+            return claim
+
+    def read_validated_event(self, event_digest: str) -> ValidatedEvent | None:
+        """Read a durably retained validated event from the object store.
+
+        Fail closed on corrupt bytes: the frozen contract re-verifies the
+        self-digest, and the parsed identity must match the requested digest.
+        """
+
+        with self._lock():
+            path = self._validated_event_path(event_digest)
+            if not path.is_file():
+                return None
+            value = _json_object(path.read_bytes(), "validated event")
+            try:
+                event = cast(ValidatedEvent, ValidatedEvent.from_json(value))
+            except GovernanceContractError as exc:
+                raise D5GenerationConflictError("D5_VALIDATED_EVENT_CORRUPT") from exc
+            if event.digest != event_digest:
+                raise D5GenerationConflictError("D5_VALIDATED_EVENT_IDENTITY_MISMATCH")
+            return event
 
     def _read_artifact(self, path: Path, label: str) -> dict[str, Any] | None:
         if not path.is_file():
@@ -1027,11 +1072,14 @@ class D5GenerationStore:
             generation_digest=_compute_generation_digest(manifest_unsigned),
         )
 
-        # Defect 4: durably retain the semantic receipt, three projection plans,
-        # and reference disposition receipt in the content-addressed object
-        # store so they survive commit + restart (not just the ephemeral bundle).
+        # Defect 4: durably retain the clock claim, validated event, semantic
+        # receipt, three projection plans, and reference disposition receipt in
+        # the content-addressed object store so they survive commit + restart
+        # (not just the ephemeral bundle).
         self._install_manifest(manifest)
         self._install_completion(completion)
+        self._install_clock_claim(claim)
+        self._install_validated_event(validated_event)
         self._install_semantic_receipt(semantic_receipt)
         self._install_projection_plan(evidence_plan, "evidence")
         self._install_projection_plan(assumption_plan, "assumption")
@@ -1437,6 +1485,14 @@ class D5GenerationStore:
         hex_digest = _digest_hex(completion_digest)
         return self.completions / hex_digest[:2] / f"{hex_digest[2:]}.json"
 
+    def _clock_claim_path(self, claim_digest: str) -> Path:
+        hex_digest = _digest_hex(claim_digest)
+        return self.clock_claims / hex_digest[:2] / f"{hex_digest[2:]}.json"
+
+    def _validated_event_path(self, event_digest: str) -> Path:
+        hex_digest = _digest_hex(event_digest)
+        return self.validated_events / hex_digest[:2] / f"{hex_digest[2:]}.json"
+
     def _install_manifest(self, manifest: D5GenerationManifest) -> None:
         self._install(
             self._manifest_path(manifest.generation_digest), _json_bytes(manifest.to_json_value())
@@ -1444,6 +1500,12 @@ class D5GenerationStore:
 
     def _install_completion(self, completion: ClockCompletionReceipt) -> None:
         self._install(self._completion_path(completion.digest), completion.canonical_bytes)
+
+    def _install_clock_claim(self, claim: ClockClaim) -> None:
+        self._install(self._clock_claim_path(claim.digest), claim.canonical_bytes)
+
+    def _install_validated_event(self, event: ValidatedEvent) -> None:
+        self._install(self._validated_event_path(event.digest), event.canonical_bytes)
 
     def _install_semantic_receipt(self, receipt: SemanticProjectionReceipt) -> None:
         self._install(self._semantic_receipt_path(receipt.digest), receipt.canonical_bytes)
