@@ -1094,6 +1094,7 @@ class D5GenerationStore:
             ClockCompletionReceipt, ClockCompletionReceipt.from_json(bundle["completion"])
         )
         claim = cast(ClockClaim, ClockClaim.from_json(bundle["claim"]))
+        self._verify_authority_markers(active, manifest, claim=claim)
 
         # Defect 3: single authoritative finalization verifier, shared with
         # recovery. Runs BEFORE any pointer replacement.
@@ -1168,7 +1169,7 @@ class D5GenerationStore:
         active = self._read_active_marker()
         if active is None:
             return "NO_ACTIVE_GENERATION"
-        _claim_digest, generation_digest = active
+        claim_digest, generation_digest = active
         try:
             bundle = self._read_prepared_bundle(generation_digest)
             manifest = D5GenerationManifest.from_json(cast(dict[str, Any], bundle["manifest"]))
@@ -1184,6 +1185,7 @@ class D5GenerationStore:
             return "INCOMPLETE_GENERATION_FAILED"
 
         pointer = self._read_current_pointer()
+        self._verify_authority_markers(active, manifest, claim=claim)
         if pointer is not None and pointer[1] == generation_digest:
             self._clear_active()
             return "IDEMPOTENT_SUCCESS"
@@ -1347,7 +1349,15 @@ class D5GenerationStore:
         pointer = self._read_current_pointer()
         if pointer is None:
             return None
-        return self._read_manifest(pointer[1])
+        manifest = self._read_manifest(pointer[1])
+        # Fail closed if the pointer does not exactly cite the referenced manifest.
+        if (
+            pointer[0] != manifest.clock_sequence
+            or pointer[1] != manifest.generation_digest
+            or pointer[2] != manifest.clock_completion_digest
+        ):
+            raise D5GenerationConflictError("D5_POINTER_MANIFEST_MISMATCH")
+        return manifest
 
     def _read_active_marker(self) -> tuple[str, str] | None:
         if not self.active_path.is_file():
@@ -1356,6 +1366,38 @@ class D5GenerationStore:
         if value.get("schema_version") != ACTIVE_MARKER_SCHEMA_VERSION:
             raise D5GenerationConflictError("D5_ACTIVE_MARKER_VERSION_INVALID")
         return (cast(str, value["clock_claim_digest"]), cast(str, value["generation_digest"]))
+
+    def _verify_authority_markers(
+        self,
+        active: tuple[str, str],
+        manifest: D5GenerationManifest,
+        *,
+        claim: ClockClaim | None,
+    ) -> None:
+        """Verify that the active marker and current pointer bind to the manifest.
+
+        Checks:
+        - Active marker's clock_claim_digest matches manifest.clock_claim_digest.
+        - If a deserialized claim is provided, claim.digest also matches.
+        - Current pointer (when present) exactly cites the referenced manifest's
+          clock_sequence, generation_digest, and clock_completion_digest.
+        """
+        active_claim_digest, active_generation_digest = active
+        if active_generation_digest != manifest.generation_digest:
+            raise D5GenerationConflictError("D5_ACTIVE_GENERATION_MISMATCH")
+        if active_claim_digest != manifest.clock_claim_digest:
+            raise D5GenerationConflictError("D5_ACTIVE_CLAIM_MISMATCH")
+        if claim is not None and claim.digest != manifest.clock_claim_digest:
+            raise D5GenerationConflictError("D5_ACTIVE_CLAIM_MISMATCH")
+        pointer = self._read_current_pointer()
+        if pointer is not None:
+            ptr_sequence, ptr_generation, ptr_completion = pointer
+            if ptr_generation == manifest.generation_digest:
+                if (
+                    ptr_sequence != manifest.clock_sequence
+                    or ptr_completion != manifest.clock_completion_digest
+                ):
+                    raise D5GenerationConflictError("D5_POINTER_MANIFEST_MISMATCH")
 
     def _read_manifest(self, generation_digest: str) -> D5GenerationManifest:
         path = self._manifest_path(generation_digest)

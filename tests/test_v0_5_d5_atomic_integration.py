@@ -1623,3 +1623,72 @@ def test_governed_admit_comparison_evidence_survives_commit_and_restart(
     # The semantic receipt + disposition receipt also survive for gen2.
     assert reopened.read_semantic_receipt(current.semantic_projection_receipt_digest) is not None
     assert reopened.read_disposition_receipt(current.disposition_receipt_digest) is not None
+
+
+def test_wrong_active_claim_digest_rejected(d5: SimpleNamespace) -> None:
+    """A mismatched active-claim marker cannot authorize publication."""
+    manifest = _prepare_one(d5.store, 1, "auth1")
+
+    # Corrupt the active marker's claim digest (already written by prepare).
+    active_value = json.loads(d5.store.active_path.read_bytes())
+    active_value["clock_claim_digest"] = _digest("wrong-active-claim")
+    d5.store.active_path.write_text(
+        json.dumps(active_value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+    state_before = _capture_state(d5.store)
+
+    with pytest.raises(D5GenerationConflictError, match="D5_ACTIVE_CLAIM_MISMATCH"):
+        d5.store.commit_generation(manifest)
+
+    assert _capture_state(d5.store) == state_before
+
+
+def test_matching_generation_wrong_pointer_sequence_not_idempotent(
+    d5: SimpleNamespace,
+) -> None:
+    """Matching generation digest + wrong pointer sequence → NOT idempotent success.
+
+    Simulates a corrupted post-commit pointer by writing the pointer with the
+    generation's own digest but wrong clock_sequence, then attempting recovery.
+    """
+    manifest = _prepare_one(d5.store, 1, "auth2")
+    # Commit normally, then corrupt the pointer.
+    d5.store.commit_generation(manifest)
+
+    # Write a corrupted pointer: same generation digest, wrong sequence.
+    ptr = {
+        "schema_version": "current-d5-generation/1",
+        "clock_sequence": manifest.clock_sequence + 100,
+        "generation_digest": manifest.generation_digest,
+        "clock_completion_digest": manifest.clock_completion_digest,
+    }
+    d5.store.current_path.write_text(
+        json.dumps(ptr, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+    # Any attempt to read the current manifest through the corrupted pointer
+    # must fail closed (pointer/manifest mismatch detected).
+    with pytest.raises(D5GenerationConflictError):
+        d5.store.current_generation()
+
+
+def test_matching_generation_wrong_pointer_completion_not_idempotent(
+    d5: SimpleNamespace,
+) -> None:
+    """Matching generation digest + wrong pointer completion digest → NOT idempotent."""
+    manifest = _prepare_one(d5.store, 1, "auth3")
+    d5.store.commit_generation(manifest)
+
+    ptr = {
+        "schema_version": "current-d5-generation/1",
+        "clock_sequence": manifest.clock_sequence,
+        "generation_digest": manifest.generation_digest,
+        "clock_completion_digest": _digest("wrong-completion"),
+    }
+    d5.store.current_path.write_text(
+        json.dumps(ptr, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(D5GenerationConflictError):
+        d5.store.current_generation()
