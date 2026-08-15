@@ -770,6 +770,59 @@ def _read_all_objects(directory: Path) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _serialized_temporal_context(
+    chain: tuple[D5GenerationManifest, ...],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Serialize every generation's ClockClaim and ValidatedEvent.
+
+    The canary temporal context is a pure function of the clock sequence and the
+    predecessor completion digest, so each committed generation's claim and
+    validated event reconstruct exactly. The reconstruction fails closed if a
+    rebuilt claim/validated-event digest does not bind to the committed
+    manifest, guaranteeing the serialized corpus carries the artifacts the
+    committed chain actually cites.
+    """
+
+    claims: list[dict[str, Any]] = []
+    validated_events: list[dict[str, Any]] = []
+    previous_completion: str | None = None
+    for manifest in chain:
+        claim, validated_event, _semantic = phase3_context(
+            manifest.clock_sequence, previous_completion
+        )
+        if claim.digest != manifest.clock_claim_digest:
+            raise RuntimeError(
+                "reconstructed canary claim does not bind to committed manifest "
+                f"at clock sequence {manifest.clock_sequence}"
+            )
+        if validated_event.digest != manifest.validated_event_digest:
+            raise RuntimeError(
+                "reconstructed canary validated event does not bind to committed "
+                f"manifest at clock sequence {manifest.clock_sequence}"
+            )
+        claims.append(claim.to_json_value())
+        validated_events.append(validated_event.to_json_value())
+        previous_completion = manifest.clock_completion_digest
+    return claims, validated_events
+
+
+def _serialized_authorizations(chain: tuple[D5GenerationManifest, ...]) -> list[dict[str, Any]]:
+    """Serialize the governed D4 ADMIT authorization for every governed ADMIT.
+
+    The canary commits exactly one governed ADMIT (clock sequence 2) from the
+    deterministic governed-admit fixture. Reconstruction fails closed if the
+    fixture's ADMIT event is not the event the committed chain actually cites.
+    """
+
+    authorizations: list[dict[str, Any]] = []
+    if len(chain) >= 2:
+        fixture = _build_governed_admit_fixture()
+        if fixture.admit_event.digest not in chain[1].alt_model_event_digests:
+            raise RuntimeError("governed admit fixture event is not committed by the canary chain")
+        authorizations.append(fixture.authorization.to_json_value())
+    return authorizations
+
+
 def serialize_phase3_corpus(scenario: Phase3CanaryScenario) -> dict[str, Any]:
     """Serialize every committed artifact of the scenario into the corpus."""
 
@@ -811,11 +864,15 @@ def serialize_phase3_corpus(scenario: Phase3CanaryScenario) -> dict[str, Any]:
     pointer = json.loads(store.current_path.read_text(encoding="utf-8"))
     if type(pointer) is not dict:
         raise RuntimeError("serialized current pointer is not an object")
+    claims, validated_events = _serialized_temporal_context(chain)
     return {
         "schema_version": CORPUS_SCHEMA_VERSION,
         "current_pointer": cast(dict[str, Any], pointer),
         "active_marker": None,
         "generations": [manifest.to_json_value() for manifest in chain],
+        "claims": claims,
+        "validated_events": validated_events,
+        "authorizations": _serialized_authorizations(chain),
         "completions": completions,
         "semantic_receipts": semantic_receipts,
         "projection_plans": projection_plans,

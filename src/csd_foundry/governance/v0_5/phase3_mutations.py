@@ -11,12 +11,14 @@ unexplained escapes.
 
 Covered mutation families: current pointer corruption, active marker
 corruption, generation chain (sequence gap / predecessor break / self-digest /
-fork / cycle / missing), projection-plan digest + root + predecessor + claim
-bindings, plan event inventories, cross-root bindings (E->A->M), canonical head
-sets, entity identity/sequence/predecessor links, event inventory corruption,
-completion sequence/root/predecessor/quarantine bindings, semantic and
-disposition reference receipts, D4 comparison receipts and their FULL_REPLAY
-proof bindings (graph / context / state / clock / runner / inventory).
+fork / cycle / missing), clock-claim temporal-chaining rebind, projection-plan
+digest + root + predecessor + claim bindings, plan event inventories, cross-root
+bindings (E->A->M), canonical head sets, entity identity/sequence/predecessor
+links, event inventory corruption, completion sequence/root/predecessor/
+disposition/quarantine bindings, semantic and disposition reference receipts,
+D4 comparison receipts and their FULL_REPLAY proof bindings (graph / context /
+state / clock / runner / inventory), and the governed D4 ADMIT source-receipt
+authority binding.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from csd_foundry.governance.v0_5.phase3_validation import (
     compute_generation_digest,
     validate_phase3_generations,
 )
+from csd_foundry.governance.v0_5.registry import RegistryEntityHead, _snapshot_root
 
 _MUTATION_CATALOG_DOMAIN = b"PHASE3_MUTATION_CATALOG\0"
 _MUTATION_CLASSES = {"KILLED", "SURVIVED", "EQUIVALENT", "INVALID_MUTATION"}
@@ -469,14 +472,218 @@ def _rebind_completion(
     new_digest: str,
 ) -> None:
     old_digest = cast(str, manifest["clock_completion_digest"])
+    old_generation_digest = cast(str, manifest["generation_digest"])
     completions = cast(dict[str, Any], corpus["completions"])
     del completions[old_digest]
     completions[new_digest] = completion
     manifest["clock_completion_digest"] = new_digest
-    pointer = cast(dict[str, Any], corpus["current_pointer"])
-    if pointer.get("generation_digest") == manifest.get("generation_digest"):
-        pointer["clock_completion_digest"] = new_digest
     _recompute_manifest(manifest)
+    pointer = cast(dict[str, Any], corpus["current_pointer"])
+    if pointer.get("generation_digest") == old_generation_digest:
+        pointer["generation_digest"] = manifest["generation_digest"]
+        pointer["clock_completion_digest"] = new_digest
+
+
+def _rebind_pointer(corpus: dict[str, Any]) -> None:
+    """Re-point the current pointer at the (possibly re-digested) chain head."""
+
+    generations = cast(list[dict[str, Any]], corpus["generations"])
+    last = generations[-1]
+    pointer = cast(dict[str, Any], corpus["current_pointer"])
+    pointer["clock_sequence"] = last["clock_sequence"]
+    pointer["generation_digest"] = last["generation_digest"]
+    pointer["clock_completion_digest"] = last["clock_completion_digest"]
+
+
+def _claim_of(corpus: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    """Return the serialized clock claim a manifest cites."""
+
+    claims = cast(list[dict[str, Any]], corpus["claims"])
+    claim = next(
+        (
+            item
+            for item in claims
+            if item.get("clock_claim_digest") == manifest["clock_claim_digest"]
+        ),
+        None,
+    )
+    if claim is None:
+        raise Phase3MutationError("PHASE3_MUTATION_CLAIM_MISSING")
+    return claim
+
+
+def _refinalize_generation(corpus: dict[str, Any], manifest: dict[str, Any]) -> None:
+    """Re-finalize one generation's temporal citations and self-digests.
+
+    Rebuilds the claim, semantic receipt, disposition receipt, three projection
+    plans, completion, and manifest self-digest in dependency order, threading
+    every cross-citation (claim -> semantic -> disposition -> plans ->
+    completion -> manifest) and the completion predecessor link, so the
+    generation is internally coherent again after its artifacts were tampered.
+    """
+
+    generations = cast(list[dict[str, Any]], corpus["generations"])
+    index = generations.index(manifest)
+
+    claim = _claim_of(corpus, manifest)
+    new_claim_digest = _rebuild_contract("clock-claim", claim)
+    manifest["clock_claim_digest"] = new_claim_digest
+
+    semantic_receipts = cast(dict[str, Any], corpus["semantic_receipts"])
+    semantic = cast(
+        dict[str, Any], semantic_receipts[manifest["semantic_projection_receipt_digest"]]
+    )
+    semantic["clock_claim_digest"] = new_claim_digest
+    new_semantic_digest = _rebuild_contract("semantic-projection-receipt", semantic)
+    del semantic_receipts[manifest["semantic_projection_receipt_digest"]]
+    semantic_receipts[new_semantic_digest] = semantic
+    manifest["semantic_projection_receipt_digest"] = new_semantic_digest
+
+    disposition_receipts = cast(dict[str, Any], corpus["disposition_receipts"])
+    disposition = cast(dict[str, Any], disposition_receipts[manifest["disposition_receipt_digest"]])
+    disposition["semantic_projection_receipt_digest"] = new_semantic_digest
+    new_disposition_digest = _rebuild_contract("disposition-receipt", disposition)
+    del disposition_receipts[manifest["disposition_receipt_digest"]]
+    disposition_receipts[new_disposition_digest] = disposition
+    manifest["disposition_receipt_digest"] = new_disposition_digest
+
+    projection_plans = cast(dict[str, Any], corpus["projection_plans"])
+    for registry in ("evidence", "assumption", "alt_model"):
+        plan = cast(dict[str, Any], projection_plans[manifest[f"{registry}_plan_digest"]])
+        plan["clock_claim_digest"] = new_claim_digest
+        plan["semantic_receipt_digest"] = new_semantic_digest
+        _recompute_plan(plan, registry)
+        del projection_plans[manifest[f"{registry}_plan_digest"]]
+        projection_plans[plan["plan_digest"]] = plan
+        manifest[f"{registry}_plan_digest"] = plan["plan_digest"]
+
+    completions = cast(dict[str, Any], corpus["completions"])
+    completion = cast(dict[str, Any], completions[manifest["clock_completion_digest"]])
+    completion["clock_claim_digest"] = new_claim_digest
+    completion["semantic_projection_receipt_digest"] = new_semantic_digest
+    completion["disposition_receipt_digest"] = new_disposition_digest
+    if index > 0:
+        completion["previous_completion_digest"] = generations[index - 1]["clock_completion_digest"]
+    new_completion_digest = _rebuild_contract("clock-completion-receipt", completion)
+    _rebind_completion(corpus, manifest, completion, new_completion_digest)
+
+
+def _claim_predecessor_rebind(corpus: dict[str, Any]) -> None:
+    """Coherently rebind a generation's clock-claim digest.
+
+    Tamper the claim's temporal predecessor link to an arbitrary digest,
+    re-finalize the claim's self-digest, then re-finalize every dependent
+    digest (semantic receipt, disposition receipt, completion, projection
+    plans, manifest, successor claims/generations, current pointer) so the
+    only binding that breaks is the claim's temporal chaining to the prior
+    generation's committed completion digest.
+    """
+
+    generations = cast(list[dict[str, Any]], corpus["generations"])
+    claim = _claim_of(corpus, _manifest_at(corpus, 1))
+    claim["previous_completion_digest"] = _ZERO_DIGEST
+    for index in range(1, len(generations)):
+        manifest = generations[index]
+        if index > 1:
+            manifest["previous_generation_digest"] = generations[index - 1]["generation_digest"]
+            successor_claim = _claim_of(corpus, manifest)
+            successor_claim["previous_completion_digest"] = generations[index - 1][
+                "clock_completion_digest"
+            ]
+        _refinalize_generation(corpus, manifest)
+    _rebind_pointer(corpus)
+
+
+def _admit_source_receipt_corrupt(corpus: dict[str, Any]) -> None:
+    """Coherently tamper the governed ADMIT event's source-receipt binding.
+
+    Corrupt the ADMIT event's ``source_receipt_digest`` (its admission
+    authority binding), re-finalize the event digest, and rebuild the entire
+    dependent alternative-model entity chain plus every dependent head-set
+    root, temporal artifact, manifest, and pointer digest — so the only
+    binding that breaks is the ADMIT's authority binding to the governed
+    authorization digest.
+    """
+
+    generations = cast(list[dict[str, Any]], corpus["generations"])
+    events = cast(dict[str, Any], corpus["events"])
+    projection_plans = cast(dict[str, Any], corpus["projection_plans"])
+    disposition_receipts = cast(dict[str, Any], corpus["disposition_receipts"])
+    completions = cast(dict[str, Any], corpus["completions"])
+    admit_manifest = _manifest_at(corpus, 1)
+    admit_digests = cast(list[str], admit_manifest["alt_model_event_digests"])
+    admit_event = cast(dict[str, Any], events[admit_digests[0]])
+    payload = admit_event.get("payload")
+    if type(payload) is not dict or payload.get("operation") != "ADMIT":
+        raise Phase3MutationError("PHASE3_MUTATION_ADMIT_EVENT_MISSING")
+    admit_event["source_receipt_digest"] = _ZERO_DIGEST
+    rebuilt_admit_digest = _rebuild_event(admit_event)
+    del events[admit_digests[0]]
+    events[rebuilt_admit_digest] = admit_event
+
+    predecessor_digest: str | None = rebuilt_admit_digest
+    for index in range(1, len(generations)):
+        manifest = generations[index]
+        old_event_digests = cast(list[str], manifest["alt_model_event_digests"])
+        new_event_digests = list(old_event_digests)
+        if index == 1:
+            new_event_digests[0] = rebuilt_admit_digest
+        else:
+            event = cast(dict[str, Any], events[old_event_digests[0]])
+            event["previous_entity_event_digest"] = predecessor_digest
+            rebuilt_digest = _rebuild_event(event)
+            del events[old_event_digests[0]]
+            events[rebuilt_digest] = event
+            new_event_digests[0] = rebuilt_digest
+        manifest["alt_model_event_digests"] = new_event_digests
+        predecessor_digest = new_event_digests[0]
+
+        old_head_digest = old_event_digests[0]
+        for head in cast(list[dict[str, Any]], manifest["alt_model_heads"]):
+            if head["event_digest"] == old_head_digest:
+                head["event_digest"] = new_event_digests[0]
+        heads = tuple(
+            RegistryEntityHead(
+                "ALTERNATIVE_MODEL",
+                cast(str, item["entity_id"]),
+                cast(int, item["entity_sequence"]),
+                cast(str, item["event_digest"]),
+            )
+            for item in cast(list[dict[str, Any]], manifest["alt_model_heads"])
+        )
+        projected_root = _snapshot_root("ALTERNATIVE_MODEL", heads)
+        manifest["alt_model_projected_root"] = projected_root
+        if index > 1:
+            manifest["previous_generation_digest"] = generations[index - 1]["generation_digest"]
+            manifest["alt_model_predecessor_root"] = generations[index - 1][
+                "alt_model_projected_root"
+            ]
+            successor_claim = _claim_of(corpus, manifest)
+            successor_claim["previous_completion_digest"] = generations[index - 1][
+                "clock_completion_digest"
+            ]
+
+        plan = cast(dict[str, Any], projection_plans[manifest["alt_model_plan_digest"]])
+        plan["event_digests"] = new_event_digests
+        plan["projected_root_digest"] = projected_root
+        if index > 1:
+            plan["predecessor_root_digest"] = generations[index - 1]["alt_model_projected_root"]
+
+        disposition = cast(
+            dict[str, Any], disposition_receipts[manifest["disposition_receipt_digest"]]
+        )
+        cast(dict[str, Any], disposition["registry_root_digests"])["alternative_model"] = (
+            projected_root
+        )
+
+        completion = cast(dict[str, Any], completions[manifest["clock_completion_digest"]])
+        cast(dict[str, Any], completion["registry_root_digests"])["alternative_model"] = (
+            projected_root
+        )
+
+        _refinalize_generation(corpus, manifest)
+
+    _rebind_pointer(corpus)
 
 
 # --------------------------------------------------------------------------- #
@@ -537,6 +744,9 @@ def _apply_operator(
         _manifest_at(corpus, 0)["previous_generation_digest"] = last["generation_digest"]
     elif operator == "GENERATION_MISSING":
         del generations[1]
+
+    elif operator == "CLAIM_PREDECESSOR_REBIND":
+        _claim_predecessor_rebind(corpus)
 
     elif operator == "PLAN_DIGEST_CORRUPT":
         manifest = _manifest_at(corpus, 0)
@@ -680,6 +890,14 @@ def _apply_operator(
         completion["quarantine_epoch"] = 1
         new_digest = _rebuild_contract("clock-completion-receipt", completion)
         _rebind_completion(corpus, manifest, completion, new_digest)
+    elif operator == "COMPLETION_DISPOSITION_CORRUPT":
+        manifest = _last_manifest(corpus)
+        completion = cast(
+            dict[str, Any], corpus["completions"][manifest["clock_completion_digest"]]
+        )
+        completion["disposition_receipt_digest"] = _ZERO_DIGEST
+        new_digest = _rebuild_contract("clock-completion-receipt", completion)
+        _rebind_completion(corpus, manifest, completion, new_digest)
 
     elif operator == "SEMANTIC_RECEIPT_CORRUPT":
         manifest = _manifest_at(corpus, 0)
@@ -762,6 +980,9 @@ def _apply_operator(
     elif operator == "D4_REPLAY_DIGEST_CORRUPT":
         comparison = _sole_comparison(corpus)
         cast(dict[str, Any], comparison["shadow_replay_receipt"])["receipt_digest"] = _ZERO_DIGEST
+
+    elif operator == "ADMIT_SOURCE_RECEIPT_CORRUPT":
+        _admit_source_receipt_corrupt(corpus)
 
     else:
         raise Phase3MutationError("PHASE3_MUTATION_OPERATOR_UNSUPPORTED", operator)
@@ -870,6 +1091,13 @@ def _declared_mutations() -> list[dict[str, Any]]:
             "generation-chain",
             "GENERATION_MISSING",
             "PHASE3_GENERATION_PREDECESSOR_BREAK",
+        ),
+        # Clock-claim temporal chaining (coherent claim-digest rebind).
+        _spec(
+            "P3M-016",
+            "clock-claim",
+            "CLAIM_PREDECESSOR_REBIND",
+            "PHASE3_CLAIM_PREDECESSOR_MISMATCH",
         ),
         # Projection-plan digest + binding corruption.
         _spec("P3M-020", "projection-plan", "PLAN_DIGEST_CORRUPT", "PHASE3_PLAN_MISSING"),
@@ -1004,6 +1232,12 @@ def _declared_mutations() -> list[dict[str, Any]]:
             "QUARANTINE_BINDING_CORRUPT",
             "PHASE3_QUARANTINE_BINDING_MISMATCH",
         ),
+        _spec(
+            "P3M-055",
+            "completion",
+            "COMPLETION_DISPOSITION_CORRUPT",
+            "PHASE3_COMPLETION_DISPOSITION_MISMATCH",
+        ),
         # Semantic / disposition reference receipts.
         _spec(
             "P3M-060",
@@ -1077,6 +1311,13 @@ def _declared_mutations() -> list[dict[str, Any]]:
             "d4-comparison",
             "D4_REPLAY_DIGEST_CORRUPT",
             "PHASE3_D4_REPLAY_DIGEST_MISMATCH",
+        ),
+        # Governed D4 ADMIT admission-authority binding.
+        _spec(
+            "P3M-079",
+            "governed-admit",
+            "ADMIT_SOURCE_RECEIPT_CORRUPT",
+            "PHASE3_AUTHORIZATION_SOURCE_RECEIPT_MISMATCH",
         ),
     ]
 

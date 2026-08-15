@@ -573,6 +573,119 @@ def test_pointer_replacement_failure_recovery_publishes_exactly_once(
     assert reopened.current_generation_digest() == manifest2.generation_digest
 
 
+def test_nth_event_object_installation_failure_isolates_partial_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(31) A 3rd-object event installation failure (after a partial install of
+    at least two candidate event objects) leaves the current generation, all
+    three roots, and the temporal head byte-identical to the predecessor; the
+    orphan installed objects carry no D5 authority."""
+
+    scenario = build_phase3_scenario(tmp_path, generations=2)
+    manifest3 = _prepare_only(scenario.store, 3, scenario.manifests[-1].clock_completion_digest)
+    baseline = _capture_state(scenario.store)
+    pointer_before = scenario.store.current_path.read_bytes()
+
+    original = FilesystemRegistryStore._install
+    installed: list[str] = []
+    armed = {"on": False}
+
+    def failing_install(self: FilesystemRegistryStore, path: Path, payload: bytes) -> None:
+        if armed["on"] and path.parent.parent.name == "registry-event":
+            installed.append(path.name)
+            if len(installed) >= 3:
+                raise RuntimeError("NTH_EVENT_OBJECT_INSTALL_INJECTED_FAILURE")
+        original(self, path, payload)
+
+    monkeypatch.setattr(FilesystemRegistryStore, "_install", failing_install)
+    armed["on"] = True
+    with pytest.raises(RuntimeError, match="NTH_EVENT_OBJECT_INSTALL_INJECTED_FAILURE"):
+        scenario.store.commit_generation(manifest3)
+    armed["on"] = False
+    monkeypatch.undo()
+
+    # At least two candidate event objects were durably installed before the
+    # failure (generation 3 stages two evidence events before the assumption
+    # event whose install fails).
+    assert len(installed) == 3
+    assert scenario.evidence_store.get_event(manifest3.evidence_event_digests[0]) is not None
+    assert scenario.evidence_store.get_event(manifest3.evidence_event_digests[1]) is not None
+
+    # All authority is byte-identical to the predecessor.
+    assert _capture_state(scenario.store) == baseline
+    assert scenario.store.current_path.read_bytes() == pointer_before
+
+    # The orphan installed objects have no authority: the generation-bound D5
+    # view (bound to the committed generation's head sets) does not see them.
+    view = scenario.store.evidence_view()
+    assert view.snapshot("EVIDENCE_UNIT").root_digest == (
+        scenario.manifests[-1].evidence_projected_root
+    )
+    assert view.reconstruct_entity("EVIDENCE_UNIT", "evidence:phase3-ev-2") == ()
+    ev1_chain = view.reconstruct_entity("EVIDENCE_UNIT", "evidence:phase3-ev-1")
+    assert ev1_chain[-1].digest != manifest3.evidence_event_digests[0]
+
+
+def test_proof_artifact_installation_failure_leaves_authority_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(32) A durable proof-artifact (disposition receipt) installation failure
+    during the pre-publication phase changes no committed authority and never
+    reaches the commit point."""
+
+    scenario = build_phase3_scenario(tmp_path, generations=1)
+    baseline = _capture_state(scenario.store)
+    pointer_before = scenario.store.current_path.read_bytes()
+
+    def failing_install(self: D5GenerationStore, receipt: object) -> None:
+        del self, receipt
+        raise RuntimeError("PROOF_ARTIFACT_INSTALL_INJECTED_FAILURE")
+
+    monkeypatch.setattr(D5GenerationStore, "_install_disposition_receipt", failing_install)
+    with pytest.raises(RuntimeError, match="PROOF_ARTIFACT_INSTALL_INJECTED_FAILURE"):
+        _prepare_only(scenario.store, 2, scenario.manifests[-1].clock_completion_digest)
+    monkeypatch.undo()
+
+    assert _capture_state(scenario.store) == baseline
+    assert scenario.store.current_path.read_bytes() == pointer_before
+    # No active marker or prepared bundle was published: the attempt never
+    # reached the commit point.
+    assert not scenario.store.active_path.exists()
+    assert not scenario.store.prepared_path.exists()
+
+
+def test_completion_installation_failure_leaves_authority_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(33) A completion-receipt installation failure (after the manifest
+    install, before pointer replacement) changes no committed authority."""
+
+    scenario = build_phase3_scenario(tmp_path, generations=1)
+    manifest2 = _prepare_only(scenario.store, 2, scenario.manifests[-1].clock_completion_digest)
+    baseline = _capture_state(scenario.store)
+    pointer_before = scenario.store.current_path.read_bytes()
+
+    original = D5GenerationStore._install_completion
+    armed = {"on": False}
+
+    def failing_install(self: D5GenerationStore, completion: object) -> None:
+        if armed["on"]:
+            raise RuntimeError("COMPLETION_INSTALL_INJECTED_FAILURE")
+        original(self, completion)
+
+    monkeypatch.setattr(D5GenerationStore, "_install_completion", failing_install)
+    armed["on"] = True
+    with pytest.raises(RuntimeError, match="COMPLETION_INSTALL_INJECTED_FAILURE"):
+        scenario.store.commit_generation(manifest2)
+    armed["on"] = False
+    monkeypatch.undo()
+
+    # The event objects and manifest object may be installed, but the
+    # generation pointer — the single authority — was never replaced.
+    assert _capture_state(scenario.store) == baseline
+    assert scenario.store.current_path.read_bytes() == pointer_before
+
+
 # ============================================================================ #
 # Post-finalization recovery
 # ============================================================================ #

@@ -2,13 +2,17 @@
 
 This module re-implements the Phase-3 (D5 atomic multi-registry generation)
 integrity derivation from SERIALIZED COMMITTED ARTIFACTS ONLY. It reads the
-canary corpus (generation manifests, current pointer, clock completions,
-semantic/disposition/comparison receipts, projection plans, and registry-event
-envelopes) and independently re-derives every binding:
+canary corpus (generation manifests, current pointer, clock claims, validated
+events, governed-admit authorizations, clock completions, semantic/disposition/
+comparison receipts, projection plans, and registry-event envelopes) and
+independently re-derives every binding:
 
 * generation-chain continuity (predecessor digests, contiguous clock sequences,
   fork/cycle freedom, genesis linkage),
 * claim/completion continuity (``previous_completion_digest`` chaining),
+* clock-claim integrity (self-digests, proposed-sequence binding, temporal
+  predecessor chaining, validated-event binding, manifest citation),
+* validated-event self-digests,
 * exact manifest self-digests (recomputed from the unsigned value),
 * all three canonical head sets re-rooted via the snapshot-root digest,
 * event-chain reconstruction (predecessor links, contiguous entity sequences,
@@ -17,7 +21,10 @@ envelopes) and independently re-derives every binding:
   root, temporal bindings, event inventories),
 * cross-root bindings (evidence -> assumption -> alternative-model),
 * semantic/disposition reference digests and their root bindings,
-* D4 comparison receipts with primary/shadow FULL_REPLAY proof references.
+* completion-to-disposition receipt binding,
+* D4 comparison receipts with primary/shadow FULL_REPLAY proof references,
+* governed D4 ADMIT authorizations (self-digest, structural-difference
+  comparison binding, ADMIT source-receipt authority binding).
 
 It MUST NOT call ``D5GenerationStore.prepare_generation``,
 ``D5GenerationStore.commit_generation``, ``D5GenerationStore.recover``,
@@ -36,10 +43,10 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from csd_foundry.governance.v0_5.canonicalization import GovernanceContractError
-from csd_foundry.governance.v0_5.contracts import parse_contract
+from csd_foundry.governance.v0_5.contracts import contract_entry, parse_contract
 from csd_foundry.governance.v0_5.registry import RegistryEntityHead, _snapshot_root
 
-CORPUS_SCHEMA_VERSION = "phase3-canary-corpus/1"
+CORPUS_SCHEMA_VERSION = "phase3-canary-corpus/2"
 MANIFEST_SCHEMA_VERSION = "d5-generation-manifest/1"
 CURRENT_POINTER_SCHEMA_VERSION = "current-d5-generation/1"
 ACTIVE_MARKER_SCHEMA_VERSION = "active-d5-generation/1"
@@ -65,6 +72,10 @@ _PLAN_DIGEST_DOMAINS = {
 # use the flat (no NUL separator) domain form of the governed contracts.
 _COMPARISON_RECEIPT_DOMAIN = "ALTERNATIVE_MODEL_COMPARISON_RECEIPT"
 _REPLAY_RECEIPT_DOMAIN = "ALTERNATIVE_MODEL_REPLAY_RECEIPT"
+
+# Domain prefix used by the governed D4 ADMIT authorization self-digest (flat
+# domain form of the governed alternative-model contracts).
+_AUTHORIZATION_DOMAIN = "ALTERNATIVE_MODEL_GOVERNED_ADMIT_AUTHORIZATION"
 
 _EMPTY_ROOTS = {key: _snapshot_root(value, ()) for key, value in _REGISTRIES.items()}
 
@@ -161,10 +172,12 @@ class Phase3ValidationReport:
             "errors": list(self.errors),
             "claim_boundary": (
                 "This report establishes deterministic serialized Phase-3 generation-chain, "
-                "completion-chain, manifest self-digest, canonical head-set rooting, event-chain, "
-                "projection-plan, cross-root, semantic/disposition, and D4 comparison integrity "
-                "relative to the committed canary corpus. It does not establish external truth, "
-                "source completeness, real-world dependency completeness, or production safety."
+                "completion-chain, clock-claim/validated-event, manifest self-digest, "
+                "canonical head-set rooting, event-chain, projection-plan, cross-root, "
+                "semantic/disposition, completion-to-disposition, and D4 comparison plus "
+                "governed-admit authorization integrity relative to the committed canary "
+                "corpus. It does not establish external truth, source completeness, "
+                "real-world dependency completeness, or production safety."
             ),
         }
 
@@ -226,6 +239,46 @@ def _section(corpus: dict[str, Any], field: str, errors: list[str]) -> dict[str,
     return cast(dict[str, Any], value)
 
 
+def _list_section(corpus: dict[str, Any], field: str, errors: list[str]) -> list[dict[str, Any]]:
+    value = corpus.get(field)
+    if value is None:
+        return []
+    if type(value) is not list or any(type(item) is not dict for item in value):
+        errors.append(f"PHASE3_CORPUS_SECTION_INVALID: {field}")
+        return []
+    return cast(list[dict[str, Any]], value)
+
+
+def _contract_index(
+    values: list[dict[str, Any]],
+    contract_name: str,
+    code_prefix: str,
+    errors: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Index serialized contract objects by digest, verifying each self-digest.
+
+    Identical re-listings are idempotent (the canary legitimately cites the same
+    reference validated event for every generation): a repeated digest is only
+    possible for byte-identical content, because the verified self-digest
+    covers every field.
+    """
+
+    digest_field = contract_entry(contract_name).digest_field
+    index: dict[str, dict[str, Any]] = {}
+    for position, value in enumerate(values):
+        try:
+            parsed = parse_contract(contract_name, value)
+        except GovernanceContractError:
+            errors.append(f"{code_prefix}_SELF_DIGEST_INVALID: index {position}")
+            continue
+        digest = parsed.digest
+        if value.get(digest_field) != digest:
+            errors.append(f"{code_prefix}_SELF_DIGEST_INVALID: index {position}")
+            continue
+        index.setdefault(digest, value)
+    return index
+
+
 def _digest_list(value: object) -> list[str] | None:
     if type(value) is not list or any(not _is_digest(item) for item in value):
         return None
@@ -253,6 +306,9 @@ def validate_phase3_generations(corpus: dict[str, Any]) -> Phase3ValidationRepor
     projection_plans = _section(corpus, "projection_plans", errors) or {}
     disposition_receipts = _section(corpus, "disposition_receipts", errors) or {}
     comparison_receipts = _section(corpus, "comparison_receipts", errors) or {}
+    claims = _list_section(corpus, "claims", errors)
+    validated_events = _list_section(corpus, "validated_events", errors)
+    authorizations = _list_section(corpus, "authorizations", errors)
 
     generations = _parse_generations(corpus, errors)
     _validate_generation_chain(generations, errors)
@@ -265,6 +321,8 @@ def validate_phase3_generations(corpus: dict[str, Any]) -> Phase3ValidationRepor
     _validate_disposition_receipts(generations, disposition_receipts, errors)
     _validate_completions(generations, completions, errors)
     _validate_comparison_receipts(comparison_receipts, errors)
+    _validate_claims(generations, claims, validated_events, errors)
+    _validate_authorizations(authorizations, comparison_receipts, events, errors)
 
     summaries = tuple(
         Phase3GenerationSummary(
@@ -790,6 +848,10 @@ def _validate_completions(
             "semantic_projection_receipt_digest"
         ):
             errors.append(f"PHASE3_COMPLETION_SEMANTIC_BINDING_MISMATCH: generation {index}")
+        if completion.get("disposition_receipt_digest") != manifest.get(
+            "disposition_receipt_digest"
+        ):
+            errors.append(f"PHASE3_COMPLETION_DISPOSITION_MISMATCH: generation {index}")
         roots = completion.get("registry_root_digests")
         if type(roots) is not dict:
             errors.append(f"PHASE3_COMPLETION_ROOT_BINDING_MISMATCH: generation {index}")
@@ -812,6 +874,117 @@ def _validate_completions(
             expected_previous = cast(str, generations[index - 1].get("clock_completion_digest"))
         if completion.get("previous_completion_digest") != expected_previous:
             errors.append(f"PHASE3_COMPLETION_PREDECESSOR_MISMATCH: generation {index}")
+
+
+# --------------------------------------------------------------------------- #
+# Clock claims + validated events
+# --------------------------------------------------------------------------- #
+
+
+def _validate_claims(
+    generations: list[dict[str, Any]],
+    claims: list[dict[str, Any]],
+    validated_events: list[dict[str, Any]],
+    errors: list[str],
+) -> None:
+    """Independently verify every generation's clock claim and validated event.
+
+    Re-derives, from the serialized artifacts only:
+
+    * each claim's self-digest (via the frozen clock-claim contract),
+    * ``claim.previous_completion_digest`` chaining against the prior
+      generation's committed completion digest (``None`` for the genesis
+      generation),
+    * ``claim.proposed_sequence == manifest.clock_sequence``,
+    * ``claim.validated_event_digest == validated_event.digest ==
+      manifest.validated_event_digest``,
+    * each validated event's self-digest,
+    * ``manifest.clock_claim_digest == claim.digest`` (via digest lookup).
+    """
+
+    claim_by_digest = _contract_index(claims, "clock-claim", "PHASE3_CLAIM", errors)
+    event_by_digest = _contract_index(
+        validated_events, "validated-event", "PHASE3_VALIDATED_EVENT", errors
+    )
+    for index, manifest in enumerate(generations):
+        claim = claim_by_digest.get(cast(str, manifest.get("clock_claim_digest")))
+        if claim is None:
+            errors.append(f"PHASE3_CLAIM_MISSING: generation {index}")
+            continue
+        if claim.get("proposed_sequence") != manifest.get("clock_sequence"):
+            errors.append(f"PHASE3_CLAIM_SEQUENCE_MISMATCH: generation {index}")
+        expected_previous: str | None
+        if index == 0:
+            expected_previous = None
+        else:
+            expected_previous = cast(str, generations[index - 1].get("clock_completion_digest"))
+        if claim.get("previous_completion_digest") != expected_previous:
+            errors.append(f"PHASE3_CLAIM_PREDECESSOR_MISMATCH: generation {index}")
+        manifest_event_digest = manifest.get("validated_event_digest")
+        if claim.get("validated_event_digest") != manifest_event_digest:
+            errors.append(f"PHASE3_CLAIM_EVENT_BINDING_MISMATCH: generation {index}")
+            continue
+        validated_event = event_by_digest.get(cast(str, claim.get("validated_event_digest")))
+        if validated_event is None:
+            errors.append(f"PHASE3_VALIDATED_EVENT_MISSING: generation {index}")
+        elif validated_event.get("validated_event_digest") != manifest_event_digest:
+            errors.append(f"PHASE3_CLAIM_EVENT_BINDING_MISMATCH: generation {index}")
+
+
+# --------------------------------------------------------------------------- #
+# Governed D4 ADMIT authorizations
+# --------------------------------------------------------------------------- #
+
+
+def _validate_authorizations(
+    authorizations: list[dict[str, Any]],
+    comparison_receipts: dict[str, Any],
+    events: dict[str, Any],
+    errors: list[str],
+) -> None:
+    """Independently verify every governed D4 ADMIT authorization.
+
+    Re-derives, from the serialized artifacts only:
+
+    * each authorization's self-digest (flat governed-contract domain form),
+    * the authorization's structural-difference receipt binds the same receipt
+      carried by a committed comparison receipt,
+    * the corresponding ADMIT event exists in the alternative-model event
+      chain (matching entity identity and ADMIT operation),
+    * ``admit_event.source_receipt_digest == authorization.authorization_digest``
+      — the ADMIT's admission authority binding.
+    """
+
+    for index, authorization in enumerate(authorizations):
+        unsigned = {
+            key: value for key, value in authorization.items() if key != "authorization_digest"
+        }
+        recomputed = _flat_domain_digest(_AUTHORIZATION_DOMAIN, unsigned)
+        if recomputed != authorization.get("authorization_digest"):
+            errors.append(f"PHASE3_AUTHORIZATION_DIGEST_MISMATCH: index {index}")
+            continue
+        structural = authorization.get("structural_difference_receipt")
+        if not any(
+            type(receipt) is dict and receipt.get("structural_difference_receipt") == structural
+            for receipt in comparison_receipts.values()
+        ):
+            errors.append(f"PHASE3_AUTHORIZATION_COMPARISON_MISMATCH: index {index}")
+        admit_event = next(
+            (
+                event
+                for event in events.values()
+                if type(event) is dict
+                and event.get("registry_type") == "ALTERNATIVE_MODEL"
+                and event.get("entity_id") == authorization.get("model_id")
+                and type(event.get("payload")) is dict
+                and cast(dict[str, Any], event.get("payload")).get("operation") == "ADMIT"
+            ),
+            None,
+        )
+        if admit_event is None:
+            errors.append(f"PHASE3_AUTHORIZATION_ADMIT_EVENT_MISSING: index {index}")
+        elif admit_event.get("source_receipt_digest") != authorization.get("authorization_digest"):
+            errors.append(f"PHASE3_AUTHORIZATION_SOURCE_RECEIPT_MISMATCH: index {index}")
 
 
 # --------------------------------------------------------------------------- #
