@@ -1623,3 +1623,85 @@ def test_governed_admit_comparison_evidence_survives_commit_and_restart(
     # The semantic receipt + disposition receipt also survive for gen2.
     assert reopened.read_semantic_receipt(current.semantic_projection_receipt_digest) is not None
     assert reopened.read_disposition_receipt(current.disposition_receipt_digest) is not None
+
+
+def test_wrong_active_claim_digest_rejected(d5: SimpleNamespace) -> None:
+    """A mismatched active-claim marker cannot authorize publication."""
+    manifest = _prepare_one(d5.store, 1, "auth1")
+
+    # Corrupt the active marker's claim digest (already written by prepare).
+    active_value = json.loads(d5.store.active_path.read_bytes())
+    active_value["clock_claim_digest"] = _digest("wrong-active-claim")
+    d5.store.active_path.write_text(
+        json.dumps(active_value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+    state_before = _capture_state(d5.store)
+
+    with pytest.raises(D5GenerationConflictError, match="D5_ACTIVE_CLAIM_MISMATCH"):
+        d5.store.commit_generation(manifest)
+
+    # recover() must also reject (authority check fires before bundle processing).
+    with pytest.raises(D5GenerationConflictError, match="D5_ACTIVE_CLAIM_MISMATCH"):
+        d5.store.recover()
+
+    assert _capture_state(d5.store) == state_before
+
+
+def test_matching_generation_wrong_pointer_sequence_not_idempotent(
+    d5: SimpleNamespace,
+) -> None:
+    """Matching generation digest + wrong pointer sequence → NOT idempotent success.
+
+    Commits gen1, prepares gen2 (active + prepared bundle present), corrupts
+    the current pointer to claim gen2's generation digest but wrong sequence,
+    then calls recover(). The authority check must fire BEFORE the shortcut.
+    """
+    gen1 = _prepare_one(d5.store, 1, "auth2a")
+    d5.store.commit_generation(gen1)
+
+    # Prepare gen2: this writes active marker + prepared bundle for gen2.
+    gen2 = _prepare_one(
+        d5.store, 2, "auth2b", previous_completion_digest=gen1.clock_completion_digest
+    )
+
+    # Corrupt the current pointer: same generation digest as gen2, wrong sequence.
+    ptr = {
+        "schema_version": "current-d5-generation/1",
+        "clock_sequence": gen2.clock_sequence + 100,
+        "generation_digest": gen2.generation_digest,
+        "clock_completion_digest": gen2.clock_completion_digest,
+    }
+    d5.store.current_path.write_text(
+        json.dumps(ptr, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+    # recover() must detect the pointer/manifest mismatch BEFORE reaching
+    # the IDEMPOTENT_SUCCESS shortcut.
+    with pytest.raises(D5GenerationConflictError, match="D5_POINTER_MANIFEST_MISMATCH"):
+        d5.store.recover()
+
+
+def test_matching_generation_wrong_pointer_completion_not_idempotent(
+    d5: SimpleNamespace,
+) -> None:
+    """Matching generation digest + wrong pointer completion digest → NOT idempotent."""
+    gen1 = _prepare_one(d5.store, 1, "auth3a")
+    d5.store.commit_generation(gen1)
+
+    gen2 = _prepare_one(
+        d5.store, 2, "auth3b", previous_completion_digest=gen1.clock_completion_digest
+    )
+
+    ptr = {
+        "schema_version": "current-d5-generation/1",
+        "clock_sequence": gen2.clock_sequence,
+        "generation_digest": gen2.generation_digest,
+        "clock_completion_digest": _digest("wrong-completion"),
+    }
+    d5.store.current_path.write_text(
+        json.dumps(ptr, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(D5GenerationConflictError, match="D5_POINTER_MANIFEST_MISMATCH"):
+        d5.store.recover()
