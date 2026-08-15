@@ -32,6 +32,7 @@ csd-foundry-alternative-model-v0-5 = "csd_foundry.governance.v0_5.alternative_mo
 csd-foundry-evidence-v0-5 = "csd_foundry.governance.v0_5.evidence_cli:main"
 csd-foundry-evidence-mutations-v0-5 = "csd_foundry.governance.v0_5.evidence_mutation_cli:main"
 csd-foundry-governance = "csd_foundry.governance.v0_5.cli:main"
+csd-foundry-phase3-qualification-v0-5 = "csd_foundry.governance.v0_5.phase3_qualification_cli:main"
 csd-foundry-temporal-v0-5 = "csd_foundry.governance.v0_5.temporal_cli:main"
 
 [tool.setuptools.packages.find]
